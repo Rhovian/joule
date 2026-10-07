@@ -20,6 +20,14 @@ _Avoid_: Copy, merge
 One run that fetches new Jobs from one or more Sources, started by hand or on a schedule.
 _Avoid_: Search, crawl, sync
 
+**Fit Score**:
+A 0–100 judgement of how well a Job suits the owner, with a short reason, made by the AI from the Profile. A Job without one is unscored, never zero.
+_Avoid_: Match score, rating, rank
+
+**Filtered**:
+A Job that failed one of the owner's Preferences before scoring; kept with the reason, not scored, hidden by default. Distinct from dismissed, which is the owner's own choice.
+_Avoid_: Rejected, excluded
+
 **Profile**:
 The owner's private material the tool reasons from: CV, work history and preferences. Never stored in version control.
 _Avoid_: Resume, account, user data
