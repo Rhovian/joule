@@ -20,6 +20,14 @@ _Avoid_: Search, crawl, sync
 The owner's private material the tool reasons from: CV, work history and preferences. Never stored in version control.
 _Avoid_: Resume, account, user data
 
+**Master CV**:
+The owner's complete, verified CV inside the Profile; every Tailored CV is selected and rewritten from it, never invented beyond it.
+_Avoid_: Base resume, main CV
+
+**Preferences**:
+The owner's rules inside the Profile for which Jobs are acceptable: roles, work type, pay floors, locations, deal-breakers and Upwork client floors.
+_Avoid_: Settings, filters, criteria
+
 **Draft**:
 Application material written for one Job on request: a Tailored CV, a Cover Letter or a Proposal. The owner submits it.
 _Avoid_: Application, submission
