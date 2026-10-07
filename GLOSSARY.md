@@ -12,6 +12,10 @@ _Avoid_: Listing, posting, opening, gig
 A place Jobs come from: a job board, a job-board aggregator, or Upwork.
 _Avoid_: Board, feed, provider
 
+**Duplicate**:
+A Job from one Source that is the same role as a Job already seen from another Source; it links to that earlier Job, its **Primary**, and shares its state and score.
+_Avoid_: Copy, merge
+
 **Scan**:
 One run that fetches new Jobs from one or more Sources, started by hand or on a schedule.
 _Avoid_: Search, crawl, sync
