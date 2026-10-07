@@ -2,3 +2,6 @@
 
 # Niles workspace state
 .niles/
+
+# Secrets (real ones live in ~/.joule/.env)
+.env
