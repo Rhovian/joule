@@ -1,0 +1,20 @@
+---
+import '../dashboard.css';
+---
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8" /><meta name="viewport" content="width=device-width" /><meta name="description" content="joule Job dashboard" /><title>joule · Jobs</title><link rel="icon" href="data:," /></head>
+  <body>
+    <header class="app-header"><a class="brand" href="/">joule<span class="brand-dot">.</span></a><span class="header-divider"></span><span>Jobs</span></header>
+    <main id="dashboard" class="variant-a">
+      <div class="page-title"><div><span class="eyebrow">01 / TRIAGE</span><h1>Find the next good fit.</h1><p>Scan the details. Keep the Jobs worth a closer look.</p></div><div class="keyboard-hint"><kbd>j</kbd> / <kbd>k</kbd> move · <kbd>o</kbd> open · <kbd>d</kbd> dismiss / restore · <kbd>s</kbd> Scans</div></div>
+      <button class="a-scans-toggle" data-action="scans" aria-controls="a-scans" aria-expanded="false">Scans</button>
+      <div class="a-layout"><aside id="a-scans" class="a-scan-sidebar" tabindex="-1" aria-label="Scans"><p class="empty">Loading Sources…</p></aside><div class="a-table-area">
+        <div class="controls"><label><input type="checkbox" name="unscored" checked /> Show unscored</label><label><input type="checkbox" name="filtered" /> Show Filtered</label><label><input type="checkbox" name="dismissed" /> Show dismissed</label><span id="job-count"></span></div>
+        <div id="jobs" class="table-wrap" aria-label="Jobs"><p class="empty">Loading Jobs…</p></div>
+      </div></div><div id="detail"></div>
+      <noscript><p>Enable JavaScript to load Jobs and run Scans.</p></noscript>
+    </main><div id="notice" role="status" aria-live="polite"></div>
+    <script>import '../dashboard';</script>
+  </body>
+</html>

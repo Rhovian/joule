@@ -5,9 +5,11 @@ from pathlib import Path
 import httpx
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from joule.config import data_dir as default_data_dir
 from joule.db import init_db
+from joule.jobs import router as jobs_router
 from joule.scan import Scanner
 from joule.scan import router as scan_router
 from joule.upwork_auth import UpworkAuth, UpworkNotConnected, router
@@ -44,6 +46,15 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     app.state.data_dir = directory
     app.include_router(router)
     app.include_router(scan_router)
+    app.include_router(jobs_router)
+    app.mount(
+        "/",
+        StaticFiles(
+            directory=Path(__file__).parent.parent / "web" / "dist",
+            html=True,
+            check_dir=False,
+        ),
+    )
     return app
 
 

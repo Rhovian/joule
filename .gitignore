@@ -16,3 +16,7 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+
+# Frontend dependencies
+node_modules/
+.astro/
