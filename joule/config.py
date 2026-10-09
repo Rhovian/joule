@@ -39,7 +39,9 @@ class Model(StrictModel):
 
 
 class Models(StrictModel):
-    scoring: Model = Field(default_factory=lambda: Model(provider="codex"))
+    scoring: Model = Field(
+        default_factory=lambda: Model(provider="codex", model="gpt-6-luna")
+    )
     drafts: Model = Field(default_factory=lambda: Model(provider="codex"))
 
 

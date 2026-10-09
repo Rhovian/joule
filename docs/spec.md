@@ -45,7 +45,7 @@ Settings and Profile files are re-read on every Scan and every Draft, so editing
 | `schedule.upwork_minutes` | 15 | scheduled Upwork Scan interval ([#9](https://github.com/Rhovian/joule/issues/9)) |
 | `upwork.scoring` | on | AI-score Upwork Jobs ([#9](https://github.com/Rhovian/joule/issues/9)) |
 | `upwork.retention_hours` | 24 | Upwork content purge window |
-| `models.scoring` / `models.drafts` | `{provider: codex, model: null}` | optional model name; null uses the Codex default |
+| `models.scoring` / `models.drafts` | `{provider: codex, model: gpt-6-luna}` / `{provider: codex, model: null}` | model name; null uses the Codex default |
 | `alert_threshold` | 75 | Telegram alert at or above this Fit Score |
 | `max_scored_per_scan` | 100 | newest first; the rest stay unscored |
 | `results_per_search` | 50 | per Indeed search |
