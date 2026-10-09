@@ -127,6 +127,14 @@ class Scanner:
         try:
             with closing(connect(self.path)) as db:
                 db.create_function("tidy", 1, filters.tidy)
+
+                def save():
+                    with db:
+                        db.execute(
+                            "UPDATE scans SET per_source=? WHERE id=?",
+                            (json.dumps(progress), scan_id),
+                        )
+
                 for source in sources:
                     counts = progress[source] = dict.fromkeys(
                         ("new", "duplicate", "filtered", "scored"), 0
@@ -138,17 +146,15 @@ class Scanner:
                     except Exception as error:
                         logger.exception("Scan Source %s failed", source)
                         counts["errors"].append(f"{type(error).__name__}: {error}")
-                    with db:
-                        db.execute(
-                            "UPDATE scans SET per_source=? WHERE id=?",
-                            (json.dumps(progress), scan_id),
-                        )
+                    save()
                 stamp = score.fingerprint(self.data_dir, settings)
                 jobs = sorted(ctx.inserted, key=lambda j: j[2] or "", reverse=True)
                 jobs = [j for j in jobs if j[1] != "upwork" or settings.upwork.scoring]
                 limit = asyncio.Semaphore(3)
+                graded = 0
 
                 async def grade(job):
+                    nonlocal graded
                     id, source, _ = job
                     async with limit:
                         try:
@@ -158,6 +164,10 @@ class Scanner:
                             progress[source]["scored"] += 1
                         except ai.AIError as error:
                             progress[source]["errors"].append(f"Score {id}: {error}")
+                        graded += 1
+                        # Persist progress in batches so the dashboard sees scoring move.
+                        if graded % 10 == 0:
+                            save()
 
                 await asyncio.gather(*map(grade, jobs[: settings.max_scored_per_scan]))
                 status = "done"
