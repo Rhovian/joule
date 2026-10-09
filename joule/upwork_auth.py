@@ -16,6 +16,7 @@ from joule.config import load_env
 
 AUTHORIZE_URL = "https://www.upwork.com/ab/account-security/oauth2/authorize"
 TOKEN_URL = "https://www.upwork.com/api/v3/oauth2/token"
+GRAPHQL_URL = "https://api.upwork.com/graphql"
 COOKIE_PATH = "/auth/upwork"
 router = APIRouter()
 
@@ -161,4 +162,13 @@ async def callback(request: Request):
 
 @router.get("/api/upwork/status")
 async def status(request: Request):
-    return {"connected": request.app.state.upwork_auth.path.exists()}
+    auth = request.app.state.upwork_auth
+    try:
+        response = await auth.client.post(
+            GRAPHQL_URL,
+            headers={"Authorization": f"Bearer {await auth.access_token()}"},
+            json={"query": "query { user { id } }"},
+        )
+    except (UpworkNotConnected, httpx.HTTPError):
+        return {"connected": False}
+    return {"connected": response.is_success}

@@ -123,6 +123,7 @@ body:has(.drawer) { overflow: hidden; }
 .variant-a .keyboard-hint { white-space: normal; text-align: right; }
 .description { white-space: pre-line; overflow-wrap: anywhere; }
 .connect { font-size: 12px; margin-top: 12px; }
+.connected { color: #1f7a4d; font-weight: 600; }
 .scan-source, .reason, .source-links, .client-stats { overflow-wrap: anywhere; }
 #notice { bottom: 24px; }
 @media (max-width: 1050px) {

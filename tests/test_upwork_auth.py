@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from joule.app import create_app
-from joule.upwork_auth import UpworkNotConnected
+from joule.upwork_auth import GRAPHQL_URL, UpworkNotConnected
 
 TOKEN = {"access_token": "access", "refresh_token": "refresh", "expires_in": 3600}
 REDIRECT = "http://localhost:8000/auth/upwork/callback"
@@ -100,6 +100,10 @@ def test_callback(client, failure):
     assert token["access_token"] == "access" and token["refresh_token"] == "refresh"
     assert stat.S_IMODE(auth.path.stat().st_mode) == 0o600
     assert client.get("/api/upwork/status").json() == {"connected": True}
+    assert client.requests[-1].url == GRAPHQL_URL
+    # A token file Upwork rejects is not a connection.
+    client.replies[0] = httpx.Response(401, json={"message": "Authentication failed"})
+    assert client.get("/api/upwork/status").json() == {"connected": False}
 
 
 @pytest.mark.parametrize("expiry", [3600, 0])
