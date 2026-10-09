@@ -92,7 +92,7 @@ def test_callback(client, failure):
         assert "private" not in response.text
         assert not auth.path.exists()
         return
-    assert response.status_code == 303 and response.headers["location"] == "/"
+    assert response.status_code == 200 and "upwork-connected" in response.text
     assert "Max-Age=0" in response.headers["set-cookie"]
     assert "upwork_oauth" not in client.cookies
     token = json.loads(auth.path.read_text())

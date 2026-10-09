@@ -80,7 +80,7 @@ function counts(c?: Counts | null) {
   return c ? `<p class="scan-counts">${escape(c.new)} new · ${escape(c.duplicate)} Duplicate · ${escape(c.filtered)} Filtered</p>${(c.errors ?? []).map(e => `<p class="scan-error">${escape(e)}</p>`).join('')}` : '';
 }
 function renderSources() {
-  replace('a-scans', `<section class="scan-panel"><div class="section-heading"><h2>Scans</h2><button data-action="scan" ${runningId || starting ? 'disabled' : ''}>Scan all</button></div><p class="muted">Discover Jobs from each Source.</p>${runningId ? `<div class="scan-progress" role="status"><strong>Scan in progress</strong>${scan ? scan.sources.map(name => `<div>${escape(name)}${counts(scan?.per_source[name])}</div>`).join('') : '<span>Waiting for Source counts…</span>'}</div>` : '<p class="scan-idle">Ready for a new Scan</p>'}<div class="scan-sources">${sources.map(s => `<article class="scan-source"><div><strong>${escape(s.name)}</strong><button data-action="scan" data-source="${escape(s.name)}" ${runningId || starting ? 'disabled' : ''}>Scan</button></div>${s.last ? `<small>Last Scan · ${escape(s.last.finished_at ?? s.last.started_at)} · ${escape(s.last.status)}</small>${counts(s.last.counts)}` : '<small>No Scan yet</small>'}${s.name === 'upwork' && !connected ? '<p class="connect"><a href="/auth/upwork/connect">Connect Upwork</a></p>' : ''}</article>`).join('')}</div></section>`);
+  replace('a-scans', `<section class="scan-panel"><div class="section-heading"><h2>Scans</h2><button data-action="scan" ${runningId || starting ? 'disabled' : ''}>Scan all</button></div><p class="muted">Discover Jobs from each Source.</p>${runningId ? `<div class="scan-progress" role="status"><strong>Scan in progress</strong>${scan ? scan.sources.map(name => `<div>${escape(name)}${counts(scan?.per_source[name])}</div>`).join('') : '<span>Waiting for Source counts…</span>'}</div>` : '<p class="scan-idle">Ready for a new Scan</p>'}<div class="scan-sources">${sources.map(s => `<article class="scan-source"><div><strong>${escape(s.name)}</strong><button data-action="scan" data-source="${escape(s.name)}" ${runningId || starting ? 'disabled' : ''}>Scan</button></div>${s.last ? `<small>Last Scan · ${escape(s.last.finished_at ?? s.last.started_at)} · ${escape(s.last.status)}</small>${counts(s.last.counts)}` : '<small>No Scan yet</small>'}${s.name === 'upwork' ? `<p class="connect"><button data-action="connect">${connected ? 'Reconnect' : 'Connect'} Upwork</button></p>` : ''}</article>`).join('')}</div></section>`);
 }
 async function loadSources() {
   const result = await api<{ sources: Source[]; running: number | null }>('sources');
@@ -158,10 +158,14 @@ root.addEventListener('click', event => {
   if (target.dataset.action === 'state') void changeState(id).catch(notice);
   if (target.dataset.action === 'close') closeDetail();
   if (target.dataset.action === 'scan') void startScan(target.dataset.source).catch(notice);
+  if (target.dataset.action === 'connect') window.open('/auth/upwork/connect', 'upwork-connect', 'popup,width=640,height=760');
   if (target.dataset.action === 'scans') {
     const open = element('a-scans').classList.toggle('is-open'); target.setAttribute('aria-expanded', String(open));
     if (open) element('a-scans').focus();
   }
+});
+window.addEventListener('message', event => {
+  if (event.origin === location.origin && event.data === 'upwork-connected') { notice('Upwork connected'); void loadSources().catch(notice); }
 });
 root.addEventListener('change', event => { if ((event.target as HTMLElement).closest('.controls')) void loadJobs().catch(notice); });
 document.addEventListener('keydown', event => {

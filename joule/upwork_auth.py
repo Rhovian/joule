@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from joule.config import load_env
 
@@ -150,9 +150,13 @@ async def callback(request: Request):
         await auth.save(token)
     except (httpx.HTTPError, ValueError, KeyError, TypeError):
         raise HTTPException(502, "Upwork token exchange failed") from None
-    redirect = RedirectResponse("/", status_code=303)
-    redirect.delete_cookie("upwork_oauth", path=COOKIE_PATH)
-    return redirect
+    # Runs in the dashboard's popup: tell the opener, then close.
+    page = HTMLResponse(
+        "<script>window.opener?.postMessage('upwork-connected', location.origin);"
+        "window.close();</script><p>Upwork connected. <a href='/'>Back</a></p>"
+    )
+    page.delete_cookie("upwork_oauth", path=COOKIE_PATH)
+    return page
 
 
 @router.get("/api/upwork/status")
