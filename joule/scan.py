@@ -10,7 +10,15 @@ from fastapi import APIRouter, HTTPException, Request
 from joule import ai, filters, score
 from joule.config import StrictModel, load_preferences, load_settings
 from joule.db import connect
-from joule.sources import hotfix, remoteok, upwork, weworkremotely
+from joule.sources import (
+    freehire,
+    golangjobs,
+    hotfix,
+    remoteok,
+    upwork,
+    weworkremotely,
+    workingnomads,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -41,6 +49,12 @@ ADAPTERS = {
     "upwork": (fetch_upwork, enrich_upwork),
     "weworkremotely": (lambda ctx: weworkremotely.search(ctx.client), None),
     "remoteok": (lambda ctx: remoteok.search(ctx.client), None),
+    "workingnomads": (
+        lambda ctx: workingnomads.search(ctx.client, ctx.preferences.roles),
+        None,
+    ),
+    "freehire": (lambda ctx: freehire.search(ctx.client, ctx.preferences.roles), None),
+    "golangjobs": (lambda ctx: golangjobs.search(ctx.client), None),
 }
 
 

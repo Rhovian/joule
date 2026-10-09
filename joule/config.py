@@ -55,9 +55,21 @@ class Settings(StrictModel):
             "indeed",
             "upwork",
             "hotfix",
+            "workingnomads",
+            "freehire",
+            "golangjobs",
         ]
     ] = Field(
-        default_factory=lambda: ["hn", "weworkremotely", "remoteok", "upwork", "hotfix"]
+        default_factory=lambda: [
+            "hn",
+            "weworkremotely",
+            "remoteok",
+            "upwork",
+            "hotfix",
+            "workingnomads",
+            "freehire",
+            "golangjobs",
+        ]
     )
     schedule: Schedule = Field(default_factory=Schedule)
     upwork: Upwork = Field(default_factory=Upwork)
