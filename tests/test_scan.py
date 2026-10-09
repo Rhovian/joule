@@ -36,7 +36,7 @@ def setup(tmp_path, monkeypatch):
             return httpx.Response(200, json={"data": nodes})
         return httpx.Response(200, json={"description": "Full description"})
 
-    with TestClient(create_app(tmp_path)) as client:
+    with TestClient(create_app(tmp_path), base_url="http://localhost") as client:
         scanner = client.app.state.scanner
         original = scanner.client
         mocked = httpx.AsyncClient(transport=httpx.MockTransport(respond))
@@ -80,7 +80,7 @@ def test_first_scan_age_enrichment_then_seen_ids(setup):
     calls.clear()
     _, id = run(["hotfix"])
     assert calls == ["/v1/jobs"]
-    result = client.get(f"/scans/{id}").json()
+    result = client.get(f"/api/scans/{id}").json()
     assert result["status"] == "done" and result["finished_at"]
     assert result["sources"] == ["hotfix"]
     assert result["per_source"]["hotfix"] == {
@@ -187,13 +187,13 @@ def test_routes_busy_validation_and_reload(setup, monkeypatch):
 
     monkeypatch.setitem(scan.ADAPTERS, "hotfix", (blocked, scan.enrich_hotfix))
     for source in ["unknown", "hn", "indeed"]:
-        assert client.post("/scans", json={"sources": [source]}).status_code == 422
+        assert client.post("/api/scans", json={"sources": [source]}).status_code == 422
     # Body required, so a cross-site empty POST cannot start a Scan.
-    assert client.post("/scans").status_code == 422
-    response = client.post("/scans", json={"sources": ["hotfix"]})
+    assert client.post("/api/scans").status_code == 422
+    response = client.post("/api/scans", json={"sources": ["hotfix"]})
     assert response.status_code == 202
-    assert client.post("/scans", json={}).json() == {"detail": "Scan in progress"}
-    assert client.post("/scans", json={}).status_code == 409
+    assert client.post("/api/scans", json={}).json() == {"detail": "Scan in progress"}
+    assert client.post("/api/scans", json={}).status_code == 409
 
     async def finish():
         with pytest.raises(scan.ScanInProgress):
@@ -205,11 +205,11 @@ def test_routes_busy_validation_and_reload(setup, monkeypatch):
 
     client.portal.call(finish)
     assert not scanner.busy
-    assert client.get("/scans/999").status_code == 404
+    assert client.get("/api/scans/999").status_code == 404
     (scanner.path.parent / "settings.yaml").write_text("sources: [upwork]\n")
-    assert client.post("/scans", json={"sources": ["hotfix"]}).status_code == 422
+    assert client.post("/api/scans", json={"sources": ["hotfix"]}).status_code == 422
     (scanner.path.parent / "profile" / "preferences.yaml").write_text("broken: true\n")
-    assert client.post("/scans", json={}).status_code == 422
+    assert client.post("/api/scans", json={}).status_code == 422
 
 
 def test_shutdown_interrupts_running_scan(tmp_path, monkeypatch):
@@ -217,12 +217,12 @@ def test_shutdown_interrupts_running_scan(tmp_path, monkeypatch):
         await asyncio.Event().wait()
 
     monkeypatch.setitem(scan.ADAPTERS, "hotfix", (blocked, None))
-    with TestClient(create_app(tmp_path)) as client:
+    with TestClient(create_app(tmp_path), base_url="http://localhost") as client:
         (tmp_path / "profile" / "preferences.yaml").write_text("roles: [Engineer]\n")
-        response = client.post("/scans", json={"sources": ["hotfix"]})
+        response = client.post("/api/scans", json={"sources": ["hotfix"]})
         assert response.status_code == 202
         id = response.json()["id"]
-        assert client.get(f"/scans/{id}").json()["status"] == "running"
+        assert client.get(f"/api/scans/{id}").json()["status"] == "running"
     with closing(connect(tmp_path / "joule.db")) as db:
         row = db.execute("SELECT * FROM scans WHERE id=?", (id,)).fetchone()
         assert row["status"] == "interrupted" and row["finished_at"]

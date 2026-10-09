@@ -205,7 +205,7 @@ Layout A from branch `prototype/dashboard` (`0c14dd1`), rewritten for production
 
 Opening a Job's drawer marks it seen.
 
-Job text, `extra` and links come from outside sources: the dashboard escapes every field (descriptions are raw HTML) and makes only `http`/`https` links clickable. State-changing requests take a JSON body, so a cross-site form or empty POST cannot trigger them.
+Job text, `extra` and links come from outside sources: the dashboard escapes every field (descriptions are raw HTML) and makes only `http`/`https` links clickable. State-changing requests take a JSON body, so a cross-site form or empty POST cannot trigger them. The server answers only to `localhost`, `127.0.0.1` and the host of `UPWORK_REDIRECT_URI` (DNS rebinding), and forbids framing.
 
 ## 12. Open
 

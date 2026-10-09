@@ -38,7 +38,9 @@ def client(tmp_path, monkeypatch):
         "AsyncClient",
         lambda **kwargs: original(transport=httpx.MockTransport(respond), **kwargs),
     )
-    with TestClient(create_app(tmp_path), follow_redirects=False) as browser:
+    with TestClient(
+        create_app(tmp_path), base_url="http://localhost", follow_redirects=False
+    ) as browser:
         browser.requests, browser.replies = requests, replies
         yield browser
 

@@ -164,7 +164,7 @@ class ScanRequest(StrictModel):
     sources: list[str] | None = None
 
 
-@router.post("/scans", status_code=202)
+@router.post("/api/scans", status_code=202)
 async def start_scan(request: Request, body: ScanRequest):
     try:
         settings = load_settings(request.app.state.data_dir)
@@ -184,7 +184,7 @@ async def start_scan(request: Request, body: ScanRequest):
         raise HTTPException(409, "Scan in progress") from None
 
 
-@router.get("/scans/{scan_id}")
+@router.get("/api/scans/{scan_id}")
 async def get_scan(request: Request, scan_id: int):
     with closing(connect(request.app.state.data_dir / "joule.db")) as db:
         row = db.execute("SELECT * FROM scans WHERE id=?", (scan_id,)).fetchone()

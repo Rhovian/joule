@@ -93,8 +93,22 @@ def test_startup_interrupts_running_scans(tmp_path):
 
 def test_app_startup_creates_data_directory(tmp_path):
     directory = tmp_path / "data"
-    with TestClient(create_app(directory)) as client:
+    with TestClient(create_app(directory), base_url="http://localhost") as client:
         assert client.app.state.data_dir == directory
         assert (directory / "drafts").is_dir()
         assert (directory / "profile" / "samples").is_dir()
         assert (directory / "joule.db").is_file()
+
+
+def test_host_validation_and_framing_headers(tmp_path):
+    (tmp_path / ".env").write_text(
+        "UPWORK_REDIRECT_URI=https://joule.example.ts.net/auth/upwork/callback\n"
+    )
+    with TestClient(create_app(tmp_path), base_url="http://localhost") as client:
+        for host, status in [("evil.com", 400), ("joule.example.ts.net", 200)]:
+            response = client.get("/api/upwork/status", headers={"Host": host})
+            assert response.status_code == status
+            assert response.headers["X-Frame-Options"] == "DENY"
+            assert (
+                response.headers["Content-Security-Policy"] == "frame-ancestors 'none'"
+            )
