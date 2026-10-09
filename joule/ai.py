@@ -40,7 +40,10 @@ async def structured[T: BaseModel](model: Model, prompt: str, schema: type[T]) -
             "-s",
             "read-only",
         ]
+        # Scoring needs no tools; Job text is untrusted, so the shell goes too.
         for feature in (
+            "shell_tool",
+            "unified_exec",
             "browser_use",
             "computer_use",
             "image_generation",
