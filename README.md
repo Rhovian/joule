@@ -12,4 +12,4 @@ Skills under `.claude/skills/` are vendored from [mattpocock/skills](https://git
 docker compose up -d --build
 ```
 
-Open http://localhost:8000. Data lives in `~/.joule` (override with `JOULE_DATA_DIR`); Preferences go in `profile/preferences.yaml` (spec §4) and secrets go in `~/.joule/.env`. The port is bound to `127.0.0.1` only; on a server, expose it with Tailscale Serve and set `UPWORK_REDIRECT_URI` to the tailnet URL, whose host is then also allowed.
+Open http://localhost:8000. Data lives in `~/.joule`; Preferences go in `profile/preferences.yaml` (spec §4) and secrets go in `~/.joule/.env`. The port is bound to `127.0.0.1` only; on a server, expose it with Tailscale Serve and set `UPWORK_REDIRECT_URI` to the tailnet URL, whose host is then also allowed.

@@ -4,5 +4,5 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
-      - ${JOULE_DATA_DIR:-~/.joule}:/data
+      - ~/.joule:/data
     restart: unless-stopped
