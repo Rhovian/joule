@@ -165,13 +165,13 @@ class ScanRequest(StrictModel):
 
 
 @router.post("/scans", status_code=202)
-async def start_scan(request: Request, body: ScanRequest | None = None):
+async def start_scan(request: Request, body: ScanRequest):
     try:
         settings = load_settings(request.app.state.data_dir)
         preferences = load_preferences(request.app.state.data_dir)
     except Exception as error:
         raise HTTPException(422, str(error)) from error
-    requested = body.sources if body else None
+    requested = body.sources
     if requested is not None and any(
         source not in settings.sources or source not in ADAPTERS for source in requested
     ):
