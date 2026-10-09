@@ -37,7 +37,7 @@ async def search(client: httpx.AsyncClient) -> list[Candidate]:
                 source="hn",
                 source_id=str(comment["id"]),
                 link=f"https://news.ycombinator.com/item?id={comment['id']}",
-                title=header,
+                title=header[:200],
                 company=header.split("|", 1)[0].strip() if "|" in header else None,
                 remote=True
                 if re.search(r"\bremote\b", header, re.IGNORECASE)
