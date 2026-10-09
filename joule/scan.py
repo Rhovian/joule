@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Request
 from joule import ai, filters, score
 from joule.config import StrictModel, load_preferences, load_settings
 from joule.db import connect
-from joule.sources import hotfix, remoteok, upwork, weworkremotely
+from joule.sources import hn, hotfix, remoteok, upwork, weworkremotely
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -37,6 +37,7 @@ async def enrich_upwork(ctx, candidate):
 
 
 ADAPTERS = {
+    "hn": (lambda ctx: hn.search(ctx.client), None),
     "hotfix": (fetch_hotfix, enrich_hotfix),
     "upwork": (fetch_upwork, enrich_upwork),
     "weworkremotely": (lambda ctx: weworkremotely.search(ctx.client), None),

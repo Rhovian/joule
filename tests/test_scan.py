@@ -194,7 +194,7 @@ def test_routes_busy_validation_and_reload(setup, monkeypatch):
         await asyncio.Event().wait()
 
     monkeypatch.setitem(scan.ADAPTERS, "hotfix", (blocked, scan.enrich_hotfix))
-    for source in ["unknown", "hn", "indeed"]:
+    for source in ["unknown", "indeed"]:
         assert client.post("/api/scans", json={"sources": [source]}).status_code == 422
     # Body required, so a cross-site empty POST cannot start a Scan.
     assert client.post("/api/scans").status_code == 422
