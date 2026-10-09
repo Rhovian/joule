@@ -3,6 +3,7 @@ import json
 import logging
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from types import SimpleNamespace
 
 from fastapi import APIRouter, HTTPException, Request
@@ -10,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Request
 from joule import ai, filters, score
 from joule.config import StrictModel, load_preferences, load_settings
 from joule.db import connect
-from joule.sources import hn, hotfix, remoteok, upwork, weworkremotely
+from joule.sources import hn, hotfix, jobspy, remoteok, upwork, weworkremotely
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -18,6 +19,10 @@ logger = logging.getLogger(__name__)
 
 async def fetch_hotfix(ctx):
     return await hotfix.search(ctx.client, ctx.preferences.roles)
+
+
+async def fetch_jobspy(site, ctx):
+    return await jobspy.search(site, ctx.preferences, ctx.settings.results_per_search)
 
 
 async def enrich_hotfix(ctx, candidate):
@@ -42,6 +47,10 @@ ADAPTERS = {
     "upwork": (fetch_upwork, enrich_upwork),
     "weworkremotely": (lambda ctx: weworkremotely.search(ctx.client), None),
     "remoteok": (lambda ctx: remoteok.search(ctx.client), None),
+    **{
+        site: (partial(fetch_jobspy, site), None)
+        for site in ("indeed", "linkedin", "glassdoor")
+    },
 }
 
 
@@ -67,7 +76,11 @@ class Scanner:
                 (json.dumps(sources), trigger, datetime.now(UTC).isoformat()),
             ).lastrowid
         ctx = SimpleNamespace(
-            client=self.client, auth=self.auth, preferences=preferences, inserted=[]
+            client=self.client,
+            auth=self.auth,
+            preferences=preferences,
+            settings=settings,
+            inserted=[],
         )
         self.task = asyncio.create_task(self._run(scan_id, sources, settings, ctx))
         self.busy = True

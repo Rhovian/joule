@@ -53,6 +53,8 @@ class Settings(StrictModel):
             "remoteok",
             "web3career",
             "indeed",
+            "linkedin",
+            "glassdoor",
             "upwork",
             "hotfix",
         ]
