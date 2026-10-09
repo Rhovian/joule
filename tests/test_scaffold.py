@@ -21,6 +21,7 @@ def test_missing_settings_use_defaults(tmp_path):
         "workingnomads",
         "freehire",
         "golangjobs",
+        "getarustjob",
     ]
     assert settings.models.scoring.model == "gpt-6-luna"
     assert settings.models.scoring.provider == "codex"

@@ -60,6 +60,8 @@ class Settings(StrictModel):
             "workingnomads",
             "freehire",
             "golangjobs",
+            "getarustjob",
+            "adzuna",
         ]
     ] = Field(
         default_factory=lambda: [
@@ -71,6 +73,7 @@ class Settings(StrictModel):
             "workingnomads",
             "freehire",
             "golangjobs",
+            "getarustjob",
         ]
     )
     schedule: Schedule = Field(default_factory=Schedule)

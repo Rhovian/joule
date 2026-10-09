@@ -35,13 +35,13 @@ Default `~/.joule/`, path configurable, never in git. Mounted into the container
 Settings and Profile files are re-read on every Scan and every Draft, so editing them needs no restart.
 
 ### `.env`
-`UPWORK_CLIENT_ID`, `UPWORK_CLIENT_SECRET`, `UPWORK_REDIRECT_URI`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, plus provider keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) and `WEB3_CAREER_TOKEN`.
+`UPWORK_CLIENT_ID`, `UPWORK_CLIENT_SECRET`, `UPWORK_REDIRECT_URI`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `ADZUNA_APP_ID`, `ADZUNA_APP_KEY`, plus provider keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) and `WEB3_CAREER_TOKEN`.
 
 ### `settings.yaml` ([#11](https://github.com/Rhovian/joule/issues/11), [#13](https://github.com/Rhovian/joule/issues/13), [#14](https://github.com/Rhovian/joule/issues/14), [#7](https://github.com/Rhovian/joule/issues/7))
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `sources` | HN, WWR, RemoteOK, Upwork, Hotfix, Working Nomads, FreeHire, Golang Jobs on; web3.career, Indeed, LinkedIn, Glassdoor off | enabled Sources |
+| `sources` | HN, WWR, RemoteOK, Upwork, Hotfix, Working Nomads, FreeHire, Golang Jobs, getarustjob on; web3.career, Indeed, LinkedIn, Glassdoor, Adzuna US off | enabled Sources |
 | `schedule.upwork_minutes` | 15 | scheduled Upwork Scan interval ([#9](https://github.com/Rhovian/joule/issues/9)) |
 | `upwork.scoring` | on | AI-score Upwork Jobs ([#9](https://github.com/Rhovian/joule/issues/9)) |
 | `upwork.retention_hours` | 24 | Upwork content purge window |
@@ -120,6 +120,9 @@ Each Source is an adapter that returns candidate Jobs in the common fields plus 
 | Working Nomads | public `jobsapi/_search` JSON POST | each Preferences role, first 100 | USA / North America / Anywhere; HTML descriptions; no pagination |
 | FreeHire | public `/api/v1/agent/jobs/search` JSON API | each Preferences role, newest 100 | US country filter; Markdown descriptions; no pagination |
 | Golang Jobs | public Supabase JSON API with site anon key | whole unarchived feed | 200 per page, at most 10 pages; descriptions when supplied; only Remote/Global city names establish remote |
+
+| getarustjob | public `/jobs?page=N` HTML with embedded JSON | whole directory, at most 20 pages | Detail JobPosting description and YEAR pay on new Jobs; list approval date used as posted date; stop on an empty page, structure failures are Scan errors |
+| Adzuna US (opt-in) | `/v1/api/jobs/us/search/1`, App ID + App Key | each Preferences role, first 50 | 500-character description snippet; predicted salaries kept only in extra; USD pay with unknown period |
 
 Out of scope for now: Google Jobs (unavailable).
 

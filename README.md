@@ -10,7 +10,7 @@ Skills under `.claude/skills/` are vendored from [mattpocock/skills](https://git
 
 Working now:
 
-- **Scans** from the dashboard, per Source or all at once: HN Who's Hiring, We Work Remotely, RemoteOK, Hotfix, Upwork, Working Nomads, FreeHire, Golang Jobs, plus opt-in Indeed, LinkedIn and Glassdoor. New Jobs are deduplicated across Sources (Duplicates link to their Primary) and run through the cheap filters (deal-breakers, work type, pay floor, location, Upwork client floors).
+- **Scans** from the dashboard, per Source or all at once: HN Who's Hiring, We Work Remotely, RemoteOK, Hotfix, Upwork, Working Nomads, FreeHire, Golang Jobs, getarustjob, plus opt-in Indeed, LinkedIn, Glassdoor and Adzuna US. New Jobs are deduplicated across Sources (Duplicates link to their Primary) and run through the cheap filters (deal-breakers, work type, pay floor, location, Upwork client floors).
 - **Fit Score** from Codex, with a reason and for/against points; new surviving Primaries score during Scans, with manual retry and stale-score flags.
 - **Dashboard** at `/`: triage table with unscored / Filtered / dismissed toggles, Job drawer, Scan sidebar with live progress and last-Scan counts per Source, Connect Upwork in a popup. Keys: `j`/`k` move, `o` open, `d` dismiss/restore, `s` Scans, `Esc` close.
 - **Upwork** OAuth sign-in with token refresh; job search and screening questions.
@@ -29,7 +29,7 @@ Everything joule reads and writes lives in `~/.joule`, mounted into the containe
 
 ```
 ~/.joule/
-  .env                    # UPWORK_CLIENT_ID, UPWORK_CLIENT_SECRET, UPWORK_REDIRECT_URI, …
+  .env                    # UPWORK_CLIENT_ID, UPWORK_CLIENT_SECRET, UPWORK_REDIRECT_URI, ADZUNA_APP_ID, ADZUNA_APP_KEY, …
   settings.yaml           # optional; enabled Sources, timeouts, … (spec §3)
   profile/preferences.yaml  # roles, pay floors, locations, deal-breakers (spec §4)
   joule.db                # SQLite, created on first start
