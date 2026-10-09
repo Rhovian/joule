@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Request
 from joule import ai, filters, score
 from joule.config import StrictModel, load_preferences, load_settings
 from joule.db import connect
-from joule.sources import hotfix, remoteok, upwork, weworkremotely
+from joule.sources import hotfix, jobspy, remoteok, upwork, weworkremotely
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -41,6 +41,24 @@ ADAPTERS = {
     "upwork": (fetch_upwork, enrich_upwork),
     "weworkremotely": (lambda ctx: weworkremotely.search(ctx.client), None),
     "remoteok": (lambda ctx: remoteok.search(ctx.client), None),
+    "indeed": (
+        lambda ctx: jobspy.search(
+            "indeed", ctx.preferences, ctx.settings.results_per_search
+        ),
+        None,
+    ),
+    "linkedin": (
+        lambda ctx: jobspy.search(
+            "linkedin", ctx.preferences, ctx.settings.results_per_search
+        ),
+        None,
+    ),
+    "glassdoor": (
+        lambda ctx: jobspy.search(
+            "glassdoor", ctx.preferences, ctx.settings.results_per_search
+        ),
+        None,
+    ),
 }
 
 
@@ -66,7 +84,11 @@ class Scanner:
                 (json.dumps(sources), trigger, datetime.now(UTC).isoformat()),
             ).lastrowid
         ctx = SimpleNamespace(
-            client=self.client, auth=self.auth, preferences=preferences, inserted=[]
+            client=self.client,
+            auth=self.auth,
+            preferences=preferences,
+            settings=settings,
+            inserted=[],
         )
         self.task = asyncio.create_task(self._run(scan_id, sources, settings, ctx))
         self.busy = True
