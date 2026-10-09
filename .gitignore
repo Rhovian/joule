@@ -5,3 +5,14 @@
 
 # Secrets (real ones live in ~/.joule/.env)
 .env
+
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/

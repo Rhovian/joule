@@ -41,9 +41,9 @@ Settings and Profile files are re-read on every Scan and every Draft, so editing
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `sources` | HN, WWR, RemoteOK on; web3.career, Indeed, Upwork off | enabled Sources |
-| `schedule.upwork_minutes` | 15, **off** | scheduled Upwork Scan interval; stays off until [#9](https://github.com/Rhovian/joule/issues/9) |
-| `upwork.scoring` | off | AI-score Upwork Jobs; stays off until [#9](https://github.com/Rhovian/joule/issues/9) |
+| `sources` | HN, WWR, RemoteOK, Upwork on; web3.career, Indeed off | enabled Sources |
+| `schedule.upwork_minutes` | 15 | scheduled Upwork Scan interval ([#9](https://github.com/Rhovian/joule/issues/9)) |
+| `upwork.scoring` | on | AI-score Upwork Jobs ([#9](https://github.com/Rhovian/joule/issues/9)) |
 | `upwork.retention_hours` | 24 | Upwork content purge window |
 | `models.scoring` / `models.drafts` | a cheap model (e.g. Claude Haiku) / a stronger one | provider + model name |
 | `models.ollama_base_url` | — | only when using Ollama |
@@ -116,7 +116,7 @@ Each Source is an adapter that returns candidate Jobs in the common fields plus 
 | RemoteOK | `/api` JSON | whole feed | Skip the first (metadata) entry; attribution link required; salary 0 = unknown |
 | web3.career (opt-in) | token API, `limit=100`, descriptions on | whole feed, no tag | Attribution required; verify field names against a live response |
 | Indeed (opt-in) | JobSpy, pinned version | each Preferences role × (each city + remote) | `results_per_search` cap; surface partial or failed results as Scan errors |
-| Upwork (off until key) | GraphQL `marketplaceJobPostingsSearch` + detail query | each Preferences role, plus the API-side filters it supports (hourly floor, fixed-budget floor, payment verified) | No scraping, no RSS |
+| Upwork | GraphQL `marketplaceJobPostingsSearch` + detail query | each Preferences role, plus the API-side filters it supports (hourly floor, fixed-budget floor, payment verified) | No scraping, no RSS |
 
 **Extraction** is one shared step: a cheap model turns free text into the common Job fields. Text with no title found is skipped and counted.
 
@@ -176,7 +176,7 @@ Written only on request, per Job, from the drawer.
   - On a server: `https://<host>.<tailnet>.ts.net/auth/upwork/callback`.
 - **Tokens:** kept in `upwork-token.json` (owner-only permissions), written atomically (temp file + rename). Refreshed shortly before the 24h access expiry, keeping any replacement refresh token. If the refresh token is dead (unused for over 2 weeks), the dashboard shows "Connect Upwork" again.
 - **Refresh races:** check-then-act on token expiry — guarded by a single in-process lock around refresh, since one process owns all Upwork calls.
-- **Waiting on Upwork's written answer ([#9](https://github.com/Rhovian/joule/issues/9)):** scheduled Upwork Scans, Upwork scoring, and retention longer than 24h. Each is a setting, off by default.
+- **Scheduled Scans and scoring ([#9](https://github.com/Rhovian/joule/issues/9)):** Upwork approved the key with the requested scopes and callbacks but sent no written answer on scheduled search, scoring or retention. The owner treats them as permitted: scheduled Upwork Scans and Upwork scoring are on by default; retention stays 24h. Each remains a setting.
 
 ## 11. Dashboard ([#10](https://github.com/Rhovian/joule/issues/10))
 
@@ -206,4 +206,4 @@ Opening a Job's drawer marks it seen.
 
 ## 12. Open
 
-- [#9](https://github.com/Rhovian/joule/issues/9): Upwork key approval, the callback URLs it accepts, and Upwork's written answer on scheduled search, scoring and retention. None of it blocks building; each answer flips a setting.
+Nothing open.
