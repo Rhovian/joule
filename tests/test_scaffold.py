@@ -12,7 +12,7 @@ from joule.db import connect, init_db
 
 def test_missing_settings_use_defaults(tmp_path):
     settings = load_settings(tmp_path)
-    assert settings.sources == ["hn", "weworkremotely", "remoteok", "upwork"]
+    assert settings.sources == ["hn", "weworkremotely", "remoteok", "upwork", "hotfix"]
     assert settings.models.scoring.model == "claude-haiku-4-5-20251001"
     assert settings.models.drafts.model == "claude-sonnet-5-5"
 

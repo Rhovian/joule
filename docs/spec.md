@@ -41,7 +41,7 @@ Settings and Profile files are re-read on every Scan and every Draft, so editing
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `sources` | HN, WWR, RemoteOK, Upwork on; web3.career, Indeed off | enabled Sources |
+| `sources` | HN, WWR, RemoteOK, Upwork, Hotfix on; web3.career, Indeed off | enabled Sources |
 | `schedule.upwork_minutes` | 15 | scheduled Upwork Scan interval ([#9](https://github.com/Rhovian/joule/issues/9)) |
 | `upwork.scoring` | on | AI-score Upwork Jobs ([#9](https://github.com/Rhovian/joule/issues/9)) |
 | `upwork.retention_hours` | 24 | Upwork content purge window |
@@ -117,6 +117,7 @@ Each Source is an adapter that returns candidate Jobs in the common fields plus 
 | web3.career (opt-in) | token API, `limit=100`, descriptions on | whole feed, no tag | Attribution required; verify field names against a live response |
 | Indeed (opt-in) | JobSpy, pinned version | each Preferences role × (each city + remote) | `results_per_search` cap; surface partial or failed results as Scan errors |
 | Upwork | GraphQL `marketplaceJobPostingsSearch` + detail query | each Preferences role, plus the API-side filters it supports (hourly floor, fixed-budget floor, payment verified) | No scraping, no RSS |
+| Hotfix | public `/v1/jobs` JSON API | each Preferences role, newest 100 | Detail call for full description on new Jobs; no pay period, ≥10000 treated as yearly |
 
 **Extraction** is one shared step: a cheap model turns free text into the common Job fields. Text with no title found is skipped and counted.
 
