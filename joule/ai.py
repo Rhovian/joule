@@ -83,3 +83,12 @@ async def structured[T: BaseModel](model: Model, prompt: str, schema: type[T]) -
             return schema.model_validate_json((path / "out.txt").read_text())
         except (OSError, UnicodeError, ValidationError) as error:
             raise AIError("Codex returned missing or invalid output") from error
+
+
+async def retry_structured(model, prompt, schema):
+    for attempt in range(2):
+        try:
+            return await structured(model, prompt, schema)
+        except AIError:
+            if attempt:
+                raise

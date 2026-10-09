@@ -3,8 +3,9 @@ from contextlib import closing
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import Field
 
-from joule import ai, score
+from joule import ai, drafts, score
 from joule.config import StrictModel, load_settings
 from joule.db import connect
 from joule.scan import ADAPTERS
@@ -61,6 +62,15 @@ async def get_job(request: Request, job_id: int):
         if row is None:
             raise HTTPException(404, "Job not found")
         result = dict(row) | {"duplicates": duplicates(db, job_id)}
+        result["drafts"] = {
+            draft["kind"]: dict(draft) | {"content": json.loads(draft["content"])}
+            for draft in db.execute(
+                "SELECT id,kind,text AS content,note,created_at FROM drafts "
+                "WHERE job_id=? AND id IN "
+                "(SELECT MAX(id) FROM drafts WHERE job_id=? GROUP BY kind)",
+                (job_id, job_id),
+            )
+        }
     directory = request.app.state.data_dir
     result["score_stale"] = result["score"] is not None and result[
         "score_fingerprint"
@@ -86,6 +96,31 @@ async def rescore_job(request: Request, job_id: int, body: StrictModel):
                 settings,
                 directory,
                 score.fingerprint(directory, settings),
+            )
+        except ai.AIError as error:
+            raise HTTPException(502, str(error)) from error
+    return await get_job(request, job_id)
+
+
+class DraftRequest(StrictModel):
+    kind: Literal["cover_letter", "proposal"]
+    note: str | None = Field(None, max_length=2000)
+
+
+@router.post("/jobs/{job_id}/drafts")
+async def write_draft(request: Request, job_id: int, body: DraftRequest):
+    directory = request.app.state.data_dir
+    with closing(connect(directory / "joule.db")) as db:
+        job = db.execute(
+            "SELECT * FROM jobs WHERE id=? AND primary_id IS NULL", (job_id,)
+        ).fetchone()
+        if job is None:
+            raise HTTPException(404, "Job not found")
+        if (body.kind == "proposal") != (job["source"] == "upwork"):
+            raise HTTPException(400, "Draft kind does not match Job source")
+        try:
+            await drafts.write(
+                db, job, body.kind, body.note, load_settings(directory), directory
             )
         except ai.AIError as error:
             raise HTTPException(502, str(error)) from error
