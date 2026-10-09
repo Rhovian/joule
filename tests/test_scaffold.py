@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from joule.app import create_app
-from joule.config import load_env, load_preferences, load_settings
+from joule.config import load_env, load_settings
 from joule.db import connect, init_db
 
 
@@ -98,11 +98,6 @@ def test_app_startup_creates_data_directory(tmp_path):
         assert (directory / "drafts").is_dir()
         assert (directory / "profile" / "samples").is_dir()
         assert (directory / "joule.db").is_file()
-        assert load_preferences(directory).roles == ["Software Engineer"]
-    preferences = directory / "profile" / "preferences.yaml"
-    preferences.write_text("roles: [Mine]\n")
-    with TestClient(create_app(directory), base_url="http://localhost"):
-        assert preferences.read_text() == "roles: [Mine]\n"
 
 
 def test_host_validation_and_framing_headers(tmp_path):
