@@ -52,8 +52,18 @@ class Models(StrictModel):
 
 class Settings(StrictModel):
     sources: list[
-        Literal["hn", "weworkremotely", "remoteok", "web3career", "indeed", "upwork"]
-    ] = Field(default_factory=lambda: ["hn", "weworkremotely", "remoteok", "upwork"])
+        Literal[
+            "hn",
+            "weworkremotely",
+            "remoteok",
+            "web3career",
+            "indeed",
+            "upwork",
+            "hotfix",
+        ]
+    ] = Field(
+        default_factory=lambda: ["hn", "weworkremotely", "remoteok", "upwork", "hotfix"]
+    )
     schedule: Schedule = Field(default_factory=Schedule)
     upwork: Upwork = Field(default_factory=Upwork)
     models: Models = Field(default_factory=Models)
