@@ -22,3 +22,9 @@ class Candidate(BaseModel):
     pay_period: Literal["hour", "year", "fixed"] | None = None
     posted_at: datetime | None = None
     extra: dict = Field(default_factory=dict)
+
+
+BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/141.0 Safari/537.36"
+)
