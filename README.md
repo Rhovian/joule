@@ -11,10 +11,11 @@ Skills under `.claude/skills/` are vendored from [mattpocock/skills](https://git
 Working now:
 
 - **Scans** from the dashboard, per Source or all at once: We Work Remotely, RemoteOK, Hotfix and Upwork. New Jobs are deduplicated across Sources (Duplicates link to their Primary) and run through the cheap filters (deal-breakers, work type, pay floor, location, Upwork client floors).
+- **Fit Score** from Codex, with a reason and for/against points; new surviving Primaries score during Scans, with manual retry and stale-score flags.
 - **Dashboard** at `/`: triage table with unscored / Filtered / dismissed toggles, Job drawer, Scan sidebar with live progress and last-Scan counts per Source, Connect Upwork in a popup. Keys: `j`/`k` move, `o` open, `d` dismiss/restore, `s` Scans, `Esc` close.
 - **Upwork** OAuth sign-in with token refresh; job search and screening questions.
 
-Not built yet: Fit Score, Telegram alerts, Drafts (Tailored CV, Cover Letter, Proposal), HN, web3.career and Indeed, scheduled Upwork Scans and the 24h Upwork purge.
+Not built yet: Telegram alerts, Drafts (Tailored CV, Cover Letter, Proposal), HN, web3.career and Indeed, scheduled Upwork Scans and the 24h Upwork purge.
 
 ## Run
 
@@ -34,6 +35,8 @@ Everything joule reads and writes lives in `~/.joule`, mounted into the containe
   joule.db                # SQLite, created on first start
   upwork-token.json       # written by Connect Upwork
 ```
+
+Scoring uses the host’s Codex login; work history must live under `~/.joule` to be visible in Docker.
 
 `settings.yaml` and `preferences.yaml` are re-read on every Scan; no restart needed.
 

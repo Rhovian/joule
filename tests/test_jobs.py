@@ -136,3 +136,33 @@ def test_missing_static_build(tmp_path):
     with TestClient(app, base_url="http://localhost") as client:
         assert client.get("/api/jobs").json() == []
         assert client.get("/api/upwork/status").json() == {"connected": False}
+
+
+def test_score_route_and_stale(client, monkeypatch):
+    from joule import ai
+    from joule.score import Score
+
+    directory = client.app.state.data_dir
+    (directory / "profile").mkdir()
+    (directory / "profile" / "preferences.yaml").write_text("roles: [Engineer]\n")
+
+    async def structured(*args):
+        return Score(score=88, reason="pay not stated", points=[])
+
+    monkeypatch.setattr(ai, "structured", structured)
+    assert client.post("/api/jobs/3/score").status_code == 422
+    for id in (6, 999):
+        assert client.post(f"/api/jobs/{id}/score", json={}).status_code == 404
+    result = client.post("/api/jobs/3/score", json={})
+    assert result.status_code == 200 and result.json()["score"] == 88
+    rows = client.get("/api/jobs").json()
+    assert next(r for r in rows if r["id"] == 3)["score_stale"] is False
+    (directory / "profile" / "cv.yaml").write_text("changed")
+    assert client.get("/api/jobs").json()[0]["score_stale"] is True
+
+    async def fail(*args):
+        raise ai.AIError("Codex failed")
+
+    monkeypatch.setattr(ai, "structured", fail)
+    response = client.post("/api/jobs/3/score", json={})
+    assert response.status_code == 502 and response.json() == {"detail": "Codex failed"}

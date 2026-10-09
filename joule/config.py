@@ -34,20 +34,13 @@ class Upwork(StrictModel):
 
 
 class Model(StrictModel):
-    provider: Literal["anthropic", "openai", "ollama"]
-    model: str
+    provider: Literal["codex"]
+    model: str | None = None
 
 
 class Models(StrictModel):
-    scoring: Model = Field(
-        default_factory=lambda: Model(
-            provider="anthropic", model="claude-haiku-4-5-20251001"
-        )
-    )
-    drafts: Model = Field(
-        default_factory=lambda: Model(provider="anthropic", model="claude-sonnet-5-5")
-    )
-    ollama_base_url: str | None = None
+    scoring: Model = Field(default_factory=lambda: Model(provider="codex"))
+    drafts: Model = Field(default_factory=lambda: Model(provider="codex"))
 
 
 class Settings(StrictModel):

@@ -5,6 +5,10 @@ from joule.config import Preferences
 from joule.sources import Candidate
 
 
+def plain_text(text: str) -> str:
+    return html.unescape(re.sub(r"<[^>]*>", " ", text))
+
+
 def tidy(text: str) -> str:
     words = re.sub(r"[^\w\s]", " ", text.lower()).split()
     return " ".join(word for word in words if word not in {"inc", "ltd"})
@@ -20,7 +24,7 @@ def filter_reason(candidate: Candidate, preferences: Preferences) -> str | None:
         tidy(candidate.company) == tidy(company) for company in breakers.companies
     ):
         return f"deal_breaker: company {candidate.company}"
-    description = html.unescape(re.sub(r"<[^>]*>", " ", candidate.description or ""))
+    description = plain_text(candidate.description or "")
     text = f"{candidate.title}\n{description}"
     for keyword in breakers.keywords:
         if re.search(rf"(?<!\w){re.escape(keyword)}(?!\w)", text, re.IGNORECASE):

@@ -67,3 +67,19 @@ def test_search(low, high, yearly):
 def test_errors():
     with pytest.raises(httpx.HTTPStatusError, match="429"):
         run(lambda r: httpx.Response(429))
+
+
+def test_mojibake_repaired_and_correct_text_preserved():
+    for text in ("fÃ¼r", "für"):
+        node = {
+            "id": 1,
+            "url": "https://remoteok.com/remote-jobs/1",
+            "position": text,
+            "company": text,
+            "location": text,
+            "description": text,
+        }
+        job = run(lambda r, node=node: httpx.Response(200, json=[{}, node]))[0]
+        assert (job.title, job.company, job.location_raw, job.description) == (
+            "für",
+        ) * 4

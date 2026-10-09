@@ -7,6 +7,15 @@ from joule.sources import BROWSER_USER_AGENT, Candidate
 JOBS_URL = "https://remoteok.com/api"
 
 
+def repair_text(text: str | None) -> str | None:
+    if text is not None:
+        try:
+            return text.encode("latin-1").decode("utf-8")
+        except UnicodeError:
+            pass
+    return text
+
+
 def _candidate(node: dict) -> Candidate:
     low, high = node.get("salary_min") or None, node.get("salary_max") or None
     amounts = [amount for amount in (low, high) if amount is not None]
@@ -17,10 +26,10 @@ def _candidate(node: dict) -> Candidate:
         source="remoteok",
         source_id=str(node["id"]),
         link=node["url"],
-        title=node["position"],
-        company=node.get("company"),
-        description=node.get("description"),
-        location_raw=node.get("location"),
+        title=repair_text(node["position"]),
+        company=repair_text(node.get("company")),
+        description=repair_text(node.get("description")),
+        location_raw=repair_text(node.get("location")),
         remote=True,
         posted_at=datetime.fromtimestamp(epoch, UTC) if epoch is not None else None,
         pay_min=low,

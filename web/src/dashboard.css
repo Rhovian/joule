@@ -147,3 +147,5 @@ body:has(.drawer) { overflow: hidden; }
   .controls > span { width: 100%; margin: 0; }
   .detail-heading h2 { font-size: 21px; }
 }
+
+.score-points { padding-left: 1.2rem; color: var(--muted); }

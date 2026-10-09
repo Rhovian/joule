@@ -4,6 +4,7 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
 
+from joule import ai, score
 from joule.config import StrictModel, load_settings
 from joule.db import connect
 from joule.scan import ADAPTERS
@@ -28,7 +29,9 @@ async def list_jobs(
     filtered: bool = False,
     dismissed: bool = False,
 ):
-    with closing(connect(request.app.state.data_dir / "joule.db")) as db:
+    directory = request.app.state.data_dir
+    stamp = score.fingerprint(directory, load_settings(directory))
+    with closing(connect(directory / "joule.db")) as db:
         rows = db.execute(
             "SELECT * FROM jobs WHERE primary_id IS NULL "
             "AND (? OR score IS NOT NULL) AND (? OR filtered_reason IS NULL) "
@@ -42,7 +45,11 @@ async def list_jobs(
                 for k, value in dict(row).items()
                 if k not in ("description", "extra", "score_points")
             }
-            | {"duplicates": duplicates(db, row["id"])}
+            | {
+                "duplicates": duplicates(db, row["id"]),
+                "score_stale": row["score"] is not None
+                and row["score_fingerprint"] != stamp,
+            }
             for row in rows
         ]
 
@@ -54,9 +61,35 @@ async def get_job(request: Request, job_id: int):
         if row is None:
             raise HTTPException(404, "Job not found")
         result = dict(row) | {"duplicates": duplicates(db, job_id)}
+    directory = request.app.state.data_dir
+    result["score_stale"] = result["score"] is not None and result[
+        "score_fingerprint"
+    ] != score.fingerprint(directory, load_settings(directory))
     for key in ("extra", "score_points"):
         result[key] = json.loads(result[key]) if result[key] is not None else None
     return result
+
+
+@router.post("/jobs/{job_id}/score")
+async def rescore_job(request: Request, job_id: int, body: StrictModel):
+    directory = request.app.state.data_dir
+    with closing(connect(directory / "joule.db")) as db:
+        if not db.execute(
+            "SELECT 1 FROM jobs WHERE id=? AND primary_id IS NULL", (job_id,)
+        ).fetchone():
+            raise HTTPException(404, "Job not found")
+        settings = load_settings(directory)
+        try:
+            await score.score_job(
+                db,
+                job_id,
+                settings,
+                directory,
+                score.fingerprint(directory, settings),
+            )
+        except ai.AIError as error:
+            raise HTTPException(502, str(error)) from error
+    return await get_job(request, job_id)
 
 
 class StateRequest(StrictModel):

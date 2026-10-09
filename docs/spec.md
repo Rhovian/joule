@@ -12,7 +12,7 @@ Out of scope: auto-submitting; application tracking and inbox sync; multiple use
 
 - **Backend:** Python, FastAPI, SQLite. One process, started with **one worker**. That process owns every Scan, the schedule and the Upwork content purge ([#11](https://github.com/Rhovian/joule/issues/11)).
 - **Frontend:** Astro, built to static files and served by FastAPI. Plain CSS, vanilla client-side JS ([#10](https://github.com/Rhovian/joule/issues/10)).
-- **AI:** a thin in-house async interface over the official `anthropic` and `openai` SDKs; Ollama goes through the `openai` client at its OpenAI-compatible endpoint. Claude never goes through the OpenAI-compatible layer. Every call returns Pydantic-validated output ([#5](https://github.com/Rhovian/joule/issues/5)).
+- **AI:** Codex CLI on the owner’s subscription via `codex exec --output-schema`; every call returns Pydantic-validated output. Providers can be plugged in later.
 - **Deployment:** one Docker container with the data dir mounted from outside. Runs on a Mac or Linux. The dashboard is reachable only over Tailscale (Tailscale Serve for HTTPS on a server) and has no login.
 
 ## 3. Data dir
@@ -45,8 +45,7 @@ Settings and Profile files are re-read on every Scan and every Draft, so editing
 | `schedule.upwork_minutes` | 15 | scheduled Upwork Scan interval ([#9](https://github.com/Rhovian/joule/issues/9)) |
 | `upwork.scoring` | on | AI-score Upwork Jobs ([#9](https://github.com/Rhovian/joule/issues/9)) |
 | `upwork.retention_hours` | 24 | Upwork content purge window |
-| `models.scoring` / `models.drafts` | a cheap model (e.g. Claude Haiku) / a stronger one | provider + model name |
-| `models.ollama_base_url` | — | only when using Ollama |
+| `models.scoring` / `models.drafts` | `{provider: codex, model: null}` | optional model name; null uses the Codex default |
 | `alert_threshold` | 75 | Telegram alert at or above this Fit Score |
 | `max_scored_per_scan` | 100 | newest first; the rest stay unscored |
 | `results_per_search` | 50 | per Indeed search |

@@ -7,10 +7,11 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from joule import filters, scan
+from joule import ai, filters, scan
 from joule.app import create_app
 from joule.config import Preferences, Settings
 from joule.db import connect
+from joule.score import Score
 from joule.sources import Candidate
 
 
@@ -18,6 +19,11 @@ from joule.sources import Candidate
 def setup(tmp_path, monkeypatch):
     (tmp_path / "profile").mkdir()
     (tmp_path / "profile" / "preferences.yaml").write_text("roles: [Engineer]\n")
+
+    async def structured(*args):
+        return Score(score=70, reason="pay not stated", points=[])
+
+    monkeypatch.setattr(ai, "structured", structured)
     calls = []
 
     def respond(request):
@@ -87,6 +93,7 @@ def test_first_scan_age_enrichment_then_seen_ids(setup):
         "new": 0,
         "duplicate": 0,
         "filtered": 0,
+        "scored": 0,
         "errors": [],
     }
 
@@ -130,7 +137,7 @@ def test_duplicate_locations_and_upwork(
     monkeypatch.setattr(
         filters, "filter_reason", lambda c, p: filtered.append(c.source)
     )
-    run(["hotfix"])
+    run(["hotfix"], Settings(max_scored_per_scan=0))
     primary, second = rows()
     assert second["primary_id"] == (primary["id"] if linked else None)
     assert len(filtered) == (1 if linked else 2)
@@ -175,6 +182,7 @@ def test_enrich_failure_still_inserts_and_filters(setup, monkeypatch):
         "new": 0,
         "duplicate": 0,
         "filtered": 1,
+        "scored": 0,
         "errors": ["ValueError: detail failed"],
     }
 
@@ -228,3 +236,103 @@ def test_shutdown_interrupts_running_scan(tmp_path, monkeypatch):
         row = db.execute("SELECT * FROM scans WHERE id=?", (id,)).fetchone()
         assert row["status"] == "interrupted" and row["finished_at"]
     assert not client.app.state.scanner.busy
+
+
+def test_scoring_selection_cap_and_failure(setup, monkeypatch):
+    _, _, _, rows, run = setup
+    calls = []
+
+    async def fetch(ctx):
+        return [
+            Candidate(
+                source="remoteok",
+                source_id=str(i),
+                title=str(i),
+                link="x",
+                posted_at=datetime.now(UTC) - timedelta(hours=i),
+            )
+            for i in range(7)
+        ]
+
+    async def structured(model, prompt, schema):
+        calls.append(prompt)
+        if '"source_id": "1"' in prompt:
+            raise ai.AIError("offline")
+        return Score(score=50, reason="pay not stated", points=[])
+
+    monkeypatch.setitem(scan.ADAPTERS, "remoteok", (fetch, None))
+    monkeypatch.setattr(ai, "structured", structured)
+    monkeypatch.setattr(
+        filters,
+        "filter_reason",
+        lambda c, p: "filtered" if c.source_id == "0" else None,
+    )
+    run(["remoteok"], Settings(max_scored_per_scan=3))
+    assert [
+        '"source_id": "1"' in calls[0],
+        '"source_id": "1"' in calls[1],
+        '"source_id": "2"' in calls[2],
+        '"source_id": "3"' in calls[3],
+    ] == [True] * 4
+    assert [r["source_id"] for r in rows() if r["score"] is not None] == ["2", "3"]
+    counts = json.loads(rows("scans")[0]["per_source"])["remoteok"]
+    assert counts["scored"] == 2 and counts["errors"] == ["Score 2: offline"]
+    calls.clear()
+    run(["remoteok"])
+    assert not calls
+
+    async def upwork_jobs(ctx):
+        return [Candidate(source="upwork", source_id="u", title="U", link="x")]
+
+    monkeypatch.setitem(scan.ADAPTERS, "upwork", (upwork_jobs, None))
+    run(["upwork"], Settings(upwork={"scoring": False}))
+    assert not calls and rows()[-1]["score"] is None
+
+
+def test_scoring_duplicates_and_concurrency(setup, monkeypatch):
+    _, _, _, rows, run = setup
+    active = maximum = 0
+
+    async def fetch(ctx):
+        return [
+            Candidate(
+                source=source,
+                source_id=str(i),
+                title=title,
+                company="Acme",
+                remote=True,
+                link="x",
+            )
+            for i, source, title in [
+                (0, "remoteok", "Same"),
+                (1, "hotfix", "Same"),
+                (2, "remoteok", "Two"),
+                (3, "remoteok", "Three"),
+                (4, "remoteok", "Four"),
+            ]
+            if source == ctx.source
+        ]
+
+    async def remote(ctx):
+        ctx.source = "remoteok"
+        return await fetch(ctx)
+
+    async def hotfix(ctx):
+        ctx.source = "hotfix"
+        return await fetch(ctx)
+
+    async def structured(*args):
+        nonlocal active, maximum
+        active += 1
+        maximum = max(maximum, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return Score(score=50, reason="pay not stated", points=[])
+
+    monkeypatch.setitem(scan.ADAPTERS, "remoteok", (remote, None))
+    monkeypatch.setitem(scan.ADAPTERS, "hotfix", (hotfix, None))
+    monkeypatch.setattr(ai, "structured", structured)
+    run(["remoteok", "hotfix"])
+    assert maximum == 3
+    assert len([r for r in rows() if r["score"] is not None]) == 4
+    assert rows()[-1]["primary_id"] is not None and rows()[-1]["score"] is None
