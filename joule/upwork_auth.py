@@ -28,7 +28,7 @@ def credentials(data_dir: Path) -> dict[str, str]:
     env = load_env(data_dir)
     keys = ("client_id", "client_secret", "redirect_uri")
     if not all(env.get(f"UPWORK_{key.upper()}") for key in keys):
-        raise HTTPException(503, "Upwork not configured")
+        raise UpworkNotConnected("Upwork not configured")
     return {key: env[f"UPWORK_{key.upper()}"] for key in keys}
 
 
