@@ -36,7 +36,7 @@ def setup(tmp_path, monkeypatch):
             return httpx.Response(200, json={"data": nodes})
         return httpx.Response(200, json={"description": "Full description"})
 
-    with TestClient(create_app(tmp_path)) as client:
+    with TestClient(create_app(tmp_path), base_url="http://localhost") as client:
         scanner = client.app.state.scanner
         original = scanner.client
         mocked = httpx.AsyncClient(transport=httpx.MockTransport(respond))
@@ -217,7 +217,7 @@ def test_shutdown_interrupts_running_scan(tmp_path, monkeypatch):
         await asyncio.Event().wait()
 
     monkeypatch.setitem(scan.ADAPTERS, "hotfix", (blocked, None))
-    with TestClient(create_app(tmp_path)) as client:
+    with TestClient(create_app(tmp_path), base_url="http://localhost") as client:
         (tmp_path / "profile" / "preferences.yaml").write_text("roles: [Engineer]\n")
         response = client.post("/api/scans", json={"sources": ["hotfix"]})
         assert response.status_code == 202

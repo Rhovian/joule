@@ -1,13 +1,16 @@
 import asyncio
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from joule.config import data_dir as default_data_dir
+from joule.config import load_env
 from joule.db import init_db
 from joule.jobs import router as jobs_router
 from joule.scan import Scanner
@@ -38,6 +41,18 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                         await app.state.scanner.task
 
     app = FastAPI(lifespan=lifespan)
+    allowed_hosts = ["localhost", "127.0.0.1"]
+    hostname = urlsplit(load_env(directory).get("UPWORK_REDIRECT_URI", "")).hostname
+    if hostname:
+        allowed_hosts.append(hostname)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
+
+    @app.middleware("http")
+    async def framing_headers(request, call_next):
+        response = await call_next(request)
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+        return response
 
     async def upwork_not_connected(request, error):
         return JSONResponse(status_code=503, content={"detail": str(error)})

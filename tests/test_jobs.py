@@ -10,7 +10,7 @@ from joule.db import connect
 
 @pytest.fixture
 def client(tmp_path):
-    with TestClient(create_app(tmp_path)) as client:
+    with TestClient(create_app(tmp_path), base_url="http://localhost") as client:
         with closing(connect(tmp_path / "joule.db")) as db, db:
             for id, score, posted, reason, state, primary in [
                 (1, 80, "2026-01-01", None, "new", None),
@@ -131,6 +131,6 @@ def test_sources(client):
 def test_missing_static_build(tmp_path):
     app = create_app(tmp_path)
     app.routes[-1].app.directory = str(tmp_path / "absent")
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://localhost") as client:
         assert client.get("/api/jobs").json() == []
         assert client.get("/api/upwork/status").json() == {"connected": False}
