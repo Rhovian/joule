@@ -98,7 +98,8 @@ def test_sources(client):
     )
     assert client.get("/api/sources").json() == {
         "sources": [
-            {"name": name, "last": None} for name in ("hotfix", "remoteok", "upwork")
+            {"name": name, "last": None}
+            for name in ("hotfix", "hn", "remoteok", "upwork")
         ],
         "running": None,
     }
@@ -122,12 +123,13 @@ def test_sources(client):
     assert result["running"] == 2
     assert [s["last"]["id"] if s["last"] else None for s in result["sources"]] == [
         2,
+        None,
         2,
         None,
     ]
     assert result["sources"][0]["last"]["counts"] == counts
     # The running Scan hasn't reached remoteok yet: no counts, not zeros.
-    assert result["sources"][1]["last"]["counts"] is None
+    assert result["sources"][2]["last"]["counts"] is None
 
 
 def test_missing_static_build(tmp_path):

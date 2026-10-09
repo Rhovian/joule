@@ -3,21 +3,53 @@ import json
 import logging
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from types import SimpleNamespace
 
 from fastapi import APIRouter, HTTPException, Request
 
 from joule import ai, filters, score
-from joule.config import StrictModel, load_preferences, load_settings
+from joule.config import StrictModel, load_env, load_preferences, load_settings
 from joule.db import connect
-from joule.sources import hotfix, remoteok, upwork, weworkremotely
+from joule.sources import (
+    adzuna,
+    freehire,
+    getarustjob,
+    golangjobs,
+    hn,
+    hotfix,
+    jobspy,
+    remoteok,
+    upwork,
+    weworkremotely,
+    workingnomads,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+async def fetch_adzuna(ctx):
+    return await adzuna.search(
+        ctx.client,
+        ctx.preferences.roles,
+        ctx.env.get("ADZUNA_APP_ID"),
+        ctx.env.get("ADZUNA_APP_KEY"),
+    )
+
+
+async def enrich_getarustjob(ctx, candidate):
+    candidate.description = await getarustjob.description(
+        ctx.client, candidate.extra["slug"], candidate
+    )
+
+
 async def fetch_hotfix(ctx):
     return await hotfix.search(ctx.client, ctx.preferences.roles)
+
+
+async def fetch_jobspy(site, ctx):
+    return await jobspy.search(site, ctx.preferences, ctx.settings.results_per_search)
 
 
 async def enrich_hotfix(ctx, candidate):
@@ -37,10 +69,23 @@ async def enrich_upwork(ctx, candidate):
 
 
 ADAPTERS = {
+    "hn": (lambda ctx: hn.search(ctx.client), None),
+    "getarustjob": (lambda ctx: getarustjob.search(ctx.client), enrich_getarustjob),
+    "adzuna": (fetch_adzuna, None),
     "hotfix": (fetch_hotfix, enrich_hotfix),
     "upwork": (fetch_upwork, enrich_upwork),
     "weworkremotely": (lambda ctx: weworkremotely.search(ctx.client), None),
     "remoteok": (lambda ctx: remoteok.search(ctx.client), None),
+    **{
+        site: (partial(fetch_jobspy, site), None)
+        for site in ("indeed", "linkedin", "glassdoor")
+    },
+    "workingnomads": (
+        lambda ctx: workingnomads.search(ctx.client, ctx.preferences.roles),
+        None,
+    ),
+    "freehire": (lambda ctx: freehire.search(ctx.client, ctx.preferences.roles), None),
+    "golangjobs": (lambda ctx: golangjobs.search(ctx.client), None),
 }
 
 
@@ -66,7 +111,12 @@ class Scanner:
                 (json.dumps(sources), trigger, datetime.now(UTC).isoformat()),
             ).lastrowid
         ctx = SimpleNamespace(
-            client=self.client, auth=self.auth, preferences=preferences, inserted=[]
+            client=self.client,
+            auth=self.auth,
+            preferences=preferences,
+            settings=settings,
+            inserted=[],
+            env=load_env(self.data_dir),
         )
         self.task = asyncio.create_task(self._run(scan_id, sources, settings, ctx))
         self.busy = True
