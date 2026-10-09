@@ -1,7 +1,7 @@
 export {};
 type Counts = { new: number; duplicate: number; filtered: number; errors: string[] };
 type Scan = { id: number; status: string; started_at: string; finished_at: string | null; sources: string[]; per_source: Record<string, Counts> };
-type Source = { name: string; last: (Omit<Scan, 'sources' | 'per_source'> & { counts: Counts }) | null };
+type Source = { name: string; last: (Omit<Scan, 'sources' | 'per_source'> & { counts: Counts | null }) | null };
 type Job = {
   id: number; title: string; company: string | null; source: string; link: string; state: string;
   score: number | null; score_reason: string | null; filtered_reason: string | null;
@@ -76,7 +76,7 @@ async function loadJobs() {
   if (!jobs.some(j => j.id === selected)) selected = jobs[0]?.id ?? 0;
   renderJobs();
 }
-function counts(c?: Counts) {
+function counts(c?: Counts | null) {
   return c ? `<p class="scan-counts">${escape(c.new)} new · ${escape(c.duplicate)} Duplicate · ${escape(c.filtered)} Filtered</p>${(c.errors ?? []).map(e => `<p class="scan-error">${escape(e)}</p>`).join('')}` : '';
 }
 function renderSources() {

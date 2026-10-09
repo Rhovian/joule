@@ -123,7 +123,11 @@ def test_refresh_failure(client):
     with pytest.raises(UpworkNotConnected):
         client.portal.call(auth.access_token)
     client.portal.call(auth.save, {**TOKEN, "expires_in": 0})
-    client.replies[0] = httpx.Response(400)
+    client.replies[0] = httpx.Response(401, json={"error": "invalid_client"})
+    with pytest.raises(httpx.HTTPStatusError):
+        client.portal.call(auth.access_token)
+    assert auth.path.exists()
+    client.replies[0] = httpx.Response(400, json={"error": "invalid_grant"})
     with pytest.raises(UpworkNotConnected):
         client.portal.call(auth.access_token)
     assert not auth.path.exists()

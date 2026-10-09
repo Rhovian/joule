@@ -77,7 +77,7 @@ class UpworkAuth:
                     "client_secret": config["client_secret"],
                 },
             )
-            if response.status_code in (400, 401):
+            if response.status_code in (400, 401) and "invalid_grant" in response.text:
                 self.path.unlink()
                 raise UpworkNotConnected
             response.raise_for_status()

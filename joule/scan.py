@@ -115,21 +115,30 @@ class Scanner:
         ).fetchone()
         cutoff = datetime.now(UTC) - timedelta(days=settings.max_age_days)
         fetch, enrich = ADAPTERS[source]
-        for candidate in await fetch(ctx):
-            if first and candidate.posted_at and candidate.posted_at < cutoff:
-                continue
-            if db.execute(
+        new = [
+            candidate
+            for candidate in await fetch(ctx)
+            if not (first and candidate.posted_at and candidate.posted_at < cutoff)
+            and not db.execute(
                 "SELECT 1 FROM jobs WHERE source=? AND source_id=?",
                 (candidate.source, candidate.source_id),
-            ).fetchone():
-                continue
+            ).fetchone()
+        ]
+        limit = asyncio.Semaphore(5)
+
+        async def add(candidate):
             if enrich:
-                try:
-                    await enrich(ctx, candidate)
-                except Exception as error:
-                    logger.exception("Enrichment failed for %s", candidate.source_id)
-                    counts["errors"].append(f"{type(error).__name__}: {error}")
+                async with limit:
+                    try:
+                        await enrich(ctx, candidate)
+                    except Exception as error:
+                        logger.exception(
+                            "Enrichment failed for %s", candidate.source_id
+                        )
+                        counts["errors"].append(f"{type(error).__name__}: {error}")
             self._insert(db, candidate, ctx.preferences, counts)
+
+        await asyncio.gather(*map(add, new))
 
     def _insert(self, db, candidate, preferences, counts):
         primary = None

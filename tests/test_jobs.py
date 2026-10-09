@@ -106,7 +106,7 @@ def test_sources(client):
     with closing(connect(directory / "joule.db")) as db, db:
         for id, sources, status in [
             (1, ["hotfix", "remoteok"], "done"),
-            (2, ["hotfix"], "running"),
+            (2, ["hotfix", "remoteok"], "running"),
         ]:
             db.execute(
                 "INSERT INTO scans VALUES (?, ?, 'manual', 'start', ?, ?, ?)",
@@ -115,17 +115,19 @@ def test_sources(client):
                     json.dumps(sources),
                     "end" if id == 1 else None,
                     status,
-                    json.dumps({name: counts for name in sources}),
+                    json.dumps({sources[0]: counts}),
                 ),
             )
     result = client.get("/api/sources").json()
     assert result["running"] == 2
     assert [s["last"]["id"] if s["last"] else None for s in result["sources"]] == [
         2,
-        1,
+        2,
         None,
     ]
     assert result["sources"][0]["last"]["counts"] == counts
+    # The running Scan hasn't reached remoteok yet: no counts, not zeros.
+    assert result["sources"][1]["last"]["counts"] is None
 
 
 def test_missing_static_build(tmp_path):

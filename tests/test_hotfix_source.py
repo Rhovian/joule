@@ -58,11 +58,9 @@ def test_search(work_type, low, high, yearly):
     assert job.location_raw == "A; B" and job.country == "US"
     assert job.remote == (work_type == "remote")
     assert job.arrangement == (None if work_type == "remote" else work_type)
-    assert (job.pay_min, job.pay_max, job.pay_currency, job.pay_period) == (
-        (low or None, high or None, "USD", "year")
-        if yearly
-        else (None, None, None, None)
-    )
+    assert (job.pay_min, job.pay_max) == (low or None, high or None)
+    assert job.pay_currency == ("USD" if low or high else None)
+    assert job.pay_period == ("year" if yearly else None)
     assert job.posted_at == datetime(2026, 10, 8, 12, tzinfo=UTC)
 
 

@@ -1,3 +1,4 @@
+import html
 import re
 
 from joule.config import Preferences
@@ -19,7 +20,8 @@ def filter_reason(candidate: Candidate, preferences: Preferences) -> str | None:
         tidy(candidate.company) == tidy(company) for company in breakers.companies
     ):
         return f"deal_breaker: company {candidate.company}"
-    text = f"{candidate.title}\n{candidate.description or ''}"
+    description = html.unescape(re.sub(r"<[^>]*>", " ", candidate.description or ""))
+    text = f"{candidate.title}\n{description}"
     for keyword in breakers.keywords:
         if re.search(rf"(?<!\w){re.escape(keyword)}(?!\w)", text, re.IGNORECASE):
             return f"deal_breaker: keyword {keyword}"
