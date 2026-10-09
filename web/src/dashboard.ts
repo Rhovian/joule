@@ -2,8 +2,8 @@ export {};
 type Counts = { new: number; duplicate: number; filtered: number; scored: number; errors: string[] };
 type Scan = { id: number; status: string; started_at: string; finished_at: string | null; sources: string[]; per_source: Record<string, Counts> };
 type Source = { name: string; last: (Omit<Scan, 'sources' | 'per_source'> & { counts: Counts | null }) | null };
-type DraftKind = 'cover_letter' | 'proposal';
-type Draft = { content: { text?: string; cover?: string; answers?: string[] }; note: string | null };
+type DraftKind = 'cover_letter' | 'proposal' | 'tailored_cv';
+type Draft = { id: number; content: { text?: string; cover?: string; answers?: string[] }; note: string | null };
 type Job = {
   drafts?: Partial<Record<DraftKind, Draft>>;
   id: number; title: string; company: string | null; source: string; link: string; state: string;
@@ -119,22 +119,25 @@ async function startScan(source?: string) {
   catch (error) { notice(error); await loadSources(); }
   finally { starting = false; renderSources(); }
 }
-const pendingDrafts = new Set<number>();
+const pendingDrafts = new Set<string>();
 const draftKind = (j: Job): DraftKind => j.source === 'upwork' ? 'proposal' : 'cover_letter';
 function renderDraft(j: Job) {
-  const kind = draftKind(j), draft = j.drafts?.[kind], pending = pendingDrafts.has(j.id);
-  const button = `<button data-action="draft" data-id="${escape(j.id)}" ${pending ? 'disabled' : ''}>${pending ? 'Writing…' : draft ? 'Regenerate' : kind === 'proposal' ? 'Write Proposal' : 'Write Cover Letter'}</button>`;
+  return `<section class="job-content draft"><h3>Draft</h3>${[draftKind(j), 'tailored_cv' as DraftKind].map(kind => {
+  const draft = j.drafts?.[kind], pending = pendingDrafts.has(`${j.id}:${kind}`);
+  const button = `<button data-action="draft" data-kind="${escape(kind)}" data-id="${escape(j.id)}" ${pending ? 'disabled' : ''}>${pending ? 'Writing…' : draft ? 'Regenerate' : kind === 'tailored_cv' ? 'Write Tailored CV' : kind === 'proposal' ? 'Write Proposal' : 'Write Cover Letter'}</button>`;
   const text = (value: string | undefined, index: number) => `<div class="draft-text">${escape(value)}</div><button data-action="copy-draft" data-index="${escape(index)}">Copy</button>`;
-  return `<section class="job-content draft"><h3>Draft</h3>${draft ? `${text(draft.content.text ?? draft.content.cover, -1)}${(draft.content.answers ?? []).map((answer, i) => `<h4>${escape(j.extra?.screening_questions?.[i])}</h4>${text(answer, i)}`).join('')}<label>Note for regeneration<input id="draft-note" maxlength="2000" value="${escape(draft.note)}" ${pending ? 'disabled' : ''}></label>` : ''}${button}</section>`;
+  return `<div><h4>${kind === 'tailored_cv' ? 'Tailored CV' : kind === 'proposal' ? 'Proposal' : 'Cover Letter'}</h4>${draft ? `${kind === 'tailored_cv' ? `<a href="/api/drafts/${escape(draft.id)}/pdf" target="_blank" rel="noopener noreferrer">Open PDF ↗</a>` : text(draft.content.text ?? draft.content.cover, -1)}${(draft.content.answers ?? []).map((answer, i) => `<h4>${escape(j.extra?.screening_questions?.[i])}</h4>${text(answer, i)}`).join('')}<label>Note for regeneration<input id="draft-note-${escape(kind)}" maxlength="2000" value="${escape(draft.note)}" ${pending ? 'disabled' : ''}></label>` : ''}${button}</div>`;
+  }).join('')}</section>`;
 }
-async function writeDraft(id: number) {
-  if (pendingDrafts.has(id) || detail?.id !== id) return;
-  const kind = draftKind(detail), note = document.querySelector<HTMLInputElement>('#draft-note')?.value ?? null;
-  pendingDrafts.add(id); renderDetail();
+async function writeDraft(id: number, kind: DraftKind) {
+  const key = `${id}:${kind}`;
+  if (pendingDrafts.has(key) || detail?.id !== id) return;
+  const note = document.querySelector<HTMLInputElement>(`#draft-note-${kind}`)?.value ?? null;
+  pendingDrafts.add(key); renderDetail();
   try {
     const next = await api<Job>(`jobs/${id}/drafts`, 'POST', { kind, note });
     if (detailId === id) detail = next;
-  } finally { pendingDrafts.delete(id); renderDetail(); }
+  } finally { pendingDrafts.delete(key); renderDetail(); }
 }
 async function copyDraft(index: number) {
   if (!detail) return;
@@ -191,7 +194,7 @@ root.addEventListener('click', event => {
   if (!target || target instanceof HTMLInputElement) return;
   const id = Number(target.dataset.id);
   if (target.dataset.action === 'open') void openJob(id).catch(notice);
-  if (target.dataset.action === 'draft') void writeDraft(id).catch(notice);
+  if (target.dataset.action === 'draft') void writeDraft(id, target.dataset.kind as DraftKind).catch(notice);
   if (target.dataset.action === 'copy-draft') void copyDraft(Number(target.dataset.index)).catch(notice);
   if (target.dataset.action === 'score') void scoreJob(id).catch(notice);
   if (target.dataset.action === 'state') void changeState(id).catch(notice);

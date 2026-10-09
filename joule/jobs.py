@@ -2,10 +2,10 @@ import json
 from contextlib import closing
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import Field
 
-from joule import ai, drafts, score
+from joule import ai, cv, drafts, score
 from joule.config import StrictModel, load_settings
 from joule.db import connect
 from joule.scan import ADAPTERS
@@ -103,7 +103,7 @@ async def rescore_job(request: Request, job_id: int, body: StrictModel):
 
 
 class DraftRequest(StrictModel):
-    kind: Literal["cover_letter", "proposal"]
+    kind: Literal["cover_letter", "proposal", "tailored_cv"]
     note: str | None = Field(None, max_length=2000)
 
 
@@ -116,7 +116,9 @@ async def write_draft(request: Request, job_id: int, body: DraftRequest):
         ).fetchone()
         if job is None:
             raise HTTPException(404, "Job not found")
-        if (body.kind == "proposal") != (job["source"] == "upwork"):
+        if body.kind != "tailored_cv" and (body.kind == "proposal") != (
+            job["source"] == "upwork"
+        ):
             raise HTTPException(400, "Draft kind does not match Job source")
         try:
             await drafts.write(
@@ -125,6 +127,21 @@ async def write_draft(request: Request, job_id: int, body: DraftRequest):
         except ai.AIError as error:
             raise HTTPException(502, str(error)) from error
     return await get_job(request, job_id)
+
+
+@router.get("/drafts/{draft_id}/pdf")
+def draft_pdf(request: Request, draft_id: int):
+    with closing(connect(request.app.state.data_dir / "joule.db")) as db:
+        row = db.execute(
+            "SELECT text FROM drafts WHERE id=? AND kind='tailored_cv'", (draft_id,)
+        ).fetchone()
+    if row is None:
+        raise HTTPException(404, "Draft not found")
+    return Response(
+        cv.render(json.loads(row["text"])),
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'inline; filename="CV.pdf"'},
+    )
 
 
 class StateRequest(StrictModel):

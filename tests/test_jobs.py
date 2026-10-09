@@ -260,3 +260,64 @@ def test_draft_route_rejections(client):
             ).status_code
             == 404
         )
+
+
+def test_tailored_cv_and_pdf(client, monkeypatch):
+    from joule import ai
+
+    profile = client.app.state.data_dir / "profile"
+    profile.mkdir()
+    (profile / "cv.yaml").write_text("""basics: {name: Owner}
+work:
+  - {id: a, name: a, position: Engineer, startDate: '2020', summary: Original summary}
+  - {id: b, name: b, position: Engineer, startDate: '2020'}
+projects:
+  - {id: p, name: Project, url: 'https://example.com'}
+skills: [{name: Python, keywords: [APIs]}]
+education: [{institution: University, area: Engineering}]
+""")
+    payload = '#read("/etc/passwd") ] *x* $'
+
+    async def structured(model, prompt, schema):
+        return schema(
+            headline="Headline",
+            summary="Summary",
+            work=[
+                {"id": "b", "bullets": [payload]},
+                {"id": "a", "bullets": []},
+                {"id": "b", "bullets": ["Duplicate"]},
+            ],
+            projects=[{"id": "p", "text": "Rewritten project"}],
+        )
+
+    monkeypatch.setattr(ai, "structured", structured)
+    response = client.post("/api/jobs/1/drafts", json={"kind": "tailored_cv"})
+    assert response.status_code == 200
+    draft = response.json()["drafts"]["tailored_cv"]
+    document = draft["content"]
+    assert [entry["name"] for entry in document["work"]] == ["b", "a"]
+    assert document["work"][0]["bullets"] == [payload]
+    assert document["work"][0]["startDate"] == "2020"
+    assert document["work"][1]["summary"] == "Original summary"
+    assert document["projects"][0]["text"] == "Rewritten project"
+    assert document["projects"][0]["url"] == "https://example.com"
+    assert document["skills"] == [{"name": "Python", "keywords": ["APIs"]}]
+    assert document["education"] == [
+        {"institution": "University", "area": "Engineering"}
+    ]
+    pdf = client.get(f"/api/drafts/{draft['id']}/pdf")
+    assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF")
+    assert client.get("/api/drafts/999/pdf").status_code == 404
+
+
+def test_missing_master_cv(client, monkeypatch):
+    from joule import ai
+
+    async def structured(*args):
+        pytest.fail("AI called without a Master CV")
+
+    monkeypatch.setattr(ai, "structured", structured)
+    response = client.post("/api/jobs/1/drafts", json={"kind": "tailored_cv"})
+    assert response.status_code == 400 and response.json() == {
+        "detail": "Master CV not found"
+    }
