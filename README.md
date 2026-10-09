@@ -14,8 +14,9 @@ Working now:
 - **Fit Score** from Codex, with a reason and for/against points; new surviving Primaries score during Scans, with manual retry and stale-score flags.
 - **Dashboard** at `/`: triage table with unscored / Filtered / dismissed toggles, Job drawer, Scan sidebar with live progress and last-Scan counts per Source, Connect Upwork in a popup. Keys: `j`/`k` move, `o` open, `d` dismiss/restore, `s` Scans, `Esc` close.
 - **Upwork** OAuth sign-in with token refresh; job search and screening questions.
+- **Drafts** from the Job drawer: Cover Letter (board Jobs) or Proposal with one answer per screening question (Upwork), and a Tailored CV rendered to PDF from `profile/cv.yaml`. Regenerate with a note keeps every version.
 
-Not built yet: Telegram alerts, Drafts (Tailored CV, Cover Letter, Proposal), web3.career, scheduled Upwork Scans and the 24h Upwork purge.
+Not built yet: Telegram alerts, web3.career, scheduled Upwork Scans and the 24h Upwork purge.
 
 ## Run
 
@@ -32,6 +33,8 @@ Everything joule reads and writes lives in `~/.joule`, mounted into the containe
   .env                    # UPWORK_CLIENT_ID, UPWORK_CLIENT_SECRET, UPWORK_REDIRECT_URI, ADZUNA_APP_ID, ADZUNA_APP_KEY, …
   settings.yaml           # optional; enabled Sources, timeouts, … (spec §3)
   profile/preferences.yaml  # roles, pay floors, locations, deal-breakers (spec §4)
+  profile/cv.yaml         # Master CV, JSON Resume layout with stable ids (spec §4)
+  profile/samples/        # optional past Cover Letters and Proposals, used as style examples
   joule.db                # SQLite, created on first start
   upwork-token.json       # written by Connect Upwork
 ```
