@@ -1,0 +1,9 @@
+.git
+.niles
+.venv
+**/__pycache__
+**/node_modules
+web/dist
+web/.astro
+tests
+docs
