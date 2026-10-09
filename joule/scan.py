@@ -8,12 +8,27 @@ from types import SimpleNamespace
 from fastapi import APIRouter, HTTPException, Request
 
 from joule import ai, filters, score
-from joule.config import StrictModel, load_preferences, load_settings
+from joule.config import StrictModel, load_env, load_preferences, load_settings
 from joule.db import connect
-from joule.sources import hotfix, remoteok, upwork, weworkremotely
+from joule.sources import adzuna, getarustjob, hotfix, remoteok, upwork, weworkremotely
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+async def fetch_adzuna(ctx):
+    return await adzuna.search(
+        ctx.client,
+        ctx.preferences.roles,
+        ctx.env.get("ADZUNA_APP_ID"),
+        ctx.env.get("ADZUNA_APP_KEY"),
+    )
+
+
+async def enrich_getarustjob(ctx, candidate):
+    candidate.description = await getarustjob.description(
+        ctx.client, candidate.extra["slug"], candidate
+    )
 
 
 async def fetch_hotfix(ctx):
@@ -37,6 +52,8 @@ async def enrich_upwork(ctx, candidate):
 
 
 ADAPTERS = {
+    "getarustjob": (lambda ctx: getarustjob.search(ctx.client), enrich_getarustjob),
+    "adzuna": (fetch_adzuna, None),
     "hotfix": (fetch_hotfix, enrich_hotfix),
     "upwork": (fetch_upwork, enrich_upwork),
     "weworkremotely": (lambda ctx: weworkremotely.search(ctx.client), None),
@@ -66,7 +83,11 @@ class Scanner:
                 (json.dumps(sources), trigger, datetime.now(UTC).isoformat()),
             ).lastrowid
         ctx = SimpleNamespace(
-            client=self.client, auth=self.auth, preferences=preferences, inserted=[]
+            client=self.client,
+            auth=self.auth,
+            preferences=preferences,
+            inserted=[],
+            env=load_env(self.data_dir),
         )
         self.task = asyncio.create_task(self._run(scan_id, sources, settings, ctx))
         self.busy = True

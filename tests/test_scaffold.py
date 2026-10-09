@@ -12,7 +12,14 @@ from joule.db import connect, init_db
 
 def test_missing_settings_use_defaults(tmp_path):
     settings = load_settings(tmp_path)
-    assert settings.sources == ["hn", "weworkremotely", "remoteok", "upwork", "hotfix"]
+    assert settings.sources == [
+        "hn",
+        "weworkremotely",
+        "remoteok",
+        "upwork",
+        "hotfix",
+        "getarustjob",
+    ]
     assert settings.models.scoring.model == "gpt-6-luna"
     assert settings.models.scoring.provider == "codex"
     assert settings.models.drafts.model is None

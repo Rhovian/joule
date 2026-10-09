@@ -35,13 +35,13 @@ Default `~/.joule/`, path configurable, never in git. Mounted into the container
 Settings and Profile files are re-read on every Scan and every Draft, so editing them needs no restart.
 
 ### `.env`
-`UPWORK_CLIENT_ID`, `UPWORK_CLIENT_SECRET`, `UPWORK_REDIRECT_URI`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, plus provider keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) and `WEB3_CAREER_TOKEN`.
+`UPWORK_CLIENT_ID`, `UPWORK_CLIENT_SECRET`, `UPWORK_REDIRECT_URI`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `ADZUNA_APP_ID`, `ADZUNA_APP_KEY`, plus provider keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) and `WEB3_CAREER_TOKEN`.
 
 ### `settings.yaml` ([#11](https://github.com/Rhovian/joule/issues/11), [#13](https://github.com/Rhovian/joule/issues/13), [#14](https://github.com/Rhovian/joule/issues/14), [#7](https://github.com/Rhovian/joule/issues/7))
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `sources` | HN, WWR, RemoteOK, Upwork, Hotfix on; web3.career, Indeed off | enabled Sources |
+| `sources` | HN, WWR, RemoteOK, Upwork, Hotfix, getarustjob on; web3.career, Indeed, Adzuna US off | enabled Sources |
 | `schedule.upwork_minutes` | 15 | scheduled Upwork Scan interval ([#9](https://github.com/Rhovian/joule/issues/9)) |
 | `upwork.scoring` | on | AI-score Upwork Jobs ([#9](https://github.com/Rhovian/joule/issues/9)) |
 | `upwork.retention_hours` | 24 | Upwork content purge window |
@@ -117,6 +117,9 @@ Each Source is an adapter that returns candidate Jobs in the common fields plus 
 | Indeed (opt-in) | JobSpy, pinned version | each Preferences role × (each city + remote) | `results_per_search` cap; surface partial or failed results as Scan errors |
 | Upwork | GraphQL `marketplaceJobPostingsSearch` + detail query | each Preferences role, plus the API-side filters it supports (hourly floor, fixed-budget floor, payment verified) | No scraping, no RSS |
 | Hotfix | public `/v1/jobs` JSON API | each Preferences role, newest 100 | Detail call for full description on new Jobs; no pay period: amounts kept, period set to yearly only when ≥10000, else unknown |
+
+| getarustjob | public `/jobs?page=N` HTML with embedded JSON | whole directory, at most 20 pages | Detail JobPosting description and YEAR pay on new Jobs; list approval date used as posted date; stop on an empty page, structure failures are Scan errors |
+| Adzuna US (opt-in) | `/v1/api/jobs/us/search/1`, App ID + App Key | each Preferences role, first 50 | 500-character description snippet; predicted salaries kept only in extra; USD pay with unknown period |
 
 **Extraction** is one shared step: a cheap model turns free text into the common Job fields. Text with no title found is skipped and counted.
 
