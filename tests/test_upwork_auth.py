@@ -83,6 +83,7 @@ def test_callback(client, failure):
     request = client.requests[0]
     form = parse_qs(request.content.decode())
     assert form["code_verifier"] == [verifier] and form["redirect_uri"] == [REDIRECT]
+    assert request.headers["user-agent"] == "joule/0.1"
     assert form["grant_type"] == ["authorization_code"] and form["code"] == ["code"]
     if failure:
         assert response.status_code == 502
@@ -124,3 +125,16 @@ def test_refresh_failure(client):
     with pytest.raises(UpworkNotConnected):
         client.portal.call(auth.access_token)
     assert not auth.path.exists()
+
+
+def test_missing_credentials(client):
+    client.get("/auth/upwork/connect")
+    state, _ = client.cookies["upwork_oauth"].split(".")
+    auth = client.app.state.upwork_auth
+    client.portal.call(auth.save, {**TOKEN, "expires_in": 0})
+    (auth.data_dir / ".env").unlink()
+    with pytest.raises(UpworkNotConnected, match="Upwork not configured"):
+        client.portal.call(auth.access_token)
+    response = client.get(f"/auth/upwork/callback?state={state}&code=code")
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Upwork not configured"

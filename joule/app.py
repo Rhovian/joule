@@ -3,10 +3,11 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 
 from joule.config import data_dir as default_data_dir
 from joule.db import init_db
-from joule.upwork_auth import UpworkAuth, router
+from joule.upwork_auth import UpworkAuth, UpworkNotConnected, router
 
 
 def create_app(data_dir: Path | None = None) -> FastAPI:
@@ -18,11 +19,18 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         (directory / "drafts").mkdir(exist_ok=True)
         (directory / "profile" / "samples").mkdir(parents=True, exist_ok=True)
         init_db(directory / "joule.db")
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(
+            timeout=30, headers={"User-Agent": "joule/0.1"}
+        ) as client:
             app.state.upwork_auth = UpworkAuth(directory, client)
             yield
 
     app = FastAPI(lifespan=lifespan)
+
+    async def upwork_not_connected(request, error):
+        return JSONResponse(status_code=503, content={"detail": str(error)})
+
+    app.add_exception_handler(UpworkNotConnected, upwork_not_connected)
     app.state.data_dir = directory
     app.include_router(router)
     return app
