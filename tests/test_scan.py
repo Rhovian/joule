@@ -218,6 +218,7 @@ def test_shutdown_interrupts_running_scan(tmp_path, monkeypatch):
 
     monkeypatch.setitem(scan.ADAPTERS, "hotfix", (blocked, None))
     with TestClient(create_app(tmp_path), base_url="http://localhost") as client:
+        (tmp_path / "profile").mkdir()
         (tmp_path / "profile" / "preferences.yaml").write_text("roles: [Engineer]\n")
         response = client.post("/api/scans", json={"sources": ["hotfix"]})
         assert response.status_code == 202

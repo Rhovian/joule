@@ -23,9 +23,6 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        directory.mkdir(parents=True, exist_ok=True)
-        (directory / "drafts").mkdir(exist_ok=True)
-        (directory / "profile" / "samples").mkdir(parents=True, exist_ok=True)
         init_db(directory / "joule.db")
         async with httpx.AsyncClient(
             timeout=30, headers={"User-Agent": "joule/0.1"}

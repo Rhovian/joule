@@ -91,13 +91,11 @@ def test_startup_interrupts_running_scans(tmp_path):
         assert scan["finished_at"].endswith("+00:00")
 
 
-def test_app_startup_creates_data_directory(tmp_path):
+def test_app_startup_creates_only_the_database(tmp_path):
     directory = tmp_path / "data"
     with TestClient(create_app(directory), base_url="http://localhost") as client:
         assert client.app.state.data_dir == directory
-        assert (directory / "drafts").is_dir()
-        assert (directory / "profile" / "samples").is_dir()
-        assert (directory / "joule.db").is_file()
+        assert [path.name for path in directory.iterdir()] == ["joule.db"]
 
 
 def test_host_validation_and_framing_headers(tmp_path):
