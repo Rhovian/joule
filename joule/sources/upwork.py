@@ -1,9 +1,8 @@
 from math import ceil
 
 from joule.sources import Candidate
-from joule.upwork_auth import UpworkAuth
+from joule.upwork_auth import GRAPHQL_URL, UpworkAuth
 
-GRAPHQL_URL = "https://api.upwork.com/graphql"
 SEARCH_QUERY = """
 query Search($filter: MarketplaceJobPostingsSearchFilter) {
   marketplaceJobPostingsSearch(
@@ -65,7 +64,6 @@ def _candidate(node: dict) -> Candidate:
     client = node.get("client") or {}
     verification = client.get("verificationStatus")
     ciphertext = node["ciphertext"]
-    # Ciphertext URL construction remains unverified until the live scope check.
     link = "https://www.upwork.com/jobs/" + (
         ciphertext if ciphertext.startswith("~") else "~" + ciphertext
     )
