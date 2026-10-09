@@ -1,4 +1,5 @@
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 import httpx
@@ -7,6 +8,8 @@ from fastapi.responses import JSONResponse
 
 from joule.config import data_dir as default_data_dir
 from joule.db import init_db
+from joule.scan import Scanner
+from joule.scan import router as scan_router
 from joule.upwork_auth import UpworkAuth, UpworkNotConnected, router
 
 
@@ -23,7 +26,14 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             timeout=30, headers={"User-Agent": "joule/0.1"}
         ) as client:
             app.state.upwork_auth = UpworkAuth(directory, client)
-            yield
+            app.state.scanner = Scanner(directory, client, app.state.upwork_auth)
+            try:
+                yield
+            finally:
+                if app.state.scanner.task is not None:
+                    app.state.scanner.task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await app.state.scanner.task
 
     app = FastAPI(lifespan=lifespan)
 
@@ -33,6 +43,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     app.add_exception_handler(UpworkNotConnected, upwork_not_connected)
     app.state.data_dir = directory
     app.include_router(router)
+    app.include_router(scan_router)
     return app
 
 
