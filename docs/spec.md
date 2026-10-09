@@ -51,7 +51,7 @@ Settings and Profile files are re-read on every Scan and every Draft, so editing
 | `max_scored_per_scan` | 100 | newest first; the rest stay unscored |
 | `results_per_search` | 50 | per Indeed search |
 | `max_age_days` | 14 | first Scan of a Source only |
-| `source_timeout_seconds` | — | per Source within a Scan |
+| `source_timeout_seconds` | 120 | per Source within a Scan; detail calls run 5 at a time |
 
 ## 4. Profile ([#6](https://github.com/Rhovian/joule/issues/6))
 
@@ -113,11 +113,11 @@ Each Source is an adapter that returns candidate Jobs in the common fields plus 
 | --- | --- | --- | --- |
 | HN Who's Hiring | HN Firebase API: `whoishiring` user → current month's thread → top-level `kids` | whole thread | Free text → **extraction** (below), once per comment ID |
 | We Work Remotely | all-jobs RSS | whole feed | Title is "Company: Role"; attribution link required; browser User-Agent |
-| RemoteOK | `/api` JSON | whole feed | Skip the first (metadata) entry; attribution link required; salary 0 = unknown |
+| RemoteOK | `/api` JSON | whole feed | Skip the first (metadata) entry; attribution link required; salary 0 = unknown; USD, period yearly only when ≥10000, else unknown |
 | web3.career (opt-in) | token API, `limit=100`, descriptions on | whole feed, no tag | Attribution required; verify field names against a live response |
 | Indeed (opt-in) | JobSpy, pinned version | each Preferences role × (each city + remote) | `results_per_search` cap; surface partial or failed results as Scan errors |
 | Upwork | GraphQL `marketplaceJobPostingsSearch` + detail query | each Preferences role, plus the API-side filters it supports (hourly floor, fixed-budget floor, payment verified) | No scraping, no RSS |
-| Hotfix | public `/v1/jobs` JSON API | each Preferences role, newest 100 | Detail call for full description on new Jobs; no pay period, ≥10000 treated as yearly |
+| Hotfix | public `/v1/jobs` JSON API | each Preferences role, newest 100 | Detail call for full description on new Jobs; no pay period: amounts kept, period set to yearly only when ≥10000, else unknown |
 
 **Extraction** is one shared step: a cheap model turns free text into the common Job fields. Text with no title found is skipped and counted.
 

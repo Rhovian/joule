@@ -59,6 +59,16 @@ def limits(**values):
             breakers(keywords=["java"]),
             "deal_breaker",
         ),
+        (
+            {"description": '<span class="x">Rust &amp; Go</span>'},
+            breakers(keywords=["span", "class", "amp"]),
+            None,
+        ),
+        (
+            {"description": "<p>Rust&nbsp;C++</p>"},
+            breakers(keywords=["c++"]),
+            "deal_breaker",
+        ),
         ({"description": "JavaScript"}, breakers(keywords=["java"]), None),
         ({"title": "a.b"}, breakers(keywords=["a.b"]), "deal_breaker"),
         ({"title": "axb"}, breakers(keywords=["a.b"]), None),

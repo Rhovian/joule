@@ -58,9 +58,9 @@ def test_search(low, high, yearly):
     assert job.company == "Example" and job.description == node["description"]
     assert job.location_raw == "Anywhere" and job.remote is True
     assert job.posted_at == datetime(2026, 10, 8, 12, tzinfo=UTC)
-    assert (job.pay_min, job.pay_max, job.pay_currency, job.pay_period) == (
-        (low or None, high or None, "USD", "year") if yearly else (None,) * 4
-    )
+    assert (job.pay_min, job.pay_max) == (low or None, high or None)
+    assert job.pay_currency == ("USD" if low or high else None)
+    assert job.pay_period == ("year" if yearly else None)
     assert job.extra == ({"apply_url": node["apply_url"]} if low else {})
 
 

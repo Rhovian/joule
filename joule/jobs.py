@@ -93,9 +93,7 @@ async def get_sources(request: Request):
                 last = {
                     k: row[k] for k in ("id", "status", "started_at", "finished_at")
                 }
-                last["counts"] = json.loads(row["per_source"] or "{}").get(
-                    name, {"new": 0, "duplicate": 0, "filtered": 0, "errors": []}
-                )
+                last["counts"] = json.loads(row["per_source"] or "{}").get(name)
                 break
         sources.append({"name": name, "last": last})
     return {"sources": sources, "running": running["id"] if running else None}

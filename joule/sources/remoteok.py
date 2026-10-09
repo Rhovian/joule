@@ -23,9 +23,9 @@ def _candidate(node: dict) -> Candidate:
         location_raw=node.get("location"),
         remote=True,
         posted_at=datetime.fromtimestamp(epoch, UTC) if epoch is not None else None,
-        pay_min=low if yearly else None,
-        pay_max=high if yearly else None,
-        pay_currency="USD" if yearly else None,
+        pay_min=low,
+        pay_max=high,
+        pay_currency="USD" if amounts else None,
         pay_period="year" if yearly else None,
         extra={"apply_url": apply_url} if apply_url else {},
     )
