@@ -1,0 +1,93 @@
+# More Job Sources for joule
+
+| Site | Access established | Recommendation (engineering judgment) |
+| --- | --- | --- |
+| [Hotfix](https://docs.hotfix.jobs/reference/search-jobs.md) | Public JSON API; list and detail HTTP 200 | **Opt-in, off pending permission clarification:** useful broad coverage, but API documentation and general automation terms differ in scope. |
+| [hackajob](https://hackajob.com/en-us/jobs) | Public paginated HTML and detail JSON-LD; HTTP 200 | **Skip for now:** account-free reading exists, but systematic database copying requires written permission. |
+| [Web3Vacancy](https://web3vacancy.com/feeds/jobs.xml) | Public custom XML feed; HTTP 200, 91 Jobs | **Skip for now:** automated collection is prohibited despite the robots-allowed feed. |
+| [Solana](https://jobs.solana.com/cookie-policy) | Getro-hosted HTML with embedded JSON; official API requires a key | **Opt-in, off until authorized:** ecosystem coverage through Getro's documented API, with network access and reuse permission confirmed. |
+
+Checked **2026-10-09 01:04 UTC / 2026-10-08 in Boise**. Recommendations above and below are judgments, not grants of permission. No adapter implementation or spec edit is proposed as an immediate change. Common fields and Extraction follow [spec §5](/Users/j/code/joule/docs/spec.md:86), [§6](/Users/j/code/joule/docs/spec.md:110); evidence style follows [earlier research](/Users/j/code/joule/docs/research/job-board-sources.md:11). Snapshot counts establish neither complete inventory nor sustained availability.
+
+## Command evidence
+
+All local probes used Python 3 `urllib.request.Request(url, headers={'User-Agent':'Mozilla/5.0'})`, no credentials/cookies, a 30–35 second timeout, and `urllib.request.urlopen`; HTTP errors were caught and their codes reported. Reproduce a status and item-count probe with this command (substitute the exact URL from the table):
+
+```sh
+python3 - 'https://rest.hotfix.jobs/v1/jobs?page=1&limit=10' <<'PY'
+import sys,json,urllib.request,urllib.error,xml.etree.ElementTree as E
+try:
+ r=urllib.request.urlopen(urllib.request.Request(sys.argv[1],headers={'User-Agent':'Mozilla/5.0'}),timeout=35)
+ b=r.read(); print('HTTP',r.status)
+ if b.lstrip().startswith(b'{'):
+  d=json.loads(b); print('Jobs',len(d.get('data',d.get('items',[]))),'total',d.get('total_jobs',d.get('meta',{}).get('total')))
+ elif b.lstrip().startswith(b'<?xml') or b.lstrip().startswith(b'<jobs'):
+  x=E.fromstring(b); print('Jobs',len(x.findall('.//job')),'fields',sorted({c.tag for j in x.findall('.//job') for c in j}))
+except urllib.error.HTTPError as e: print('HTTP',e.code)
+PY
+```
+
+| Exact local probe | Printed result / parsing observation |
+| --- | --- |
+| `https://hotfix.jobs/jobs`; `https://hotfix.jobs/robots.txt` | Each HTTP **429**; Job count unavailable, not zero. No repeated retries against these paths. |
+| `https://rest.hotfix.jobs/v1/jobs?page=1&limit=10`; same with `page=2` | Each **200**, **10** `data` Jobs, `total_jobs=27347`; intersecting IDs **0**. |
+| `https://rest.hotfix.jobs/v1/jobs/1114253d-addf-4469-9b07-8673f65a8e8f` | **200**, **1** Job, description **3304 characters**; content not reproduced. |
+| `https://docs.hotfix.jobs/reference/search-jobs.md`; `/reference/get-job.md`; `/company-page.md` | Each **200**; first-party API and fair-use documentation read directly because web-tool opens failed. |
+| `https://hackajob.com/en-us/jobs`; same with `?page=2` | Each **200**, **12 distinct** `/en-us/job/` links (Python `set(re.findall(...))`); first page says **11,444** roles and links to page **954**. |
+| `https://hackajob.com/en-us/job/5d645aaf-74e0-11f1-a7b8-0a05e249917d-staff-product-designer-ai-builder` | **200**, **1** JSON-LD `JobPosting`; description **15,805 characters**, `datePosted=2026-07-01T01:04:01Z`. |
+| `https://web3vacancy.com/feeds/jobs.xml` | **200**, **91** unique `job/id` values; **91** nonempty descriptions, **72** `remote=true`, **34** nonempty salary strings. Root **`jobs`**, not RSS/Atom; RSS `<item>` count **0** is not an empty feed. |
+| `https://jobs.solana.com/jobs` | **200**; `__NEXT_DATA__.props.pageProps.network.id="858"`; `initialState.jobs.found` **20**, `total=416`; first `createdAt=1791465505` (2026-10-08 13:18:25 UTC). |
+| `https://jobs.solana.com/companies/alchemy-2/jobs/96323642-senior-software-engineer-developer-experience` | **200**, **1** `initialState.jobs.currentJob` with description and pay/date fields. |
+| `https://api.getro.com/v2/networks/858/jobs?page=1&per_page=20&include_descriptions=true` | **401**, no authorized item count; no key was available. |
+| `https://hackajob.com/robots.txt`; `https://web3vacancy.com/robots.txt`; `https://jobs.solana.com/robots.txt` | Each **200**; directives quoted below. Solana `/terms` returned **404**; the applicable Getro terms were found through a Job's application form. |
+
+## Hotfix Jobs
+
+**Access/account.** Official `GET https://rest.hotfix.jobs/v1/jobs` is public, without a token: `page` starts at 1, `limit` defaults to 20 and permits up to 100. Filters include `query`, `location`, `work_types`, company slugs, departments and teams. Read `GET /v1/jobs/{job_id}` for Markdown descriptions; list rows carry summaries instead. No RSS/Atom interface was established. These are Hotfix's own routes, distinct from its employer-key API/MCP. [Search contract](https://docs.hotfix.jobs/reference/search-jobs.md), [detail contract](https://docs.hotfix.jobs/reference/get-job.md), [authentication](https://docs.hotfix.jobs/authentication.md). Local successful counts are above; public search pages require no account according to [Terms, Hosted hiring](https://hotfix.jobs/terms).
+
+**Fields → Job.** Live list keys map `title` → title, `company_name` → company, `apply_url` → application link (retain `https://hotfix.jobs/jobs/{id}` in `extra`), detail `description` → raw description, `locations`/`countries` → location, `work_type` → remote/arrangement, `salary_min`/`salary_max`/`salary_currency` → pay bounds/currency, `posted_at` → posted date. Preserve UUID as `source_id`. No pay-period field appeared: Extraction must recover the period, remote geography and missing pay details from original prose; unknown stays blank. `summary` alone should not stand in for the full description. Evidence: key-only local JSON inspection of [list](https://rest.hotfix.jobs/v1/jobs?page=1&limit=10) and [detail](https://rest.hotfix.jobs/v1/jobs/1114253d-addf-4469-9b07-8673f65a8e8f). Treat Hotfix's own AI-derived fields as inferred: [AI-generated content terms](https://hotfix.jobs/terms).
+
+**Terms/limits.** Acceptable use says: “You may not scrape, crawl, or use automated tools to access the service beyond normal usage.” [Terms](https://hotfix.jobs/terms). Conversely, developer docs explicitly describe public API reads, server caching and company careers-page integrations. That establishes a supported company-page use case; permission for a cross-company joule importer remains **unverified**. Fair use is per address, with HTTP 429 and `Retry-After`; no numeric quota or mandatory attribution was found in those docs. Robots could not be read (429). Recommendation: clarify the importer use case before enabling; cache, bound pages and detail reads, and respect `Retry-After`. [Company-page API/fair use](https://docs.hotfix.jobs/company-page.md).
+
+**Overlap/volume/freshness.** This is a company-careers aggregator plus hosted employer Jobs, rather than evidence of republishing HN/WWR/RemoteOK/web3.career/Indeed. [Service description](https://hotfix.jobs/terms). Snapshot total **27,347**; the first ten API `posted_at` values ranged **2026-10-08 21:41:19–22:05:21 UTC**, about three hours before inspection. [Live API](https://rest.hotfix.jobs/v1/jobs?page=1&limit=10). Employer-role overlap with Indeed is plausible (inference), but no cross-Source matching sample was measured; a Duplicate percentage is **unknown**. Fresh API timestamps do not prove original employer publication dates.
+
+## hackajob / Archer
+
+**Access/account.** Public `https://hackajob.com/en-us/jobs?page=N` yields server-rendered HTML, twelve Job links/page in the two-page sample; linked detail pages supply JSON-LD `JobPosting` without login. Thus it **can supply public Jobs**; describing it as account-only or categorically “not a Source” would be wrong. Matching/application in the inspected detail requires creating a profile. No officially documented public API, JSON feed, RSS/Atom or third-party board platform was established. [Directory](https://hackajob.com/en-us/jobs), [public detail](https://hackajob.com/en-us/job/5d645aaf-74e0-11f1-a7b8-0a05e249917d-staff-product-designer-ai-builder), [candidate explanation](https://hackajob.com/en-us/talent/job-search-guide/what-is-hackajob).
+
+**Fields → Job.** Sample JSON-LD maps `title`, `hiringOrganization.name`, `url`, `description`, `datePosted` directly; `jobLocationType=TELECOMMUTE` and `applicantLocationRequirements` supply remote/geography. `identifier` supplies identity. This sample lacked `jobLocation` and `baseSalary`; other public pages display pay, so availability varies. Extraction would normalize displayed location/pay, geographical restrictions and missing fields from description; preserve the Source link as the application path. Evidence: JSON-LD key-only command inspection above and [sample detail](https://hackajob.com/en-us/job/5d645aaf-74e0-11f1-a7b8-0a05e249917d-staff-product-designer-ai-builder), [pay-bearing detail](https://hackajob.com/job/e6c855b9-3aec-11f1-a7b8-0a05e249917d-sales-manager-part-time).
+
+**Terms/limits.** Robots says `Allow: /` but `Disallow: /api/` and disallows application/login paths. [robots](https://hackajob.com/robots.txt). Candidate terms, Intellectual Property §11.3, say “you will not systematically copy Content” into a comprehensive collection/directory/database without express written permission; personal-use copying appears in the same clause but does not remove that specific restriction. [Candidate terms](https://hackajob.com/talent/terms-and-condition). No numeric quota or integration attribution requirement was established. Recommendation: **skip** automated ingestion unless permission explicitly covers joule's stored collection.
+
+**Overlap/volume/freshness.** Directory snapshot **11,444** roles is site-reported, not independently counted; two pages yielded **24** distinct Job URLs. The sampled July 1 `datePosted` demonstrates that public availability does not imply freshness within joule's 14-day first-Scan window. [Directory](https://hackajob.com/en-us/jobs), [detail](https://hackajob.com/en-us/job/5d645aaf-74e0-11f1-a7b8-0a05e249917d-staff-product-designer-ai-builder), [age setting](/Users/j/code/joule/docs/spec.md:53). Its terms describe employer-paid candidate matching, not import from joule's five existing boards; employer-role overlap with Indeed is an **unmeasured inference**, exact percentage unknown. [Service terms](https://hackajob.com/talent/terms-and-condition).
+
+## Web3Vacancy
+
+**Access/account.** Exact public feed `https://web3vacancy.com/feeds/jobs.xml` returned **91** Jobs without authentication. It is custom XML (`<jobs><job>…`), **not RSS/Atom**. No pagination/cursor or numeric retention guarantee was established; do not guess query parameters. The first-party site's JavaScript also references `/api/jobs`, `/api/vacancies`, `/api/scraped-jobs`; these are internal routes, not an established integration API, and robots disallows `/api/`. Public Job pages/feed do not need an account. [Feed](https://web3vacancy.com/feeds/jobs.xml), [site HTML/JavaScript](https://web3vacancy.com/), [robots](https://web3vacancy.com/robots.txt).
+
+**Fields → Job.** XML provides `id`/`referencenumber`, `title`/`name`, `company`, `url`/`link` (all **91** links on Web3Vacancy), `description`, `location`/`region`/`city`, `remote`, `jobtype`, `pubdate`/`date`, `updated`, optional `salary`/`salary_min`/`salary_max`/`salary_currency`. Map them directly to identity/title/company/Source link/raw description/location/remote/posted date/pay; retain `updated` and job type in `extra`. Extraction would recover pay period and remote geography, not infer pay from market estimates: the UI distinguishes estimated market ranges from stated salary. [XML](https://web3vacancy.com/feeds/jobs.xml), [UI and salary-estimate code](https://web3vacancy.com/).
+
+**Terms/limits.** Robots explicitly says `Allow: /feeds/jobs.xml` and `Disallow: /api/`. [robots](https://web3vacancy.com/robots.txt). The general Prohibited Conduct clause bans “Scraping, crawling, or automated data collection from the platform”. [Terms](https://web3vacancy.com/terms). No feed exception, numeric quota or attribution license was found. Recommendation: **skip pending explicit feed-use permission**; robots permission and a working URL do not resolve the terms conflict.
+
+**Overlap/volume/freshness.** The site's own JavaScript merges scraped employer-ATS Jobs with “Job Eco” data and paid vacancies; it expressly filters contacts pointing to `web3.career` and other aggregators. That establishes mixed aggregation and an upstream relationship, not a measured Duplicate rate. [First-party source code](https://web3vacancy.com/). Feed **91** versus homepage-rendered **87**, hero **500+**, footer **2,400+**: prefer measured feed count over inconsistent marketing counts. Feed first/last publication dates were **Oct 8 21:00:06 / Oct 6 12:50:06 UTC**; first `updated` was **Oct 9 01:00:06 UTC**. These are feed timestamps, not proven employer dates. [Feed](https://web3vacancy.com/feeds/jobs.xml), [homepage](https://web3vacancy.com/). Likely substantial web3.career employer-role overlap is an **inference**; HN/WWR/RemoteOK/Indeed overlap and all percentages remain unmeasured.
+
+## Solana Network Opportunities / Getro
+
+**Access/account.** Getro operates this board. [First-party policy](https://jobs.solana.com/cookie-policy). Public HTML/embedded JSON and one detail are account-free: **20** initial Jobs, **416** total, network **858**. [Jobs](https://jobs.solana.com/jobs). Official integration: `GET https://api.getro.com/v2/networks/858/jobs?include_descriptions=true&page=1&per_page=100`, `Authorization: Bearer API_KEY`; page numbers and `per_page≤100`. Keys come from the Getro Admin Portal, requiring authorized network access; no key here, probe **401**. No public RSS was established. [API documentation](https://developers.getro.com/), [key access guidance](https://help.getro.com/support/solutions/articles/65000190611).
+
+**Fields → Job.** Documented API: `title`, `company.name`, `url`, `description` (enable `include_descriptions`), `locations`, `work_mode`, `compensation_min/max/currency/period`, `created_at`; ID → `source_id`. Extraction fills missing pay/geographical restrictions. Month/day pay needs explicit conversion or unknown because joule supports hour/year/fixed. [API](https://developers.getro.com/), [Job pay model](/Users/j/code/joule/docs/spec.md:91). Embedded list lacks description; inspected detail has `description`, `postedAt`, compensation fields. Preserve source timestamps without asserting original employer publication. [Detail](https://jobs.solana.com/companies/alchemy-2/jobs/96323642-senior-software-engineer-developer-experience).
+
+**Terms/limits.** Applicable Getro terms §7.2.8 prohibit: ““Crawls,” “scrapes,” or “spiders” any page, data, or portion of or relating to the Services or Content”. Customer agreements prevail (§2); confirm API/reuse authorization, not HTML scraping. [Terms linked by Solana](https://www.getro.com/terms). API limit: **30 requests/minute**, complete network reads once per **6 hours**, no identical requests within that window. [API guidance](https://developers.getro.com/). Robots contains only `Sitemap: https://jobs.solana.com/sitemap.xml`; no attribution rule was established, while Getro §8 requires respecting content notices. [robots](https://jobs.solana.com/robots.txt), [Terms](https://www.getro.com/terms).
+
+**Overlap/volume/freshness.** In the **20** embedded Jobs, `source` was `career_page` for **17**, `admin_portal` for **3**: employer aggregation plus manual additions, no evidence of importing joule's five boards. Total **416**; newest sampled `createdAt` was **Oct 8 13:18 UTC**. [Embedded JSON](https://jobs.solana.com/jobs). Older public Jobs can remain reachable for six-plus months. [Example](https://jobs.solana.com/companies/cube-group-inc-2/jobs/35983291-sr-devops-engineer). Employer-role overlap with web3.career is plausible (**inference**); percentages unmeasured. Recommendation: **opt-in after an authorized network key and reuse agreement**, then verify the actual API response before mapping.
+
+## Proposed spec §6 rows (conditional; spec unchanged)
+
+| Source | Access | Search input | Notes |
+| --- | --- | --- | --- |
+| Hotfix (opt-in, off pending clarification) | public `/v1/jobs` + `/v1/jobs/{id}` JSON | bounded role/location queries, pages 1…N | Confirm cross-company importer permission; detail descriptions; 429 `Retry-After`; Extraction for missing pay period. |
+| hackajob (skip pending permission) | public paginated HTML + detail JSON-LD | none while disabled; if authorized, role/location pages | No read account needed; application profile needed; systematic database copying requires permission. |
+| Web3Vacancy (skip pending permission) | `/feeds/jobs.xml` custom XML | none while disabled; if authorized, whole feed | 91-Job snapshot; no verified pagination; automated collection prohibited; keep salary estimates separate. |
+| Solana (opt-in, off until authorized) | Getro `/v2/networks/858/jobs`, bearer key, descriptions on | network pages, `per_page≤100` | Authorized key/reuse needed; at most 30 requests/minute and one full read/6 hours; no HTML scraper. |
+
+Rows are recommendations from the cited interfaces/terms above. Before assigning a Duplicate percentage, compare contemporaneous normalized company + title + compatible location samples from each candidate against HN, WWR, RemoteOK, web3.career and Indeed; no such cross-Source dataset was available in this research. Use joule's existing [Duplicate rules](/Users/j/code/joule/docs/spec.md:131), preserve provenance, and surface failed/partial Scans instead of treating 401/429 as zero Jobs.
