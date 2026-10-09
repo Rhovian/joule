@@ -25,7 +25,7 @@ def test_search_fanout(monkeypatch):
         "search_term": "Role",
         "results_wanted": 17,
         "country_indeed": "USA",
-        "linkedin_fetch_description": True,
+        "fetch_description": True,
     }
     assert calls == [
         common | {"location": "Boise, US", "is_remote": False},
@@ -37,7 +37,7 @@ def test_row_mapping(monkeypatch):
     row = json.loads("""{
         "id": "1", "job_url": "https://example.com/job", "title": "Role",
         "company": "Example", "description": "Description", "location": "Boise, ID, US",
-        "city": "Boise", "state": "ID", "country": "US", "is_remote": true,
+        "is_remote": true,
         "min_amount": 30, "max_amount": 50, "currency": "USD", "interval": "yearly"
     }""") | {"date_posted": date(2026, 10, 8)}
     blank = {
@@ -51,7 +51,7 @@ def test_row_mapping(monkeypatch):
             pd.DataFrame(
                 [
                     row | {"title": "Later duplicate"},
-                    row | {"id": "2", "interval": "hourly", "location": None},
+                    row | {"id": "2", "interval": "hourly"},
                     row
                     | blank
                     | {"id": "3", "interval": "monthly", "date_posted": pd.NaT},
@@ -64,7 +64,7 @@ def test_row_mapping(monkeypatch):
     expected = json.loads("""{
         "source": "indeed", "source_id": "1", "link": "https://example.com/job",
         "title": "Role", "company": "Example", "description": "Description",
-        "location_raw": "Boise, ID, US", "city": "Boise", "country": "US", "remote": true,
+        "location_raw": "Boise, ID, US", "city": null, "country": null, "remote": true,
         "pay_min": 30, "pay_max": 50, "pay_currency": "USD", "pay_period": "year",
         "arrangement": null, "extra": {}
     }""") | {"posted_at": datetime(2026, 10, 8, tzinfo=UTC)}

@@ -9,9 +9,6 @@ from joule.sources import Candidate
 
 def _candidate(site: str, row: dict) -> Candidate:
     row = {key: None if pd.isna(value) else value for key, value in row.items()}
-    location = row.get("location") or ", ".join(
-        row[key] for key in ("city", "state", "country") if row.get(key)
-    )
     posted = row.get("date_posted")
     return Candidate(
         source=site,
@@ -20,9 +17,7 @@ def _candidate(site: str, row: dict) -> Candidate:
         title=row["title"],
         company=row.get("company"),
         description=row.get("description"),
-        location_raw=location or None,
-        city=row.get("city"),
-        country=row.get("country"),
+        location_raw=row.get("location"),
         remote=row.get("is_remote"),
         pay_min=row.get("min_amount"),
         pay_max=row.get("max_amount"),
@@ -49,7 +44,7 @@ async def search(site: str, preferences: Preferences, results: int) -> list[Cand
                 is_remote=remote,
                 results_wanted=results,
                 country_indeed="USA",
-                linkedin_fetch_description=True,
+                fetch_description=True,
             )
             for row in data.to_dict("records"):
                 if row["id"] not in candidates:

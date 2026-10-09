@@ -3,6 +3,7 @@ import json
 import logging
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from types import SimpleNamespace
 
 from fastapi import APIRouter, HTTPException, Request
@@ -18,6 +19,10 @@ logger = logging.getLogger(__name__)
 
 async def fetch_hotfix(ctx):
     return await hotfix.search(ctx.client, ctx.preferences.roles)
+
+
+async def fetch_jobspy(site, ctx):
+    return await jobspy.search(site, ctx.preferences, ctx.settings.results_per_search)
 
 
 async def enrich_hotfix(ctx, candidate):
@@ -41,24 +46,10 @@ ADAPTERS = {
     "upwork": (fetch_upwork, enrich_upwork),
     "weworkremotely": (lambda ctx: weworkremotely.search(ctx.client), None),
     "remoteok": (lambda ctx: remoteok.search(ctx.client), None),
-    "indeed": (
-        lambda ctx: jobspy.search(
-            "indeed", ctx.preferences, ctx.settings.results_per_search
-        ),
-        None,
-    ),
-    "linkedin": (
-        lambda ctx: jobspy.search(
-            "linkedin", ctx.preferences, ctx.settings.results_per_search
-        ),
-        None,
-    ),
-    "glassdoor": (
-        lambda ctx: jobspy.search(
-            "glassdoor", ctx.preferences, ctx.settings.results_per_search
-        ),
-        None,
-    ),
+    **{
+        site: (partial(fetch_jobspy, site), None)
+        for site in ("indeed", "linkedin", "glassdoor")
+    },
 }
 
 
