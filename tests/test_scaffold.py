@@ -13,8 +13,10 @@ from joule.db import connect, init_db
 def test_missing_settings_use_defaults(tmp_path):
     settings = load_settings(tmp_path)
     assert settings.sources == ["hn", "weworkremotely", "remoteok", "upwork", "hotfix"]
-    assert settings.models.scoring.model == "claude-haiku-4-5-20251001"
-    assert settings.models.drafts.model == "claude-sonnet-5-5"
+    assert settings.models.scoring.model == "gpt-6-luna"
+    assert settings.models.scoring.provider == "codex"
+    assert settings.models.drafts.model is None
+    assert settings.models.drafts.provider == "codex"
 
 
 def test_partial_settings_keep_nested_defaults_and_reread(tmp_path):
@@ -110,3 +112,12 @@ def test_host_validation_and_framing_headers(tmp_path):
             assert (
                 response.headers["Content-Security-Policy"] == "frame-ancestors 'none'"
             )
+
+
+def test_codex_model_override_is_optional(tmp_path):
+    (tmp_path / "settings.yaml").write_text(
+        "models:\n  scoring:\n    provider: codex\n  drafts:\n    provider: codex\n    model: chosen\n"
+    )
+    settings = load_settings(tmp_path)
+    assert settings.models.scoring.model is None
+    assert settings.models.drafts.model == "chosen"

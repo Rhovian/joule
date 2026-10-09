@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from fastapi import APIRouter, HTTPException, Request
 
-from joule import filters
+from joule import ai, filters, score
 from joule.config import StrictModel, load_preferences, load_settings
 from joule.db import connect
 from joule.sources import hotfix, remoteok, upwork, weworkremotely
@@ -51,6 +51,7 @@ class ScanInProgress(Exception):
 class Scanner:
     def __init__(self, data_dir, client, auth):
         self.client, self.auth = client, auth
+        self.data_dir = data_dir
         self.path = data_dir / "joule.db"
         self.busy = False
         self.task = None
@@ -65,7 +66,7 @@ class Scanner:
                 (json.dumps(sources), trigger, datetime.now(UTC).isoformat()),
             ).lastrowid
         ctx = SimpleNamespace(
-            client=self.client, auth=self.auth, preferences=preferences
+            client=self.client, auth=self.auth, preferences=preferences, inserted=[]
         )
         self.task = asyncio.create_task(self._run(scan_id, sources, settings, ctx))
         self.busy = True
@@ -78,7 +79,7 @@ class Scanner:
                 db.create_function("tidy", 1, filters.tidy)
                 for source in sources:
                     counts = progress[source] = dict.fromkeys(
-                        ("new", "duplicate", "filtered"), 0
+                        ("new", "duplicate", "filtered", "scored"), 0
                     )
                     counts["errors"] = []
                     try:
@@ -92,6 +93,23 @@ class Scanner:
                             "UPDATE scans SET per_source=? WHERE id=?",
                             (json.dumps(progress), scan_id),
                         )
+                stamp = score.fingerprint(self.data_dir, settings)
+                jobs = sorted(ctx.inserted, key=lambda j: j[2] or "", reverse=True)
+                jobs = [j for j in jobs if j[1] != "upwork" or settings.upwork.scoring]
+                limit = asyncio.Semaphore(3)
+
+                async def grade(job):
+                    id, source, _ = job
+                    async with limit:
+                        try:
+                            await score.score_job(
+                                db, id, settings, self.data_dir, stamp
+                            )
+                            progress[source]["scored"] += 1
+                        except ai.AIError as error:
+                            progress[source]["errors"].append(f"Score {id}: {error}")
+
+                await asyncio.gather(*map(grade, jobs[: settings.max_scored_per_scan]))
                 status = "done"
         except asyncio.CancelledError:
             status = "interrupted"
@@ -136,11 +154,11 @@ class Scanner:
                             "Enrichment failed for %s", candidate.source_id
                         )
                         counts["errors"].append(f"{type(error).__name__}: {error}")
-            self._insert(db, candidate, ctx.preferences, counts)
+            self._insert(db, candidate, ctx.preferences, counts, ctx.inserted)
 
         await asyncio.gather(*map(add, new))
 
-    def _insert(self, db, candidate, preferences, counts):
+    def _insert(self, db, candidate, preferences, counts, ids):
         primary = None
         if candidate.source != "upwork" and candidate.company:
             names = tuple(map(filters.tidy, (candidate.company, candidate.title)))
@@ -161,12 +179,14 @@ class Scanner:
         columns = ", ".join(values)
         placeholders = ", ".join("?" for _ in values)
         with db:
-            inserted = db.execute(
+            cursor = db.execute(
                 f"INSERT OR IGNORE INTO jobs ({columns}) VALUES ({placeholders})",
                 tuple(values.values()),
-            ).rowcount
-        if inserted:
+            )
+        if cursor.rowcount:
             counts["duplicate" if primary else "filtered" if reason else "new"] += 1
+            if not primary and not reason:
+                ids.append((cursor.lastrowid, candidate.source, values["posted_at"]))
 
 
 class ScanRequest(StrictModel):
