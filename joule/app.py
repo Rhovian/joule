@@ -26,6 +26,12 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         directory.mkdir(parents=True, exist_ok=True)
         (directory / "drafts").mkdir(exist_ok=True)
         (directory / "profile" / "samples").mkdir(parents=True, exist_ok=True)
+        example = Path(__file__).parent / "preferences.example.yaml"
+        with (
+            suppress(FileExistsError),
+            (directory / "profile" / "preferences.yaml").open("x") as file,
+        ):
+            file.write(example.read_text())
         init_db(directory / "joule.db")
         async with httpx.AsyncClient(
             timeout=30, headers={"User-Agent": "joule/0.1"}

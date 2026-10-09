@@ -9,9 +9,7 @@ Skills under `.claude/skills/` are vendored from [mattpocock/skills](https://git
 ## Run
 
 ```sh
-mkdir -p ~/.joule/profile
-$EDITOR ~/.joule/profile/preferences.yaml   # at least `roles: [...]`; see docs/spec.md §4
 docker compose up -d --build
 ```
 
-Open http://localhost:8000. Data lives in `~/.joule` (override with `JOULE_DATA_DIR`); secrets go in `~/.joule/.env`. The port is bound to `127.0.0.1` only; on a server, expose it with Tailscale Serve and set `UPWORK_REDIRECT_URI` to the tailnet URL, whose host is then also allowed. On Linux, set `JOULE_UID`/`JOULE_GID` if your user isn't 1000.
+Open http://localhost:8000. Data lives in `~/.joule` (override with `JOULE_DATA_DIR`); first start writes a boilerplate `profile/preferences.yaml` to edit (spec §4), and secrets go in `~/.joule/.env`. The port is bound to `127.0.0.1` only; on a server, expose it with Tailscale Serve and set `UPWORK_REDIRECT_URI` to the tailnet URL, whose host is then also allowed.

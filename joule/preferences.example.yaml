@@ -1,0 +1,23 @@
+# Boilerplate written on first start. Edit freely; it is re-read on every Scan.
+roles: [Software Engineer]
+seniority: senior
+work_types: [full-time, contract, freelance]
+pay:
+  salary_floor: null
+  currency: USD
+  hourly_floor: null
+  fixed_floor: null
+locations:
+  remote: { ok: true, countries: [], timezones: [] }
+  cities: []
+  aliases: {}
+deal_breakers:
+  keywords: []
+  companies: []
+  industries: []
+upwork_client:
+  min_spend: null
+  min_hire_rate: null
+  payment_verified: false
+scoring_notes: null
+work_history_path: null
