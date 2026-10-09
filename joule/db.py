@@ -67,9 +67,13 @@ def connect(path: Path) -> sqlite3.Connection:
 
 
 def init_db(path: Path) -> None:
+    new = not path.exists()
+    if new:
+        path.parent.mkdir(parents=True, exist_ok=True)
     with closing(connect(path)) as connection:
-        connection.execute("PRAGMA journal_mode=WAL")
-        connection.executescript(SCHEMA)
+        if new:
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.executescript(SCHEMA)
         with connection:
             connection.execute(
                 "UPDATE scans SET status='interrupted', finished_at=? "
