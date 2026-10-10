@@ -102,7 +102,7 @@ Blank means unknown. A blank never fails a filter.
 `id`, `job_id`, `kind` (tailored_cv / cover_letter / proposal), `text`, `pdf_path`, `note` (the regenerate note), `model`, `created_at`. Regenerating inserts a new row; the newest is shown.
 
 ### `scans`
-`id`, `sources`, `trigger` (manual / scheduled), `started_at`, `finished_at`, `status` (running / done / interrupted / failed), `per_source` JSON: counts of new, Duplicate, Filtered, scored and skipped, errors, and alert-send failures.
+`id`, `sources`, `trigger` (manual / scheduled), `started_at`, `finished_at`, `status` (running / done / interrupted / failed), `per_source` JSON: counts of new, Duplicate, Filtered, scored and skipped, errors.
 
 ## 6. Sources ([#3](https://github.com/Rhovian/joule/issues/3), [#14](https://github.com/Rhovian/joule/issues/14), [#2](https://github.com/Rhovian/joule/issues/2))
 
@@ -135,7 +135,7 @@ A Scan starts when the owner clicks Scan in the dashboard (any Source) or on the
 3. **Link Duplicates:** match on tidied company + title (lowercase, punctuation stripped, Inc./Ltd dropped) **and** a compatible location (both remote, or the same city) against existing Primaries. Upwork Jobs are never matched. A match sets `primary_id`; the Duplicate takes the Primary's state and score.
 4. **Cheap filters**, in order: deal-breakers (companies and industries by tidied name; keywords as whole words, case-insensitive, in title + description, no regex) → work type → pay floor (only when pay is given) → location rules → Upwork client floors. A failure sets `filtered_reason`. Matching is city + country plus aliases, no geocoding; a missing or unclear location sets `location_unclear` and passes.
 5. **Score** surviving Primaries, newest first, up to `max_scored_per_scan` (Upwork only when `upwork.scoring` is on).
-6. After all Sources: **one Telegram message** listing new Jobs that scored ≥ `alert_threshold`, or that are unscored Upwork Jobs that passed the filters. A send failure is recorded on the Scan and never fails it.
+6. After all Sources, when Telegram is configured: write Cover Letters (board Jobs) or Proposals (Upwork) for newly inserted eligible Primaries, three at a time. Draft failures are recorded in the Source errors. If any Drafts succeed, send **one Telegram message**: "N new Jobs queued (M in queue)" with a Start button. A send failure is logged and never fails the Scan.
 
 **One Scan at a time** — check-then-act on "is a Scan running?" and on Duplicate linking (read existing Jobs, then write). **Guarantee:** a single process with one worker owns all Scans, and an in-process lock is held for the whole Scan. A manual request during a Scan gets "Scan in progress"; a scheduled tick during a Scan is skipped; nothing is queued. On startup, any `running` Scan becomes `interrupted`. Running more than one server worker breaks this and is unsupported.
 
@@ -160,7 +160,7 @@ The same timer loop runs the **Upwork purge**: content (description, pay, client
 
 ## 9. Drafts ([#12](https://github.com/Rhovian/joule/issues/12))
 
-Written only on request, per Job, from the drawer.
+Written per Job on request from the drawer, or up front for the Telegram review queue during a Scan.
 
 - **Tailored CV:**
   - The AI returns the IDs of the Master CV entries to include and their order, plus rewritten headline, summary and text for the bullet points it selected.
@@ -171,6 +171,14 @@ Written only on request, per Job, from the drawer.
   - Text only, with a copy button.
   - Context: the Job, Master CV, all work-history notes, `samples/`, and the Fit Score reason.
 - **Regenerate** with an optional note, which creates a new version. No in-app editor.
+
+### Telegram manual review
+
+Set both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in the data dir `.env`, then restart. Missing or empty either disables polling, automatic Drafts and alerts. The bot uses HTTPS long polling, not a webhook, drops pending updates at startup, and obeys only updates from the configured chat id.
+
+The queue contains Primaries with no Filtered reason, state `new`, no purged content, and at least one Draft of the matching kind (`proposal` for Upwork, otherwise `cover_letter`). Their Fit Score must meet `alert_threshold`, or they must be unscored Upwork Jobs. Order: Fit Score descending (unscored last), then posted date descending. Existing Jobs without Drafts stay out.
+
+Start shows the queue head: title, company, Source, Fit Score and reason, link, and latest Draft (including screening answers). Apply marks the Job `applied`, replies "Marked applied — submit here: <link>", and shows the next card; the owner submits it manually. Skip marks it `seen` and shows the next card. Rework asks for direction, uses the owner's next text as a regenerate note, and resends that Job's card. An empty queue says "Queue empty". State changes are Primary-only and last-write-wins with dashboard edits; repeated Apply/Skip is idempotent. Rework direction is held in memory until the next text or action, and lost on restart.
 
 ## 10. Upwork ([#2](https://github.com/Rhovian/joule/issues/2), [#16](https://github.com/Rhovian/joule/issues/16), [#9](https://github.com/Rhovian/joule/issues/9))
 

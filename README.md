@@ -18,7 +18,9 @@ Working now:
 
 - **Scheduled Upwork Scans** every `schedule.upwork_minutes`, off until switched on in the Scan sidebar; Upwork content is purged after `upwork.retention_hours`.
 
-Not built yet: Telegram alerts, web3.career.
+- **Telegram** manual review queue with automatic Drafts, Start, Apply, Rework and Skip; Apply marks state and provides the submission link.
+
+Not built yet: web3.career.
 
 ## Run
 

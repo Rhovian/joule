@@ -15,6 +15,7 @@ from joule.db import init_db
 from joule.jobs import router as jobs_router
 from joule.scan import Scanner
 from joule.scan import router as scan_router
+from joule.telegram import Telegram
 from joule.upwork_auth import UpworkAuth, UpworkNotConnected, router
 
 
@@ -28,11 +29,23 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             timeout=30, headers={"User-Agent": "joule/0.1"}
         ) as client:
             app.state.upwork_auth = UpworkAuth(directory, client)
-            app.state.scanner = Scanner(directory, client, app.state.upwork_auth)
+            env = load_env(directory)
+            token, chat_id = env.get("TELEGRAM_BOT_TOKEN"), env.get("TELEGRAM_CHAT_ID")
+            telegram = None
+            if token and chat_id:
+                telegram = Telegram(directory, client, token, chat_id)
+            app.state.scanner = Scanner(
+                directory, client, app.state.upwork_auth, telegram
+            )
+            telegram_task = asyncio.create_task(telegram.run()) if telegram else None
             schedule_task = asyncio.create_task(app.state.scanner.run_schedule())
             try:
                 yield
             finally:
+                if telegram_task:
+                    telegram_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await telegram_task
                 schedule_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await schedule_task
