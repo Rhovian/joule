@@ -1,8 +1,8 @@
 import json
 from contextlib import closing
-from typing import Literal
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import Field
 
 from joule import ai, cv, drafts, score
@@ -30,7 +30,7 @@ async def list_jobs(
     filtered: bool = False,
     dismissed: bool = False,
     applied: bool = False,
-    source: str | None = None,
+    source: Annotated[list[str] | None, Query()] = None,
 ):
     directory = request.app.state.data_dir
     stamp = score.fingerprint(directory, load_settings(directory))
@@ -40,10 +40,19 @@ async def list_jobs(
             "AND (? OR score IS NOT NULL) AND (? OR filtered_reason IS NULL) "
             "AND (? OR state != 'dismissed') "
             "AND (? OR state != 'applied') "
-            "AND (? IS NULL OR source = ? OR EXISTS "
-            "(SELECT 1 FROM jobs d WHERE d.primary_id = jobs.id AND d.source = ?)) "
+            "AND (? OR source IN (SELECT value FROM json_each(?)) OR EXISTS "
+            "(SELECT 1 FROM jobs d WHERE d.primary_id = jobs.id "
+            "AND d.source IN (SELECT value FROM json_each(?)))) "
             "ORDER BY rank DESC NULLS LAST, posted_at DESC LIMIT 500",
-            (unscored, filtered, dismissed, applied, source, source, source),
+            (
+                unscored,
+                filtered,
+                dismissed,
+                applied,
+                not source,
+                json.dumps(source or []),
+                json.dumps(source or []),
+            ),
         ).fetchall()
         return [
             {

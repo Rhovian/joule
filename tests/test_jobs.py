@@ -43,6 +43,7 @@ def client(tmp_path):
                     ),
                 )
             db.execute("UPDATE jobs SET source='hn' WHERE id=6")
+            db.execute("UPDATE jobs SET source='remoteok' WHERE id=2")
         yield client
 
 
@@ -56,7 +57,8 @@ def client(tmp_path):
         ("?applied=true", [7, 2, 1, 3]),
         ("?filtered=true&dismissed=true", [5, 4, 2, 1, 3]),
         ("?source=hn", [1]),
-        ("?source=hotfix", [2, 1, 3]),
+        ("?source=hotfix", [1, 3]),
+        ("?source=hn&source=remoteok", [2, 1]),
     ],
 )
 def test_list(client, query, ids):
