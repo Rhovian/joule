@@ -10,7 +10,7 @@ type Job = {
   score_stale?: boolean; score_points?: { stance: string; text: string }[]; score: number | null; rank?: number | null; score_reason: string | null; filtered_reason: string | null;
   location_raw: string | null; location_unclear: number | null; pay_min: number | null;
   pay_max: number | null; pay_currency: string | null; pay_period: string | null;
-  duplicates: { id: number; source: string; link: string }[]; description?: string | null;
+  queued: number; duplicates: { id: number; source: string; link: string }[]; description?: string | null;
   extra?: { client?: Record<string, unknown>; screening_questions?: string[]; apply_url?: string } | null;
 };
 const root = document.querySelector<HTMLElement>('#dashboard')!;
@@ -94,7 +94,7 @@ function counts(c?: Counts | null) {
   return c ? `<p class="scan-counts">${escape(c.new)} new · ${escape(c.duplicate)} Duplicate · ${escape(c.filtered)} Filtered · ${escape(c.scored ?? 0)} scored</p>${(c.errors ?? []).map(e => `<p class="scan-error">${escape(e)}</p>`).join('')}` : '';
 }
 function renderSources() {
-  replace('a-scans', `<section class="scan-panel"><div class="section-heading"><h2>Scans</h2><button data-action="scan" ${runningId || starting ? 'disabled' : ''}>Scan all</button></div><p class="muted">Discover Jobs from each Source.</p>${runningId ? `<div class="scan-progress" role="status"><strong>Scan in progress</strong>${scan ? scan.sources.map(name => `<div>${escape(name)}${counts(scan?.per_source[name])}</div>`).join('') : '<span>Waiting for Source counts…</span>'}</div>` : '<p class="scan-idle">Ready for a new Scan</p>'}<div class="scan-sources">${sources.map(s => `<article class="scan-source"><div><strong>${escape(s.name)}</strong><button data-action="scan" data-source="${escape(s.name)}" ${runningId || starting ? 'disabled' : ''}>Scan</button></div>${s.last ? `<small>Last Scan · ${escape(s.last.finished_at ?? s.last.started_at)} · ${escape(s.last.status)}</small>${counts(s.last.counts)}` : '<small>No Scan yet</small>'}${s.name === 'upwork' ? `<p class="connect">${connected ? '<span class="connected">● Upwork connected</span>' : '<button data-action="connect">Connect Upwork</button>'}</p><button data-action="schedule" aria-pressed="${scheduled}">Scheduled Scans: ${scheduled ? 'On' : 'Off'}</button>` : ''}</article>`).join('')}</div></section>`);
+  replace('a-scans', `<section class="scan-panel"><div class="section-heading"><h2>Scans</h2><button data-action="scan" ${runningId || starting ? 'disabled' : ''}>Scan all</button></div><p class="muted">Discover Jobs from each Source.</p>${runningId ? `<div class="scan-progress" role="status"><strong>Scan in progress</strong>${scan ? scan.sources.map(name => `<div>${escape(name)}${counts(scan?.per_source[name])}</div>`).join('') : '<span>Waiting for Source counts…</span>'}</div>` : '<p class="scan-idle">Ready for a new Scan</p>'}<div class="scan-sources">${sources.map(s => `<article class="scan-source"><div><strong>${escape(s.name)}</strong><button data-action="scan" data-source="${escape(s.name)}" ${runningId || starting ? 'disabled' : ''}>Scan</button></div>${s.last ? `<small>Last Scan · ${escape(s.last.finished_at ?? s.last.started_at)} · ${escape(s.last.status)}</small>${counts(s.last.counts)}` : '<small>No Scan yet</small>'}${s.name === 'upwork' ? `<p class="connect">${connected ? '<span class="connected">● Upwork connected</span>' : '<button data-action="connect">Connect Upwork</button>'}</p><button data-action="schedule" aria-pressed="${scheduled}">Scheduled Scans: ${scheduled ? 'On' : 'Off'}</button><button data-action="telegram">Start Telegram queue</button>` : ''}</article>`).join('')}</div></section>`);
 }
 async function toggleSchedule() {
   scheduled = (await api<{ upwork: boolean }>('schedule', 'PUT', { upwork: !scheduled })).upwork;
@@ -135,10 +135,24 @@ async function startScan(source?: string) {
   catch (error) { notice(error); await loadSources(); }
   finally { starting = false; renderSources(); }
 }
-const pendingDrafts = new Set<string>();
+const pendingDrafts = new Set<string>(), pendingQueue = new Set<number>();
+function queueButton(j: Job) {
+  if (j.source !== 'upwork' || j.content_purged_at) return '';
+  const inQueue = j.queued && j.state === 'new', pending = pendingQueue.has(j.id);
+  return `<button data-action="queue" data-id="${escape(j.id)}" ${inQueue || pending ? 'disabled' : ''}>${pending ? 'Adding…' : inQueue ? 'In queue' : 'Add to queue'}</button>`;
+}
+async function queueJob(id: number) {
+  if (pendingQueue.has(id)) return;
+  pendingQueue.add(id); renderDetail();
+  try {
+    const next = await api<Job>(`jobs/${id}/queue`, 'POST', {});
+    if (detailId === id) detail = next;
+    await loadJobs();
+  } finally { pendingQueue.delete(id); renderDetail(); }
+}
 const draftKind = (j: Job): DraftKind => j.source === 'upwork' ? 'proposal' : 'cover_letter';
 function renderDraft(j: Job) {
-  return `<section class="job-content draft"><h3>Draft</h3>${[draftKind(j), 'tailored_cv' as DraftKind].map(kind => {
+  return `<section class="job-content draft"><h3>Draft</h3>${queueButton(j)}${[draftKind(j), 'tailored_cv' as DraftKind].map(kind => {
   const draft = j.drafts?.[kind], pending = pendingDrafts.has(`${j.id}:${kind}`);
   const button = `<button data-action="draft" data-kind="${escape(kind)}" data-id="${escape(j.id)}" ${pending ? 'disabled' : ''}>${pending ? 'Writing…' : draft ? 'Regenerate' : kind === 'tailored_cv' ? 'Write Tailored CV' : kind === 'proposal' ? 'Write Proposal' : 'Write Cover Letter'}</button>`;
   const text = (value: string | undefined, index: number) => `<div class="draft-text">${escape(value)}</div><button data-action="copy-draft" data-index="${escape(index)}">Copy</button>`;
@@ -187,7 +201,7 @@ async function openJob(id: number) {
   const j = await api<Job>(`jobs/${id}`);
   if (detailId !== id) return;
   detail = j; renderDetail();
-  if (j.state === 'new') {
+  if (j.state === 'new' && !j.queued) {
     await api(`jobs/${id}`, 'PATCH', { state: 'seen' });
     j.state = 'seen'; const row = jobs.find(job => job.id === id); if (row) row.state = 'seen';
     renderJobs(); if (detailId === id) renderDetail();
@@ -224,6 +238,8 @@ root.addEventListener('click', event => {
   if (!target || target instanceof HTMLInputElement) return;
   const id = Number(target.dataset.id);
   if (target.dataset.action === 'sort') { byScore = !byScore; void loadJobs().catch(notice); }
+  if (target.dataset.action === 'queue') void queueJob(id).catch(notice);
+  if (target.dataset.action === 'telegram') void api('telegram/start', 'POST', {}).then(() => notice('Sent the queue head to Telegram')).catch(notice);
   if (target.dataset.action === 'open') void openJob(id).catch(notice);
   if (target.dataset.action === 'draft') void writeDraft(id, target.dataset.kind as DraftKind).catch(notice);
   if (target.dataset.action === 'schedule') void toggleSchedule().catch(notice);

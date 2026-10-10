@@ -18,7 +18,7 @@ Working now:
 
 - **Scheduled Upwork Scans** every `schedule.upwork_minutes`, off until switched on in the Scan sidebar; Upwork content is purged after `upwork.retention_hours`.
 
-- **Telegram** Upwork-only manual review queue with automatic Drafts, Start, Apply, Rework and Skip; Apply asks for bid and boost Connects, then submits an Upwork Proposal only after Send confirmation.
+- **Telegram** Upwork-only manual review queue with automatic Drafts, Start, Apply, Rework and Skip; Apply asks for bid and boost Connects, then submits an Upwork Proposal only after Send confirmation. Add to queue in the Job drawer queues any Upwork Job; Start Telegram queue in the Scan sidebar begins review.
 
 Not built yet: web3.career.
 
