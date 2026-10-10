@@ -21,7 +21,7 @@ One run that fetches new Jobs from one or more Sources, started by hand or on a 
 _Avoid_: Search, crawl, sync
 
 **Fit Score**:
-A 0–100 judgement of how well a Job suits the owner, with a short reason, made by the AI from the Profile. A Job without one is unscored, never zero.
+A 0–100 judgement of how well the Master CV and work history match a Job's skills, experience and seniority, with a short reason, made by the AI. Pay and location do not count. A Job without one is unscored, never zero.
 _Avoid_: Match score, rating, rank
 
 **Filtered**:

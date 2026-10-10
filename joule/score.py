@@ -12,13 +12,10 @@ from joule.config import StrictModel, load_preferences
 from joule.filters import plain_text
 from joule.sources import Candidate
 
-RUBRIC = """| Part | Points |
-| --- | --- |
-| Experience relevance (Master CV + work history) | 40 |
-| Role and seniority | 25 |
-| Pay vs floor | 15 |
-| Location and arrangement | 10 |
-| `scoring_notes` | 10 |"""
+RUBRIC = (
+    "how well the Master CV and work history match the skills, experience "
+    "and seniority the Job needs. Ignore pay, location, arrangement and work type."
+)
 
 
 # Ranking: Fit Score minus 0.5 points per hour since posting.
@@ -38,8 +35,9 @@ class Score(StrictModel):
 
 def profile_files(data_dir):
     profile = data_dir / "profile"
-    files = [profile / "preferences.yaml", profile / "cv.yaml"]
-    preferences = load_preferences(data_dir) if files[0].exists() else None
+    files = [profile / "cv.yaml"]
+    has_preferences = (profile / "preferences.yaml").exists()
+    preferences = load_preferences(data_dir) if has_preferences else None
     if preferences and preferences.work_history_path:
         history = (profile / preferences.work_history_path.expanduser()).resolve()
         files += [history] if history.is_file() else sorted(history.rglob("*"))
@@ -76,9 +74,8 @@ def prompt(job, data_dir):
         f"## {name}\n{contents.decode()}" for name, contents in profile_files(data_dir)
     )
     return (
-        f"Give this Job a Fit Score using this rubric:\n{RUBRIC}\n"
-        "Return a one-line reason and up to three for/against points. "
-        "Missing pay scores neutral and the reason says pay not stated.\n"
+        f"Give this Job a Fit Score from 0 to 100: {RUBRIC}\n"
+        "Return a one-line reason and up to three for/against points.\n"
         f"Profile:\n{profile}\n"
         f"{job_block(job)}"
     )

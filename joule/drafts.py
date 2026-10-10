@@ -62,7 +62,7 @@ def context(job, data_dir):
         for p in sorted(samples.rglob("*"))
         if p.is_file() and p.suffix in {".md", ".txt", ".yaml"}
     ]
-    for name in ("portfolio.yaml", "answers.yaml"):
+    for name in ("preferences.yaml", "portfolio.yaml", "answers.yaml"):
         if (data_dir / "profile" / name).is_file():
             files.append((name, (data_dir / "profile" / name).read_bytes()))
     profile = "\n".join(f"## {name}\n{contents.decode()}" for name, contents in files)
