@@ -13,8 +13,42 @@ KINDS = {
 }
 
 
+RULES = (
+    "Use samples as style examples only. Never state pay floors or preferences. "
+    "Never invent experience. "
+)
+
+
 class CoverLetter(StrictModel):
     text: str
+
+
+class Answer(StrictModel):
+    answer: str = Field(max_length=5000)
+
+
+def context(job, data_dir):
+    samples = data_dir / "profile" / "samples"
+    files = score.profile_files(data_dir) + [
+        (f"samples/{p.relative_to(samples).as_posix()}", p.read_bytes())
+        for p in sorted(samples.rglob("*"))
+        if p.is_file() and p.suffix in {".md", ".txt", ".yaml"}
+    ]
+    profile = "\n".join(f"## {name}\n{contents.decode()}" for name, contents in files)
+    return (
+        f"Profile:\n{profile}\nFit Score reason: {job['score_reason'] or ''}\n"
+        f"{score.job_block(job)}"
+    )
+
+
+async def answer(job, question, settings, data_dir):
+    prompt = (
+        "Answer the owner's application question about this Job in the owner's "
+        f"voice from the Profile. {RULES}\nQuestion: {question}\n"
+        f"{context(job, data_dir)}"
+    )
+    result = await ai.retry_structured(settings.models.drafts, prompt, Answer)
+    return result.answer
 
 
 async def write(db, job, kind, note, settings, data_dir):
@@ -31,23 +65,14 @@ async def write(db, job, kind, note, settings, data_dir):
     )
     if kind == "tailored_cv":
         master, schema = cv.prepare(data_dir)
-    samples = data_dir / "profile" / "samples"
-    files = score.profile_files(data_dir) + [
-        (f"samples/{p.relative_to(samples).as_posix()}", p.read_bytes())
-        for p in sorted(samples.rglob("*"))
-        if p.is_file() and p.suffix in {".md", ".txt", ".yaml"}
-    ]
-    profile = "\n".join(f"## {name}\n{contents.decode()}" for name, contents in files)
     prompt = (
-        f"Write a {KINDS[kind]} in the owner's voice from the Profile. "
-        "Use samples as style examples only. Never state pay floors or preferences. "
-        "Never invent experience. For a Proposal, give one answer per screening "
+        f"Write a {KINDS[kind]} in the owner's voice from the Profile. {RULES}"
+        "For a Proposal, give one answer per screening "
         "question, in order. For a Tailored CV, select only work and projects that fit "
         "this Job, ordered as they should appear. Rewrite selected source bullets and "
         "descriptions; never invent facts, numbers, employers, titles or dates. "
         "Keep it to about two pages.\n"
-        f"Profile:\n{profile}\nFit Score reason: {job['score_reason'] or ''}\n"
-        f"Owner's note: {note or ''}\n{score.job_block(job)}"
+        f"Owner's note: {note or ''}\n{context(job, data_dir)}"
     )
     result = await ai.retry_structured(settings.models.drafts, prompt, schema)
     document = (

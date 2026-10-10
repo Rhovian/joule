@@ -107,15 +107,20 @@ class DraftRequest(StrictModel):
     note: str | None = Field(None, max_length=2000)
 
 
+def primary(db, job_id):
+    job = db.execute(
+        "SELECT * FROM jobs WHERE id=? AND primary_id IS NULL", (job_id,)
+    ).fetchone()
+    if job is None:
+        raise HTTPException(404, "Job not found")
+    return job
+
+
 @router.post("/jobs/{job_id}/drafts")
 async def write_draft(request: Request, job_id: int, body: DraftRequest):
     directory = request.app.state.data_dir
     with closing(connect(directory / "joule.db")) as db:
-        job = db.execute(
-            "SELECT * FROM jobs WHERE id=? AND primary_id IS NULL", (job_id,)
-        ).fetchone()
-        if job is None:
-            raise HTTPException(404, "Job not found")
+        job = primary(db, job_id)
         if body.kind != "tailored_cv" and (body.kind == "proposal") != (
             job["source"] == "upwork"
         ):
@@ -129,18 +134,49 @@ async def write_draft(request: Request, job_id: int, body: DraftRequest):
     return await get_job(request, job_id)
 
 
+class AskRequest(StrictModel):
+    question: str = Field(min_length=1, max_length=2000)
+
+
+@router.post("/jobs/{job_id}/ask")
+async def ask(request: Request, job_id: int, body: AskRequest):
+    directory = request.app.state.data_dir
+    with closing(connect(directory / "joule.db")) as db:
+        job = primary(db, job_id)
+    try:
+        text = await drafts.answer(
+            job, body.question, load_settings(directory), directory
+        )
+    except ai.AIError as error:
+        raise HTTPException(502, str(error)) from error
+    return {"answer": text}
+
+
 @router.get("/drafts/{draft_id}/pdf")
 def draft_pdf(request: Request, draft_id: int):
-    with closing(connect(request.app.state.data_dir / "joule.db")) as db:
+    directory = request.app.state.data_dir
+    with closing(connect(directory / "joule.db")) as db:
         row = db.execute(
-            "SELECT text FROM drafts WHERE id=? AND kind='tailored_cv'", (draft_id,)
+            "SELECT drafts.kind, drafts.text, jobs.company FROM drafts "
+            "JOIN jobs ON jobs.id=drafts.job_id "
+            "WHERE drafts.id=?",
+            (draft_id,),
         ).fetchone()
     if row is None:
         raise HTTPException(404, "Draft not found")
+    content, files = json.loads(row["text"]), load_settings(directory).files
+    if row["kind"] == "tailored_cv":
+        pdf, prefix = cv.render(content), files.cv_prefix
+    else:
+        pdf, prefix = (
+            cv.render_letter(content.get("text") or content["cover"], directory),
+            files.cover_letter_prefix,
+        )
+    name = cv.filename(prefix, row["company"] or "Job")
     return Response(
-        cv.render(json.loads(row["text"])),
+        pdf,
         media_type="application/pdf",
-        headers={"Content-Disposition": 'inline; filename="CV.pdf"'},
+        headers={"Content-Disposition": f'inline; filename="{name}"'},
     )
 
 

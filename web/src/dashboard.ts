@@ -52,8 +52,11 @@ function replace(id: string, html: string) {
   const container = element(id), active = document.activeElement as HTMLElement;
   const items = Array.from(container.querySelectorAll<HTMLElement>('button, a'));
   const index = items.indexOf(active), top = container.scrollTop;
+  const drawerTop = container.querySelector('.drawer')?.scrollTop ?? 0;
   container.innerHTML = html;
   container.scrollTop = top;
+  const drawer = container.querySelector('.drawer');
+  if (drawer) drawer.scrollTop = drawerTop;
   if (index >= 0) container.querySelectorAll<HTMLElement>('button, a')[index]?.focus({ preventScroll: true });
 }
 const pendingScores = new Set<number>();
@@ -126,7 +129,7 @@ function renderDraft(j: Job) {
   const draft = j.drafts?.[kind], pending = pendingDrafts.has(`${j.id}:${kind}`);
   const button = `<button data-action="draft" data-kind="${escape(kind)}" data-id="${escape(j.id)}" ${pending ? 'disabled' : ''}>${pending ? 'Writing…' : draft ? 'Regenerate' : kind === 'tailored_cv' ? 'Write Tailored CV' : kind === 'proposal' ? 'Write Proposal' : 'Write Cover Letter'}</button>`;
   const text = (value: string | undefined, index: number) => `<div class="draft-text">${escape(value)}</div><button data-action="copy-draft" data-index="${escape(index)}">Copy</button>`;
-  return `<div><h4>${kind === 'tailored_cv' ? 'Tailored CV' : kind === 'proposal' ? 'Proposal' : 'Cover Letter'}</h4>${draft ? `${kind === 'tailored_cv' ? `<a href="/api/drafts/${escape(draft.id)}/pdf" target="_blank" rel="noopener noreferrer">Open PDF ↗</a>` : text(draft.content.text ?? draft.content.cover, -1)}${(draft.content.answers ?? []).map((answer, i) => `<h4>${escape(j.extra?.screening_questions?.[i])}</h4>${text(answer, i)}`).join('')}<label>Note for regeneration<input id="draft-note-${escape(kind)}" maxlength="2000" value="${escape(draft.note)}" ${pending ? 'disabled' : ''}></label>` : ''}${button}</div>`;
+  return `<div><h4>${kind === 'tailored_cv' ? 'Tailored CV' : kind === 'proposal' ? 'Proposal' : 'Cover Letter'}</h4>${draft ? `${kind === 'tailored_cv' ? '' : text(draft.content.text ?? draft.content.cover, -1)}<a href="/api/drafts/${escape(draft.id)}/pdf" target="_blank" rel="noopener noreferrer">Open PDF ↗</a> <a href="/api/drafts/${escape(draft.id)}/pdf" download>Download PDF</a>${(draft.content.answers ?? []).map((answer, i) => `<h4>${escape(j.extra?.screening_questions?.[i])}</h4>${text(answer, i)}`).join('')}<label>Note for regeneration<input id="draft-note-${escape(kind)}" maxlength="2000" value="${escape(draft.note)}" ${pending ? 'disabled' : ''}></label>` : ''}${button}</div>`;
   }).join('')}</section>`;
 }
 async function writeDraft(id: number, kind: DraftKind) {
@@ -139,6 +142,21 @@ async function writeDraft(id: number, kind: DraftKind) {
     if (detailId === id) detail = next;
   } finally { pendingDrafts.delete(key); renderDetail(); }
 }
+type Asked = { question: string; answer?: string };
+const asks = new Map<number, Asked[]>();
+let askText = '';
+function renderAsk(j: Job) {
+  return `<section class="job-content draft"><h3>Ask</h3>${(asks.get(j.id) ?? []).map((a, i) => `<h4>${escape(a.question)}</h4>${a.answer === undefined ? '<p class="muted">Answering…</p>' : `<div class="draft-text">${escape(a.answer)}</div><button data-action="copy-answer" data-index="${escape(i)}">Copy</button>`}`).join('')}<label>Question<textarea id="ask-question" rows="3" maxlength="2000">${escape(askText)}</textarea></label><button data-action="ask" data-id="${escape(j.id)}">Ask</button></section>`;
+}
+async function ask(id: number) {
+  const question = document.querySelector<HTMLTextAreaElement>('#ask-question')?.value.trim() ?? '';
+  if (!question) return;
+  const item: Asked = { question };
+  asks.set(id, [...(asks.get(id) ?? []), item]); askText = ''; renderDetail();
+  try { item.answer = (await api<{ answer: string }>(`jobs/${id}/ask`, 'POST', { question })).answer; }
+  catch (error) { asks.set(id, (asks.get(id) ?? []).filter(a => a !== item)); askText = question; throw error; }
+  finally { renderDetail(); }
+}
 async function copyDraft(index: number) {
   if (!detail) return;
   const content = detail.drafts?.[draftKind(detail)]?.content;
@@ -148,7 +166,7 @@ function renderDetail() {
   if (!detailId) { element('detail').innerHTML = ''; return; }
   const j = detail;
   const client = j?.extra?.client;
-  replace('detail', `<div class="drawer-backdrop" data-action="close"></div><aside class="job-detail drawer" role="dialog" aria-modal="false" aria-label="Job detail" tabindex="-1"><div class="detail-top"><span class="eyebrow">PRIMARY JOB · ${escape(detailId)}</span><button data-action="close" aria-label="Close Job detail">Close ×</button></div>${j ? `<div class="detail-heading">${score(j)}<div><h2>${escape(j.title)}</h2><p>${escape(j.company)}</p></div></div><div class="flags">${flags(j)}</div><p class="job-meta">${escape(j.location_raw)} · ${escape(pay(j))}</p>${links(j)}${reason(j)}<ul class="score-points">${(j.score_points ?? []).map(p => `<li>${escape(p.stance)} · ${escape(p.text)}</li>`).join('')}</ul>${renderDraft(j)}${client ? `<div class="client-stats">Client · ${Object.entries(client).map(([key, value]) => `${escape(key.replaceAll('_', ' '))}: ${escape(typeof value === 'object' && value !== null ? JSON.stringify(value) : value)}`).join(' · ')}</div>` : ''}<div class="detail-actions">${dismiss(j)}${scoreAgain(j)}${external(j.link, 'Open Primary Job')}${j.extra?.apply_url ? external(j.extra.apply_url, 'Apply') : ''}</div><section class="job-content"><h3>Job detail</h3><p class="description">${escape(descriptionText(j.description ?? ''))}</p>${j.extra?.screening_questions?.length ? `<h4>Screening questions</h4><ol>${j.extra.screening_questions.map(q => `<li>${escape(q)}</li>`).join('')}</ol>` : ''}</section>` : '<p class="muted">Loading Job…</p>'}</aside>`);
+  replace('detail', `<div class="drawer-backdrop" data-action="close"></div><aside class="job-detail drawer" role="dialog" aria-modal="false" aria-label="Job detail" tabindex="-1"><div class="detail-top"><span class="eyebrow">PRIMARY JOB · ${escape(detailId)}</span><button data-action="close" aria-label="Close Job detail">Close ×</button></div>${j ? `<div class="detail-heading">${score(j)}<div><h2>${escape(j.title)}</h2><p>${escape(j.company)}</p></div></div><div class="flags">${flags(j)}</div><p class="job-meta">${escape(j.location_raw)} · ${escape(pay(j))}</p>${links(j)}${reason(j)}<ul class="score-points">${(j.score_points ?? []).map(p => `<li>${escape(p.stance)} · ${escape(p.text)}</li>`).join('')}</ul>${renderDraft(j)}${renderAsk(j)}${client ? `<div class="client-stats">Client · ${Object.entries(client).map(([key, value]) => `${escape(key.replaceAll('_', ' '))}: ${escape(typeof value === 'object' && value !== null ? JSON.stringify(value) : value)}`).join(' · ')}</div>` : ''}<div class="detail-actions">${dismiss(j)}${scoreAgain(j)}${external(j.link, 'Open Primary Job')}${j.extra?.apply_url ? external(j.extra.apply_url, 'Apply') : ''}</div><section class="job-content"><h3>Job detail</h3><p class="description">${escape(descriptionText(j.description ?? ''))}</p>${j.extra?.screening_questions?.length ? `<h4>Screening questions</h4><ol>${j.extra.screening_questions.map(q => `<li>${escape(q)}</li>`).join('')}</ol>` : ''}</section>` : '<p class="muted">Loading Job…</p>'}</aside>`);
 }
 async function openJob(id: number) {
   selected = id; detailId = id; detail = null; renderJobs(); renderDetail();
@@ -195,6 +213,8 @@ root.addEventListener('click', event => {
   const id = Number(target.dataset.id);
   if (target.dataset.action === 'open') void openJob(id).catch(notice);
   if (target.dataset.action === 'draft') void writeDraft(id, target.dataset.kind as DraftKind).catch(notice);
+  if (target.dataset.action === 'ask') void ask(id).catch(notice);
+  if (target.dataset.action === 'copy-answer') void navigator.clipboard.writeText(asks.get(detailId)?.[Number(target.dataset.index)]?.answer ?? '').catch(notice);
   if (target.dataset.action === 'copy-draft') void copyDraft(Number(target.dataset.index)).catch(notice);
   if (target.dataset.action === 'score') void scoreJob(id).catch(notice);
   if (target.dataset.action === 'state') void changeState(id).catch(notice);
