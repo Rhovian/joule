@@ -15,7 +15,8 @@ KINDS = {
 
 RULES = (
     "Use samples as style examples only. Never state pay floors or preferences. "
-    "Never invent experience. Cite links from portfolio.yaml only where they fit the "
+    "Never invent experience. Lead with the experience most relevant to this Job, "
+    "not the most recent, and don't default to the same project in every draft. Cite links from portfolio.yaml only where they fit the "
     "Job. When the Job asks for a video such as a Loom, give the best-fitting video "
     "link from portfolio.yaml; if none fits, write [LOOM LINK]. Never invent a URL. "
     "In a Proposal, never include email, phone, LinkedIn or other contact details; "

@@ -26,14 +26,18 @@ assert schema['additionalProperties'] is False
 assert set(schema['required']) == set(schema['properties'])
 mode = os.environ['FAKE_MODE']
 if mode == 'exit': sys.exit(7)
-if mode == 'timeout': time.sleep(10)
+if mode == 'timeout':
+    import subprocess
+    Path(os.environ['CHILD_PID']).write_text(str(subprocess.Popen(['sleep', '10']).pid))
+    time.sleep(10)
 if mode != 'missing':
     Path(args[args.index('-o')+1]).write_text('bad' if mode == 'bad' else '{"score":70,"reason":"pay not stated","points":[]}')
 """)
     executable.chmod(0o755)
     monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
     monkeypatch.setenv("FAKE_MODE", mode)
-    monkeypatch.setattr(ai, "TIMEOUT", 0.1 if mode == "timeout" else 5)
+    monkeypatch.setenv("CHILD_PID", str(tmp_path / "child.pid"))
+    monkeypatch.setattr(ai, "TIMEOUT", 1 if mode == "timeout" else 5)
     call = ai.structured(
         Model(provider="codex", model="chosen"), "private prompt", score.Score
     )
@@ -43,6 +47,10 @@ if mode != 'missing':
         with pytest.raises(ai.AIError) as error:
             asyncio.run(call)
         assert "private prompt" not in str(error.value)
+    if mode == "timeout":
+        child = int((tmp_path / "child.pid").read_text())
+        with pytest.raises(ProcessLookupError):
+            os.kill(child, 0)
 
 
 def test_profile_prompt_and_fingerprint(tmp_path):
