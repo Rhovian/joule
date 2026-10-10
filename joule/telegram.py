@@ -27,7 +27,7 @@ def queue(db, threshold):
         f"SELECT * FROM jobs WHERE {ELIGIBLE} AND EXISTS "
         "(SELECT 1 FROM drafts WHERE job_id=jobs.id AND kind=CASE "
         "WHEN jobs.source='upwork' THEN 'proposal' ELSE 'cover_letter' END) "
-        "ORDER BY score DESC NULLS LAST, posted_at DESC",
+        "ORDER BY posted_at DESC NULLS LAST, score DESC",
         (threshold,),
     ).fetchall()
 

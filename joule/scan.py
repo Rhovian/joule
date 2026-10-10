@@ -61,7 +61,7 @@ async def enrich_hotfix(ctx, candidate):
 async def fetch_upwork(ctx):
     p = ctx.preferences
     floors = (p.pay.hourly_floor, p.pay.fixed_floor, p.upwork_client.payment_verified)
-    return await upwork.search(ctx.auth, p.roles, *floors)
+    return await upwork.search(ctx.auth, p.upwork_searches or p.roles, *floors)
 
 
 async def enrich_upwork(ctx, candidate):

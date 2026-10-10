@@ -147,6 +147,7 @@ class Preferences(StrictModel):
     locations: Locations = Field(default_factory=Locations)
     deal_breakers: DealBreakers = Field(default_factory=DealBreakers)
     upwork_client: UpworkClient = Field(default_factory=UpworkClient)
+    upwork_searches: list[str] = []
     scoring_notes: str | None = None
     work_history_path: Path | None = None
 

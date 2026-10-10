@@ -71,6 +71,7 @@ One Profile, no personas.
       aliases: { NYC: New York }
     ```
   - `deal_breakers`: keywords, companies, industries
+  - `upwork_searches`: Upwork-only search terms; empty uses `roles`
   - `upwork_client`: minimum spend, minimum hire rate, payment verified (default on), at least one hire for clients outside the US (default on)
   - `scoring_notes`: free text for the scorer
   - `work_history_path`: e.g. `../work-history-notes`, read in place, never copied
@@ -117,7 +118,7 @@ Each Source is an adapter that returns candidate Jobs in the common fields plus 
 | RemoteOK | `/api` JSON | whole feed | Skip the first (metadata) entry; attribution link required; salary 0 = unknown; USD, period yearly only when ≥10000, else unknown |
 | web3.career (opt-in) | token API, `limit=100`, descriptions on | whole feed, no tag | Attribution required; verify field names against a live response |
 | Indeed, LinkedIn, Glassdoor (opt-in) | JobSpy, pinned version, `country_indeed=USA` | each Preferences role × (each city + remote) | `results_per_search` cap; a failed search fails the Source |
-| Upwork | GraphQL `marketplaceJobPostingsSearch` + detail query | each Preferences role, plus the API-side filters it supports (hourly floor, fixed-budget floor, payment verified) | No scraping, no RSS |
+| Upwork | GraphQL `marketplaceJobPostingsSearch` + detail query | each `upwork_searches` term (else each Preferences role), plus the API-side filters it supports (hourly floor, fixed-budget floor, payment verified) | No scraping, no RSS |
 | Hotfix | public `/v1/jobs` JSON API | each Preferences role, newest 100 | Detail call for full description on new Jobs; no pay period: amounts kept, period set to yearly only when ≥10000, else unknown |
 | Working Nomads | public `jobsapi/_search` JSON POST | each Preferences role, first 100 | USA / North America / Anywhere; HTML descriptions; no pagination |
 | FreeHire | public `/api/v1/agent/jobs/search` JSON API | each Preferences role, newest 100 | US country filter; Markdown descriptions; no pagination |
@@ -179,7 +180,7 @@ Written per Job on request from the drawer, or up front for the Telegram review 
 
 Set both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in the data dir `.env`, then restart. Missing or empty either disables polling, automatic Drafts and alerts. The bot uses HTTPS long polling, not a webhook, drops pending updates at startup, and obeys only updates from the configured chat id.
 
-The queue contains Primaries with no Filtered reason, state `new`, no purged content, and at least one Draft of the matching kind (`proposal` for Upwork, otherwise `cover_letter`). Their Fit Score must meet `alert_threshold`, or they must be unscored Upwork Jobs. Order: Fit Score descending (unscored last), then posted date descending. Existing Jobs without Drafts stay out.
+The queue contains Primaries with no Filtered reason, state `new`, no purged content, and at least one Draft of the matching kind (`proposal` for Upwork, otherwise `cover_letter`). Their Fit Score must meet `alert_threshold`, or they must be unscored Upwork Jobs. Order: newest posted first (Upwork rewards early proposals), then Fit Score. Existing Jobs without Drafts stay out.
 
 Start shows the queue head: title, company, Source, Fit Score and reason, link, and latest Draft (including screening answers). For board Jobs, Apply marks the Job `applied`, replies "Marked applied — submit here: <link>", and shows the next card; the owner submits it manually. For Upwork Jobs, Apply asks for the bid amount and optional boost Connects, showing pay and the Connects balance when available. Invalid replies get "Reply like: 95 or 95 10" and keep waiting. A valid reply shows the amount, hourly/fixed contract type and boost with Send and Cancel buttons. Send carries the Job ID, amount and boost in its callback, so confirmation needs no server state. Send claims the Job as `applied` only if its state still matches the state read and it is not already applied; a double Send submits once. It submits the latest Proposal cover and screening answers with that bid and boost. Success replies "Submitted — proposal <newProposalId> (<status>)" and shows the next card. Failure restores the prior state and replies "Upwork rejected: <message>"; a disconnected account gets "Upwork not connected — reconnect in the dashboard". Cancel resends that Job’s card. Skip marks it `seen` and shows the next card. Rework asks for direction, uses the owner's next text as a regenerate note, and resends that Job's card. An empty queue says "Queue empty". State changes are Primary-only; board Apply/Skip remains idempotent. One pending Rework direction or bid is held in memory until the next text or action, and lost on restart.
 

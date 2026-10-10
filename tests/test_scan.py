@@ -2,7 +2,8 @@ import asyncio
 import json
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
-from unittest.mock import Mock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
@@ -416,3 +417,14 @@ def test_scoring_duplicates_and_concurrency(setup, monkeypatch):
     assert maximum == 3
     assert len([r for r in rows() if r["score"] is not None]) == 4
     assert rows()[-1]["primary_id"] is not None and rows()[-1]["score"] is None
+
+
+@pytest.mark.parametrize(
+    "searches, used", [([], ["Role"]), (["Rust", "Go"], ["Rust", "Go"])]
+)
+def test_upwork_searches_fall_back_to_roles(monkeypatch, searches, used):
+    search = AsyncMock(return_value=[])
+    monkeypatch.setattr(scan.upwork, "search", search)
+    preferences = Preferences(roles=["Role"], upwork_searches=searches)
+    asyncio.run(scan.fetch_upwork(SimpleNamespace(auth=None, preferences=preferences)))
+    assert search.call_args.args[1] == used
