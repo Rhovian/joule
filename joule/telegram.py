@@ -1,11 +1,14 @@
 import asyncio
 import json
 import logging
-from contextlib import closing
+import re
+from contextlib import closing, suppress
 
 from joule import drafts
 from joule.config import load_settings
 from joule.db import connect
+from joule.sources import upwork
+from joule.upwork_auth import UpworkNotConnected
 
 logger = logging.getLogger(__name__)
 ELIGIBLE = (
@@ -29,9 +32,20 @@ def queue(db, threshold):
     ).fetchall()
 
 
+def proposal(db, job):
+    draft = db.execute(
+        "SELECT text FROM drafts WHERE job_id=? AND kind=? ORDER BY id DESC LIMIT 1",
+        (job["id"], kind(job)),
+    ).fetchone()
+    content = json.loads(draft["text"])
+    questions = json.loads(job["extra"] or "{}").get("screening_questions", [])
+    answers = zip(questions, content.get("answers", []))
+    return content, [{"question": q, "answer": a} for q, a in answers]
+
+
 class Telegram:
-    def __init__(self, data_dir, client, token, chat_id):
-        self.data_dir, self.client = data_dir, client
+    def __init__(self, data_dir, client, token, chat_id, upwork_auth=None):
+        self.data_dir, self.client, self.auth = data_dir, client, upwork_auth
         self.url = f"https://api.telegram.org/bot{token}/"
         self.chat_id, self.awaiting = str(chat_id), None
 
@@ -68,14 +82,9 @@ class Telegram:
             if not jobs:
                 return await self.send("Queue empty")
             job = jobs[0]
-        draft = db.execute(
-            "SELECT text FROM drafts WHERE job_id=? AND kind=? ORDER BY id DESC LIMIT 1",
-            (job["id"], kind(job)),
-        ).fetchone()
-        content = json.loads(draft["text"])
+        content, answers = proposal(db, job)
         text = content.get("text", content.get("cover", ""))
-        questions = json.loads(job["extra"] or "{}").get("screening_questions", [])
-        for question, answer in zip(questions, content.get("answers", [])):
+        for question, answer in (a.values() for a in answers):
             text += f"\n\nQ: {question}\nA: {answer}"
         flag = "⚠ needs Loom video\n" if "[LOOM LINK]" in text else ""
         await self.send(
@@ -93,6 +102,8 @@ class Telegram:
         message = (callback or update).get("message", {})
         if str(message.get("chat", {}).get("id")) != self.chat_id:
             return
+        if str((callback or message).get("from", {}).get("id")) != self.chat_id:
+            return
         if callback:
             await self.api("answerCallbackQuery", callback_query_id=callback["id"])
             data = callback.get("data", "")
@@ -101,11 +112,11 @@ class Telegram:
                 with closing(connect(self.data_dir / "joule.db")) as db:
                     return await self.card(db)
             action, _, value = data.partition(":")
-            if action not in ("apply", "skip", "rework"):
+            if action not in ("apply", "skip", "rework", "send", "cancel"):
                 return
-            job_id = int(value)
+            job_id = int(value.split(":")[0])
         elif self.awaiting is not None and isinstance(message.get("text"), str):
-            action, job_id = "note", self.awaiting
+            action, job_id = self.awaiting
         else:
             return
         with closing(connect(self.data_dir / "joule.db")) as db:
@@ -115,10 +126,40 @@ class Telegram:
             if job is None:
                 self.awaiting = None
                 return await self.send("Job not found")
+            title = job["title"]
+            period = "hourly" if job["pay_period"] == "hour" else "fixed"
             if action == "rework":
-                self.awaiting = job_id
+                self.awaiting = ("note", job_id)
                 return await self.send(f"Send direction for {job['title']}")
+            if action == "apply" and job["source"] == "upwork":
+                self.awaiting = ("bid", job_id)
+                values = (job["pay_min"], job["pay_max"])
+                amounts = "–".join(f"{v:g}" for v in values if v is not None)
+                pay = f"{period} ${amounts}" if amounts else "pay not stated"
+                text = f"Bid for {title} ({pay}). Reply: <amount> [boost Connects]."
+                with suppress(Exception):
+                    text += f" Connects available: {await upwork.connects_balance(self.auth)}"
+                return await self.send(text)
+            if action == "bid":
+                text = message["text"].strip()
+                m = re.fullmatch(r"(\d+(?:\.\d+)?)(?:\s+(\d+))?", text)
+                if not m or float(m[1]) <= 0:
+                    return await self.send("Reply like: 95 or 95 10")
+                amount, boost = m[1], int(m[2] or 0)
+                send_data = f"send:{job_id}:{amount}:{boost}"
+                self.awaiting = None
+                return await self.send(
+                    f"Send proposal for {title}: ${amount} ({period}), boost {boost} Connects?",
+                    [
+                        {"text": "Send", "callback_data": send_data},
+                        {"text": "Cancel", "callback_data": f"cancel:{job_id}"},
+                    ],
+                )
             self.awaiting = None
+            if action == "cancel":
+                return await self.card(db, job)
+            if action == "send" and job["source"] == "upwork":
+                return await self.submit(db, job, value)
             if action == "note":
                 settings = load_settings(self.data_dir)
                 await drafts.write(
@@ -134,6 +175,34 @@ class Telegram:
             if action == "apply":
                 await self.send(f"Marked applied — submit here: {job['link']}")
             await self.card(db)
+
+    async def submit(self, db, job, value):
+        job_id, state = job["id"], job["state"]
+        _, amount, boost = value.split(":")
+        amount, boost = float(amount), int(boost)
+        claim = "UPDATE jobs SET state='applied' WHERE id=? AND primary_id IS NULL AND state=? AND state!='applied'"
+        with db:
+            claimed = db.execute(claim, (job_id, state)).rowcount
+        if not claimed:
+            return await self.send("Already applied")
+        try:
+            content, answers = proposal(db, job)
+            result = await upwork.submit_proposal(
+                self.auth, job["source_id"], amount, content["cover"], answers, boost
+            )
+        except Exception as error:
+            logger.exception("Upwork submission failed")
+            restore = "UPDATE jobs SET state=? WHERE id=? AND state='applied'"
+            with db:
+                db.execute(restore, (state, job_id))
+            return await self.send(
+                "Upwork not connected — reconnect in the dashboard"
+                if isinstance(error, UpworkNotConnected)
+                else f"Upwork rejected: {error}"
+            )
+        text = f"Submitted — proposal {result['newProposalId']} ({result['status']})"
+        await self.send(text)
+        await self.card(db)
 
     async def run(self):
         offset = -1

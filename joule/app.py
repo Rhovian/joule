@@ -33,7 +33,8 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             token, chat_id = env.get("TELEGRAM_BOT_TOKEN"), env.get("TELEGRAM_CHAT_ID")
             telegram = None
             if token and chat_id:
-                telegram = Telegram(directory, client, token, chat_id)
+                auth = app.state.upwork_auth
+                telegram = Telegram(directory, client, token, chat_id, auth)
             app.state.scanner = Scanner(
                 directory, client, app.state.upwork_auth, telegram
             )

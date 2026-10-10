@@ -10,6 +10,7 @@ from joule import drafts
 from joule.config import Settings
 from joule.db import connect, init_db
 from joule.telegram import Telegram, queue
+from joule.upwork_auth import UpworkAuth, UpworkNotConnected
 from tests.test_scan import setup  # noqa: F401 — registers the shared pytest fixture
 
 
@@ -25,7 +26,11 @@ def bot(tmp_path):
     client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
     with closing(connect(tmp_path / "joule.db")) as db:
         db.isolation_level = None
-        yield Telegram(tmp_path, client, "token", "42"), db, sent
+        yield (
+            Telegram(tmp_path, client, "token", "42", UpworkAuth(tmp_path, client)),
+            db,
+            sent,
+        )
     asyncio.run(client.aclose())
 
 
@@ -42,7 +47,12 @@ def seed(db, id=1, source="hn", **fields):
 
 def callback(data, chat=42):
     return {
-        "callback_query": {"id": "cb", "data": data, "message": {"chat": {"id": chat}}}
+        "callback_query": {
+            "id": "cb",
+            "data": data,
+            "from": {"id": 42},
+            "message": {"chat": {"id": chat}},
+        }
     }
 
 
@@ -93,7 +103,11 @@ def test_start_rework_chat_and_split(bot, monkeypatch):
     assert "Q: Why?\nA: [LOOM LINK]" in parts[-1]["text"]
     asyncio.run(telegram.handle(callback("rework:1")))
     assert sent[-1]["text"] == "Send direction for Engineer"
-    asyncio.run(telegram.handle({"message": {"chat": {"id": 42}, "text": "shorter"}}))
+    asyncio.run(
+        telegram.handle(
+            {"message": {"chat": {"id": 42}, "from": {"id": 42}, "text": "shorter"}}
+        )
+    )
     assert drafts.write.call_args.args[2:4] == ("proposal", "shorter")
 
 
@@ -164,3 +178,117 @@ def test_send_error_does_not_expose_token(tmp_path, body):
             assert error.value.__context__ is None
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "mode", ["send", "boost", "reject", "disconnected", "cancel", "balance"]
+)
+def test_upwork_apply(bot, mode):
+    telegram, db, sent = bot
+    boost = 10 if mode == "boost" else 0
+    period = "fixed" if boost else "hour"
+    seed(db, source="upwork", pay_period=period, pay_min=50)
+    questions = ["Why?", "More?"] if boost else []
+    db.execute(
+        "UPDATE jobs SET extra=?", (json.dumps({"screening_questions": questions}),)
+    )
+    seed_draft(db, 1, "proposal")
+    content = json.dumps({"cover": "Latest", "answers": ["Because"]})
+    db.execute("UPDATE drafts SET text=? WHERE id=2", (content,))
+    calls = []
+
+    async def respond(request):
+        body = json.loads(request.content)
+        query = body["query"]
+        if "connectsSummary" in query:
+            data = {"connectsSummary": {"connectsBalance": 123}}
+            return httpx.Response(
+                400 if mode == "balance" else 200, json={"data": data}
+            )
+        if "createJobProposal" not in query:
+            data = {"user": {"id": "u", "nid": "n"}, "organization": {"id": "o"}}
+            return httpx.Response(200, json={"data": data})
+        calls.append(body["variables"]["input"])
+        await asyncio.sleep(0)  # Keep the first submit in flight for the second Send.
+        result = {
+            "newProposalId": "p",
+            "status": "OK",
+            "error": "Nope" if mode == "reject" else None,
+        }
+        return httpx.Response(200, json={"data": {"createJobProposal": result}})
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            telegram.auth = UpworkAuth(telegram.data_dir, client)
+            telegram.auth.access_token = AsyncMock(return_value="token")
+            await telegram.handle(callback("apply:1"))
+            prompt = f"Bid for Engineer ({'fixed' if boost else 'hourly'} $50). Reply: <amount> [boost Connects]."
+            assert sent[-1]["text"] == prompt + (
+                "" if mode == "balance" else " Connects available: 123"
+            )
+            for text in ("no", "0", "-1", "95 -1", "95 1.5", "95 10 extra", "nan"):
+                message = {"chat": {"id": 42}, "from": {"id": 42}, "text": text}
+                await telegram.handle({"message": message})
+                assert sent[-1]["text"] == "Reply like: 95 or 95 10"
+                assert telegram.awaiting == ("bid", 1)
+            message["text"] = "95 10" if boost else "95"
+            await telegram.handle({"message": message})
+            buttons = sent[-1]["reply_markup"]["inline_keyboard"][0]
+            assert [b["text"] for b in buttons] == ["Send", "Cancel"]
+            assert [b["callback_data"] for b in buttons] == [
+                f"send:1:95:{boost}",
+                "cancel:1",
+            ]
+            assert len(buttons[0]["callback_data"].encode()) <= 64
+            confirm = f"Send proposal for Engineer: $95 ({'fixed' if boost else 'hourly'}), boost {boost} Connects?"
+            assert sent[-1]["text"] == confirm and telegram.awaiting is None
+            if mode == "disconnected":
+                telegram.auth.access_token.side_effect = UpworkNotConnected
+            if mode == "cancel":
+                await telegram.handle(callback("cancel:1"))
+                assert "Latest" in sent[-1]["text"]
+            else:
+                update = callback(f"send:1:95:{boost}")
+                await asyncio.gather(telegram.handle(update), telegram.handle(update))
+
+    asyncio.run(run())
+    failed = mode in ("reject", "disconnected")
+    state = "new" if failed or mode == "cancel" else "applied"
+    assert db.execute("SELECT state FROM jobs").fetchone()[0] == state
+    assert len(calls) == (0 if mode in ("cancel", "disconnected") else 1)
+    if calls:
+        expected = {"jobReference": "1", "chargedAmount": 95.0, "coverLetter": "Latest"}
+        expected.update(
+            teamOrgId="o", selectedContractor={"id": "u", "oDeskUserID": "n"}
+        )
+        if boost:
+            expected["boostBidAmount"] = 10
+            expected["questions"] = [{"question": "Why?", "answer": "Because"}]
+        assert calls[0] == expected
+    texts = [p["text"] for p in sent if "text" in p]
+    if failed:
+        error = (
+            "Upwork not connected — reconnect in the dashboard"
+            if mode == "disconnected"
+            else "Upwork rejected: Nope"
+        )
+        assert error in texts
+    elif mode != "cancel":
+        assert "Submitted — proposal p (OK)" in texts
+        assert "Already applied" in texts and "Queue empty" in texts
+
+
+@pytest.mark.parametrize("is_callback", [True, False])
+def test_matching_chat_other_sender_ignored(bot, is_callback):
+    telegram, db, sent = bot
+    seed(db)
+    telegram.awaiting = ("note", 1)
+    update = (
+        callback("apply:1")
+        if is_callback
+        else {"message": {"chat": {"id": 42}, "text": "shorter"}}
+    )
+    update["callback_query" if is_callback else "message"]["from"] = {"id": 99}
+    asyncio.run(telegram.handle(update))
+    assert not sent and telegram.awaiting == ("note", 1)
+    assert db.execute("SELECT state FROM jobs").fetchone()[0] == "new"

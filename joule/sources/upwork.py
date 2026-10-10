@@ -125,3 +125,30 @@ async def screening_questions(auth: UpworkAuth, job_id: str) -> list[str]:
     requirement = selection.get("proposalRequirement") or {}
     questions = requirement.get("screeningQuestions") or []
     return [q["question"] for q in sorted(questions, key=lambda q: q["sequenceNumber"])]
+
+
+async def submit_proposal(auth, job_reference, amount, cover, answers, boost):
+    identity = await _query(auth, "{ user { id nid } organization { id } }", {})
+    user = identity["user"]
+    payload = {
+        "jobReference": job_reference,
+        "chargedAmount": amount,
+        "coverLetter": cover,
+        "teamOrgId": identity["organization"]["id"],
+        "selectedContractor": {"id": user["id"], "oDeskUserID": user["nid"]},
+    }
+    if answers:
+        payload["questions"] = answers
+    if boost > 0:
+        payload["boostBidAmount"] = boost
+    mutation = "mutation Submit($input: CreateJobProposalInput!) { createJobProposal(input: $input) { newProposalId status error } }"
+    data = await _query(auth, mutation, {"input": payload})
+    result = data["createJobProposal"]
+    if result.get("error"):
+        raise UpworkError(result["error"])
+    return result
+
+
+async def connects_balance(auth):
+    data = await _query(auth, "{ connectsSummary { connectsBalance } }", {})
+    return data["connectsSummary"]["connectsBalance"]

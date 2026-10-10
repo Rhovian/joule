@@ -1,6 +1,6 @@
 # joule
 
-A personal tool that finds Jobs across Sources and drafts application material for the ones worth pursuing. It never submits anything.
+A personal tool that finds Jobs across Sources and drafts application material for the ones worth pursuing. It submits only an Upwork Proposal the owner confirms in Telegram; auto-submitting is out of scope.
 
 ## Language
 
@@ -41,7 +41,7 @@ The owner's rules inside the Profile for which Jobs are acceptable: roles, work 
 _Avoid_: Settings, filters, criteria
 
 **Draft**:
-Application material written for one Job on request: a Tailored CV, a Cover Letter or a Proposal. The owner submits it.
+Application material written for one Job on request: a Tailored CV, a Cover Letter or a Proposal. The owner submits it, or confirms an Upwork Proposal submission in Telegram.
 _Avoid_: Application, submission
 
 **Proposal**:
