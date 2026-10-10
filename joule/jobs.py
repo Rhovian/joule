@@ -30,6 +30,7 @@ async def list_jobs(
     filtered: bool = False,
     dismissed: bool = False,
     applied: bool = False,
+    source: str | None = None,
 ):
     directory = request.app.state.data_dir
     stamp = score.fingerprint(directory, load_settings(directory))
@@ -39,8 +40,10 @@ async def list_jobs(
             "AND (? OR score IS NOT NULL) AND (? OR filtered_reason IS NULL) "
             "AND (? OR state != 'dismissed') "
             "AND (? OR state != 'applied') "
+            "AND (? IS NULL OR source = ? OR EXISTS "
+            "(SELECT 1 FROM jobs d WHERE d.primary_id = jobs.id AND d.source = ?)) "
             "ORDER BY score DESC NULLS LAST, posted_at DESC LIMIT 500",
-            (unscored, filtered, dismissed, applied),
+            (unscored, filtered, dismissed, applied, source, source, source),
         ).fetchall()
         return [
             {

@@ -12,7 +12,7 @@ Working now:
 
 - **Scans** from the dashboard, per Source or all at once: HN Who's Hiring, We Work Remotely, RemoteOK, Hotfix, Upwork, Working Nomads, FreeHire, Golang Jobs, getarustjob, plus opt-in Indeed, LinkedIn, Glassdoor and Adzuna US. New Jobs are deduplicated across Sources (Duplicates link to their Primary) and run through the cheap filters (deal-breakers, work type, pay floor, location, Upwork client floors).
 - **Fit Score** from Codex, with a reason and for/against points; new surviving Primaries score during Scans, with manual retry and stale-score flags.
-- **Dashboard** at `/`: triage table with unscored / Filtered / dismissed / applied toggles, Job drawer, Scan sidebar with live progress and last-Scan counts per Source, Connect Upwork in a popup. Keys: `j`/`k` move, `o` open, `d` dismiss/restore, `a` applied/unmark, `s` Scans, `Esc` close.
+- **Dashboard** at `/`: triage table with unscored / Filtered / dismissed / applied toggles and a Source picker, Job drawer, Scan sidebar with live progress and last-Scan counts per Source, Connect Upwork in a popup. Keys: `j`/`k` move, `o` open, `d` dismiss/restore, `a` applied/unmark, `s` Scans, `Esc` close.
 - **Upwork** OAuth sign-in with token refresh; job search and screening questions.
 - **Drafts** from the Job drawer: Cover Letter (board Jobs) or Proposal with one answer per screening question (Upwork), and a Tailored CV rendered to PDF from `profile/cv.yaml`. Regenerate with a note keeps every version.
 
