@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
+import yaml
 
 from joule import ai, drafts, scan
 from joule.config import Settings
@@ -114,6 +115,7 @@ def test_start_rework_chat_and_split(bot, monkeypatch):
     assert sent[-1]["text"] == "Send 2 lines: HOURLY RATE, LOOM LINK"
     assert telegram.awaiting == ("values", 1)
     message["text"] = ' 95 "USD" \n\n https://loom.example/video '
+    (telegram.data_dir / "profile").mkdir()
     asyncio.run(telegram.handle({"message": message}))
     rows = db.execute("SELECT * FROM drafts ORDER BY id").fetchall()
     assert len(rows) == 2 and json.loads(rows[0]["text"]) == content
@@ -122,6 +124,8 @@ def test_start_rework_chat_and_split(bot, monkeypatch):
         "answers": ["https://loom.example/video"],
     }
     assert telegram.awaiting is None and not drafts.write.called
+    bank = yaml.safe_load((telegram.data_dir / "profile" / "answers.yaml").read_text())
+    assert bank == [{"question": "Why?", "answer": "https://loom.example/video"}]
     assert [b["text"] for b in sent[-1]["reply_markup"]["inline_keyboard"][0]] == [
         "Apply",
         "Rework",

@@ -40,6 +40,7 @@ Everything joule reads and writes lives in `~/.joule`, mounted into the containe
   profile/cv.yaml         # Master CV, JSON Resume layout with stable ids (spec §4)
   profile/samples/        # optional past Cover Letters and Proposals, used as style examples
   profile/portfolio.yaml  # optional links (sites, Loom videos) only drafts cite
+  profile/answers.yaml    # screening answers saved by Telegram Fill, adapted by later Proposals
   joule.db                # SQLite, created on first start
   upwork-token.json       # written by Connect Upwork
 ```

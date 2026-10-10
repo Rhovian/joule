@@ -57,14 +57,14 @@ class Answer(StrictModel):
 
 def context(job, data_dir):
     samples = data_dir / "profile" / "samples"
-    portfolio = data_dir / "profile" / "portfolio.yaml"
     files = score.profile_files(data_dir) + [
         (f"samples/{p.relative_to(samples).as_posix()}", p.read_bytes())
         for p in sorted(samples.rglob("*"))
         if p.is_file() and p.suffix in {".md", ".txt", ".yaml"}
     ]
-    if portfolio.is_file():
-        files.append(("portfolio.yaml", portfolio.read_bytes()))
+    for name in ("portfolio.yaml", "answers.yaml"):
+        if (data_dir / "profile" / name).is_file():
+            files.append((name, (data_dir / "profile" / name).read_bytes()))
     profile = "\n".join(f"## {name}\n{contents.decode()}" for name, contents in files)
     return (
         f"Profile:\n{profile}\nFit Score reason: {job['score_reason'] or ''}\n"
@@ -135,8 +135,11 @@ async def write(db, job, kind, note, settings, data_dir, auth=None):
             "one-line greeting, one or two concrete points of fit, a short sign-off. "
             "Pick the one or two most relevant facts; never list credentials. For a "
             "Proposal, give one answer per screening question, in order, each two to "
-            "four sentences like the samples' answers; if you lack an example, say "
-            "what you would do instead of saying you lack it. Never repeat a fact, "
+            "four sentences like the samples' answers. Adapt the owner's answer to a "
+            "matching question in answers.yaml. Answer a question about the owner's "
+            "past only from real experience in the Profile; if none fits, write a "
+            "placeholder naming what is needed, such as [TECH DEBT STORY], and never "
+            "set an invented scenario on the client's project. Never repeat a fact, "
             "example or phrase across the cover and answers: each uses evidence the "
             "others haven't, or none.\n"
         )

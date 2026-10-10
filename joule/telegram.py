@@ -5,6 +5,8 @@ import re
 from contextlib import closing, suppress
 from datetime import UTC, datetime
 
+import yaml
+
 from joule import drafts, score
 from joule.config import load_settings
 from joule.db import connect
@@ -137,7 +139,7 @@ class Telegram:
             title = job["title"]
             period = "hourly" if job["pay_period"] == "hour" else "fixed"
             if action in ("fill", "values"):
-                content, _ = proposal(db, job)
+                content, pairs = proposal(db, job)
                 names = blanks(content)
                 text = json.dumps(content)
                 if action == "fill":
@@ -161,6 +163,13 @@ class Telegram:
                         "INSERT INTO drafts (job_id,kind,text,note,model,created_at) VALUES (?,?,?,'filled',NULL,?)",
                         (job_id, "proposal", text, datetime.now(UTC).isoformat()),
                     )
+                # Filled answers grow the answer bank that later drafts adapt.
+                filled = json.loads(text).get("answers", [])
+                with (self.data_dir / "profile" / "answers.yaml").open("a") as bank:
+                    for pair, answer in zip(pairs, filled):
+                        if blanks(pair["answer"]):
+                            entry = {"question": pair["question"], "answer": answer}
+                            yaml.safe_dump([entry], bank, allow_unicode=True, width=1e9)
                 self.awaiting = None
                 return await self.card(db, job)
             if action == "rework":
