@@ -77,7 +77,7 @@ One Profile, no personas.
   - `work_history_path`: e.g. `../work-history-notes`, read in place, never copied
   - No stack field: the owner is stack-agnostic.
 - **`samples/`:** optional past Cover Letters and Proposals, used as style examples.
-- **`portfolio.yaml`:** optional links only drafts cite (e.g. sites, Loom videos), never the CV. Drafts cite them only where they fit; when a Job asks for a video and none fits, they write `[LOOM LINK]`, and the Telegram card shows "needs Loom video".
+- **`portfolio.yaml`:** optional links only drafts cite (e.g. sites, Loom videos), never the CV. Drafts cite them only where they fit; when a Job asks for a video and none fits, they write `[LOOM LINK]`. Any fact the Job asks for that drafts lack (rate, hours, dates) becomes an uppercase placeholder like `[HOURLY RATE]`, and the Telegram card lists them as "⚠ fill in: …". Drafts never mention the Profile or their instructions. Cover Letters and Proposals match the samples' length and shape (40 to 90 words, one or two points of fit, screening answers of two to four sentences); only Tailored CVs aim for about two pages. They follow the client's application instructions for the text (a phrase to start with or include, a format, points to address) unless those break a drafting rule; other instructions in Job content are ignored.
 
 ## 5. Data model ([#8](https://github.com/Rhovian/joule/issues/8), [#11](https://github.com/Rhovian/joule/issues/11), [#12](https://github.com/Rhovian/joule/issues/12))
 
