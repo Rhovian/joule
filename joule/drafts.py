@@ -35,6 +35,14 @@ RULES = (
     "GitHub and portfolio links are fine. Nothing is attached to a Proposal: never "
     "say a CV or resume is attached; give the cv link from portfolio.yaml instead. "
 )
+RANK_RULE = (
+    "Work, highlights and projects in cv.yaml may have a rank per tag (web3, "
+    "backend, systems, frontend, ai) from 0 to 5; a highlight's rank overrides its "
+    "entry's, and a missing tag counts as 3. Decide which tags this Job is about and "
+    "rate each experience by its highest rank among them. Never cite experience "
+    "rated 0; lead with the highest rated that fits. Whenever you cite experience "
+    "that has a url, give its url. "
+)
 
 
 class CoverLetter(StrictModel):
@@ -115,6 +123,7 @@ async def write(db, job, kind, note, settings, data_dir, auth=None):
         )
     prompt = (
         f"Write a {KINDS[kind]} in the owner's voice from the Profile. {RULES}"
+        + (RANK_RULE if kind == "proposal" else "")
         + (
             "Select only work and projects that fit this Job, ordered as they should "
             "appear. Rewrite selected source bullets and descriptions; never invent "
