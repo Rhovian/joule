@@ -29,6 +29,7 @@ async def list_jobs(
     unscored: bool = True,
     filtered: bool = False,
     dismissed: bool = False,
+    applied: bool = False,
 ):
     directory = request.app.state.data_dir
     stamp = score.fingerprint(directory, load_settings(directory))
@@ -37,8 +38,9 @@ async def list_jobs(
             "SELECT * FROM jobs WHERE primary_id IS NULL "
             "AND (? OR score IS NOT NULL) AND (? OR filtered_reason IS NULL) "
             "AND (? OR state != 'dismissed') "
+            "AND (? OR state != 'applied') "
             "ORDER BY score DESC NULLS LAST, posted_at DESC LIMIT 500",
-            (unscored, filtered, dismissed),
+            (unscored, filtered, dismissed, applied),
         ).fetchall()
         return [
             {
@@ -181,7 +183,7 @@ def draft_pdf(request: Request, draft_id: int):
 
 
 class StateRequest(StrictModel):
-    state: Literal["seen", "dismissed"]
+    state: Literal["seen", "dismissed", "applied"]
 
 
 @router.patch("/jobs/{job_id}")

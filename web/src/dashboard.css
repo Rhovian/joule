@@ -50,6 +50,7 @@ input[type=checkbox] { accent-color: var(--green); width: 15px; height: 15px; }
 .state, .flag { display: inline-block; padding: 3px 6px; border-radius: 4px; font-size: 10px; white-space: nowrap; line-height: 1.3; }
 .state.new { background: #e3eee0; color: #376d3d; }
 .state.seen { background: #edf0eb; color: #63715f; }
+.state.applied { background: #dceee2; color: #1f7a4d; }
 .state.dismissed { background: #eee9e5; color: #806c5d; }
 .flag { background: #f7efdc; color: #897138; margin: 3px 0; }
 .row-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }

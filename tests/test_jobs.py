@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from joule.app import create_app
-from joule.db import connect
+from joule.db import SCHEMA, connect, init_db
 
 
 @pytest.fixture
@@ -20,6 +20,7 @@ def client(tmp_path):
                 (4, 90, "2026-01-04", "pay", "new", None),
                 (5, 95, "2026-01-05", None, "dismissed", None),
                 (6, 100, "2026-01-06", None, "new", 1),
+                (7, 85, "2026-01-07", None, "applied", None),
             ]:
                 db.execute(
                     "INSERT INTO jobs (id, source, source_id, link, title, first_seen_at, "
@@ -49,6 +50,7 @@ def client(tmp_path):
         ("?unscored=false", [2, 1]),
         ("?filtered=true", [4, 2, 1, 3]),
         ("?dismissed=true", [5, 2, 1, 3]),
+        ("?applied=true", [7, 2, 1, 3]),
         ("?filtered=true&dismissed=true", [5, 4, 2, 1, 3]),
     ],
 )
@@ -76,7 +78,7 @@ def test_detail(client):
 
 
 def test_patch(client):
-    for state in ("dismissed", "seen"):
+    for state in ("dismissed", "applied", "seen"):
         response = client.patch("/api/jobs/1", json={"state": state})
         assert response.status_code == 200 and response.json() == {
             "id": 1,
@@ -90,6 +92,27 @@ def test_patch(client):
     for body in ({"state": "new"}, {}, {"state": "seen", "extra": True}):
         assert client.patch("/api/jobs/1", json=body).status_code == 422
     assert client.patch("/api/jobs/1").status_code == 422
+
+
+def test_applied_migration(tmp_path):
+    path = tmp_path / "joule.db"
+    with closing(connect(path)) as db, db:
+        db.executescript(SCHEMA.replace(", 'applied'", ""))
+        db.execute(
+            "INSERT INTO jobs (source, source_id, link, title, first_seen_at) "
+            "VALUES ('hotfix', '1', 'https://example.com', 'Engineer', 'now')"
+        )
+        row = dict(db.execute("SELECT * FROM jobs").fetchone())
+        version = db.execute("PRAGMA schema_version").fetchone()[0]
+    init_db(path)
+    with closing(connect(path)) as db, db:
+        assert dict(db.execute("SELECT * FROM jobs").fetchone()) == row
+        assert db.execute("PRAGMA schema_version").fetchone()[0] == version + 1
+        db.execute("UPDATE jobs SET state='applied' WHERE id=1")
+        assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    before = path.read_bytes()
+    init_db(path)
+    assert path.read_bytes() == before
 
 
 def test_sources(client):

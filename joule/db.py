@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     pay_period TEXT CHECK (pay_period IN ('hour', 'year', 'fixed')),
     posted_at TEXT,
     first_seen_at TEXT NOT NULL,
-    state TEXT NOT NULL DEFAULT 'new' CHECK (state IN ('new', 'seen', 'dismissed')),
+    state TEXT NOT NULL DEFAULT 'new' CHECK (state IN ('new', 'seen', 'dismissed', 'applied')),
     primary_id INTEGER REFERENCES jobs(id),
     filtered_reason TEXT,
     score INTEGER,
@@ -75,6 +75,19 @@ def init_db(path: Path) -> None:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.executescript(SCHEMA)
         with connection:
+            connection.execute("BEGIN")
+            sql = connection.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'"
+            ).fetchone()[0]
+            if "'applied'" not in sql:
+                version = connection.execute("PRAGMA schema_version").fetchone()[0]
+                connection.execute("PRAGMA writable_schema=ON")
+                connection.execute(
+                    "UPDATE sqlite_master SET sql=? WHERE type='table' AND name='jobs'",
+                    (sql.replace("'dismissed'", "'dismissed', 'applied'"),),
+                )
+                connection.execute(f"PRAGMA schema_version={version + 1}")
+                connection.execute("PRAGMA writable_schema=OFF")
             connection.execute(
                 "UPDATE scans SET status='interrupted', finished_at=? "
                 "WHERE status='running'",
