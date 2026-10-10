@@ -104,6 +104,33 @@ def test_start_rework_chat_and_split(bot, monkeypatch):
     assert all("reply_markup" not in p for p in parts[:-1])
     assert parts[0]["text"].startswith("⚠ fill in: HOURLY RATE, LOOM LINK\n")
     assert "Q: Why?\nA: [LOOM LINK]" in parts[-1]["text"]
+    assert [b["text"] for b in parts[-1]["reply_markup"]["inline_keyboard"][0]] == [
+        "Fill",
+        "Rework",
+        "Skip",
+    ]
+    asyncio.run(telegram.handle(callback("fill:1")))
+    assert (
+        sent[-1]["text"] == "Reply one line per blank, in order: HOURLY RATE, LOOM LINK"
+    )
+    message = {"chat": {"id": 42}, "from": {"id": 42}, "text": "95"}
+    asyncio.run(telegram.handle({"message": message}))
+    assert sent[-1]["text"] == "Send 2 lines: HOURLY RATE, LOOM LINK"
+    assert telegram.awaiting == ("values", 1)
+    message["text"] = ' 95 "USD" \n\n https://loom.example/video '
+    asyncio.run(telegram.handle({"message": message}))
+    rows = db.execute("SELECT * FROM drafts ORDER BY id").fetchall()
+    assert len(rows) == 2 and json.loads(rows[0]["text"]) == content
+    assert json.loads(rows[-1]["text"]) == {
+        "cover": "x" * 8000 + '95 "USD"',
+        "answers": ["https://loom.example/video"],
+    }
+    assert telegram.awaiting is None and not drafts.write.called
+    assert [b["text"] for b in sent[-1]["reply_markup"]["inline_keyboard"][0]] == [
+        "Apply",
+        "Rework",
+        "Skip",
+    ]
     asyncio.run(telegram.handle(callback("rework:1")))
     assert sent[-1]["text"] == "Send direction for Engineer"
     asyncio.run(
@@ -184,7 +211,7 @@ def test_send_error_does_not_expose_token(tmp_path, body):
 
 
 @pytest.mark.parametrize(
-    "mode", ["send", "boost", "reject", "disconnected", "cancel", "balance"]
+    "mode", ["send", "boost", "reject", "disconnected", "cancel", "balance", "blanks"]
 )
 def test_upwork_apply(bot, mode):
     telegram, db, sent = bot
@@ -251,14 +278,20 @@ def test_upwork_apply(bot, mode):
                 await telegram.handle(callback("cancel:1"))
                 assert "Latest" in sent[-1]["text"]
             else:
+                if mode == "blanks":
+                    db.execute(
+                        'UPDATE drafts SET text=\'{"cover":"[RATE]"}\' WHERE id=2'
+                    )
                 update = callback(f"send:1:95:{boost}")
                 await asyncio.gather(telegram.handle(update), telegram.handle(update))
+                if mode == "blanks":
+                    assert sent[-1]["text"] == "Fill in placeholders first: RATE"
 
     asyncio.run(run())
     failed = mode in ("reject", "disconnected")
-    state = "new" if failed or mode == "cancel" else "applied"
+    state = "new" if failed or mode in ("cancel", "blanks") else "applied"
     assert db.execute("SELECT state FROM jobs").fetchone()[0] == state
-    assert len(calls) == (0 if mode in ("cancel", "disconnected") else 1)
+    assert len(calls) == (0 if mode in ("cancel", "disconnected", "blanks") else 1)
     if calls:
         expected = {"jobReference": "1", "chargedAmount": 95.0, "coverLetter": "Latest"}
         expected.update(
@@ -276,7 +309,7 @@ def test_upwork_apply(bot, mode):
             else "Upwork rejected: Nope"
         )
         assert error in texts
-    elif mode != "cancel":
+    elif mode not in ("cancel", "blanks"):
         assert "Submitted — proposal p (OK)" in texts
         assert "Already applied" in texts and "Queue empty" in texts
 

@@ -3,6 +3,7 @@ import json
 import logging
 import re
 from contextlib import closing, suppress
+from datetime import UTC, datetime
 
 from joule import drafts, score
 from joule.config import load_settings
@@ -25,6 +26,12 @@ def eligible(settings):
 
 def kind(job):
     return "proposal" if job["source"] == "upwork" else "cover_letter"
+
+
+def blanks(content):
+    return list(
+        dict.fromkeys(re.findall(r"\[([A-Z][A-Z0-9 ,/&'-]*)\]", json.dumps(content)))
+    )
 
 
 def queue(db, settings):
@@ -91,15 +98,15 @@ class Telegram:
         text = content.get("text", content.get("cover", ""))
         for question, answer in (a.values() for a in answers):
             text += f"\n\nQ: {question}\nA: {answer}"
-        blanks = dict.fromkeys(re.findall(r"\[([A-Z][A-Z0-9 ,/&'-]*)\]", text))
-        flag = f"⚠ fill in: {', '.join(blanks)}\n" if blanks else ""
+        names = blanks(content)
+        flag = f"⚠ fill in: {', '.join(names)}\n" if names else ""
         await self.send(
             f"{flag}{job['title']}\n{job['company'] or ''}\n{job['source']}\n"
             f"Fit Score: {job['score'] if job['score'] is not None else 'unscored'} "
             f"— {job['score_reason'] or ''}\n{job['link']}\n\n{text}",
             [
                 {"text": action.title(), "callback_data": f"{action}:{job['id']}"}
-                for action in ("apply", "rework", "skip")
+                for action in ("fill" if names else "apply", "rework", "skip")
             ],
         )
 
@@ -118,7 +125,7 @@ class Telegram:
                 with closing(connect(self.data_dir / "joule.db")) as db:
                     return await self.card(db)
             action, _, value = data.partition(":")
-            if action not in ("apply", "skip", "rework", "send", "cancel"):
+            if action not in ("apply", "fill", "skip", "rework", "send", "cancel"):
                 return
             job_id = int(value.split(":")[0])
         elif self.awaiting is not None and isinstance(message.get("text"), str):
@@ -134,6 +141,33 @@ class Telegram:
                 return await self.send("Job not found")
             title = job["title"]
             period = "hourly" if job["pay_period"] == "hour" else "fixed"
+            if action in ("fill", "values"):
+                content, _ = proposal(db, job)
+                names = blanks(content)
+                text = json.dumps(content)
+                if action == "fill":
+                    self.awaiting = ("values", job_id)
+                    return await self.send(
+                        f"Reply one line per blank, in order: {', '.join(names)}"
+                    )
+                lines = [
+                    line.strip()
+                    for line in message["text"].splitlines()
+                    if line.strip()
+                ]
+                if len(lines) != len(names):
+                    return await self.send(
+                        f"Send {len(names)} lines: {', '.join(names)}"
+                    )
+                for name, line in zip(names, lines):
+                    text = text.replace(f"[{name}]", json.dumps(line)[1:-1])
+                with db:
+                    db.execute(
+                        "INSERT INTO drafts (job_id,kind,text,note,model,created_at) VALUES (?,?,?,'filled',NULL,?)",
+                        (job_id, kind(job), text, datetime.now(UTC).isoformat()),
+                    )
+                self.awaiting = None
+                return await self.card(db, job)
             if action == "rework":
                 self.awaiting = ("note", job_id)
                 return await self.send(f"Send direction for {job['title']}")
@@ -189,6 +223,9 @@ class Telegram:
             await self.card(db)
 
     async def submit(self, db, job, value):
+        content, answers = proposal(db, job)
+        if names := blanks(content):
+            return await self.send(f"Fill in placeholders first: {', '.join(names)}")
         job_id, state = job["id"], job["state"]
         _, amount, boost = value.split(":")
         amount, boost = float(amount), int(boost)
@@ -198,7 +235,6 @@ class Telegram:
         if not claimed:
             return await self.send("Already applied")
         try:
-            content, answers = proposal(db, job)
             result = await upwork.submit_proposal(
                 self.auth, job["source_id"], amount, content["cover"], answers, boost
             )
