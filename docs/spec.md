@@ -172,7 +172,7 @@ Written per Job on request from the drawer, or up front for the Telegram review 
 - **Cover Letter** (board Jobs) and **Proposal** (Upwork; answers each screening question separately):
   - Text only, with a copy button.
   - Context: the Job, Master CV, all work-history notes, `samples/`, `portfolio.yaml`, and the Fit Score reason.
-  - Proposals never include email, phone, LinkedIn or other contact details (Upwork rules); GitHub and portfolio links are fine.
+  - Proposals never include email, phone, LinkedIn or other contact details (Upwork rules); GitHub and portfolio links are fine. Nothing is attached: Proposals give the `cv` link from `portfolio.yaml` instead of saying a CV is attached.
 - **Regenerate** with an optional note, which creates a new version. No in-app editor.
 
 ### Telegram manual review
