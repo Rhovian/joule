@@ -132,7 +132,13 @@ async def write_draft(request: Request, job_id: int, body: DraftRequest):
             raise HTTPException(400, "Draft kind does not match Job source")
         try:
             await drafts.write(
-                db, job, body.kind, body.note, load_settings(directory), directory
+                db,
+                job,
+                body.kind,
+                body.note,
+                load_settings(directory),
+                directory,
+                request.app.state.upwork_auth,
             )
         except ai.AIError as error:
             raise HTTPException(502, str(error)) from error

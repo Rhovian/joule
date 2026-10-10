@@ -14,21 +14,26 @@ logger = logging.getLogger(__name__)
 ELIGIBLE = (
     "primary_id IS NULL AND filtered_reason IS NULL AND state='new' "
     "AND content_purged_at IS NULL "
-    "AND (score >= ? OR (source='upwork' AND score IS NULL))"
+    "AND (score >= ? OR (source='upwork' AND score IS NULL AND ?))"
 )
+
+
+def eligible(settings):
+    # Unscored Upwork Jobs qualify only while Upwork scoring is off.
+    return settings.alert_threshold, not settings.upwork.scoring
 
 
 def kind(job):
     return "proposal" if job["source"] == "upwork" else "cover_letter"
 
 
-def queue(db, threshold):
+def queue(db, settings):
     return db.execute(
         f"SELECT * FROM jobs WHERE {ELIGIBLE} AND EXISTS "
         "(SELECT 1 FROM drafts WHERE job_id=jobs.id AND kind=CASE "
         "WHEN jobs.source='upwork' THEN 'proposal' ELSE 'cover_letter' END) "
         f"ORDER BY {score.RANK} DESC NULLS LAST, posted_at DESC",
-        (threshold,),
+        eligible(settings),
     ).fetchall()
 
 
@@ -68,9 +73,9 @@ class Telegram:
                 payload["reply_markup"] = {"inline_keyboard": [buttons]}
             await self.api("sendMessage", **payload)
 
-    async def alert(self, count, threshold):
+    async def alert(self, count, settings):
         with closing(connect(self.data_dir / "joule.db")) as db:
-            total = len(queue(db, threshold))
+            total = len(queue(db, settings))
         await self.send(
             f"{count} new Jobs queued ({total} in queue)",
             [{"text": "Start", "callback_data": "start"}],
@@ -78,7 +83,7 @@ class Telegram:
 
     async def card(self, db, job=None):
         if job is None:
-            jobs = queue(db, load_settings(self.data_dir).alert_threshold)
+            jobs = queue(db, load_settings(self.data_dir))
             if not jobs:
                 return await self.send("Queue empty")
             job = jobs[0]
@@ -163,7 +168,13 @@ class Telegram:
             if action == "note":
                 settings = load_settings(self.data_dir)
                 await drafts.write(
-                    db, job, kind(job), message["text"], settings, self.data_dir
+                    db,
+                    job,
+                    kind(job),
+                    message["text"],
+                    settings,
+                    self.data_dir,
+                    self.auth,
                 )
                 return await self.card(db, job)
             with db:

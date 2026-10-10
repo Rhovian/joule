@@ -25,7 +25,7 @@ from joule.sources import (
     weworkremotely,
     workingnomads,
 )
-from joule.telegram import ELIGIBLE, kind
+from joule.telegram import ELIGIBLE, eligible, kind
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -64,18 +64,12 @@ async def fetch_upwork(ctx):
     return await upwork.search(ctx.auth, p.upwork_searches or p.roles, *floors)
 
 
-async def enrich_upwork(ctx, candidate):
-    candidate.extra["screening_questions"] = await upwork.screening_questions(
-        ctx.auth, candidate.source_id
-    )
-
-
 ADAPTERS = {
     "hn": (lambda ctx: hn.search(ctx.client), None),
     "getarustjob": (lambda ctx: getarustjob.search(ctx.client), enrich_getarustjob),
     "adzuna": (fetch_adzuna, None),
     "hotfix": (fetch_hotfix, enrich_hotfix),
-    "upwork": (fetch_upwork, enrich_upwork),
+    "upwork": (fetch_upwork, None),
     "weworkremotely": (lambda ctx: weworkremotely.search(ctx.client), None),
     "remoteok": (lambda ctx: remoteok.search(ctx.client), None),
     **{
@@ -221,13 +215,19 @@ class Scanner:
                         async with limit:
                             job = db.execute(
                                 f"SELECT * FROM jobs WHERE id=? AND {ELIGIBLE}",
-                                (id, settings.alert_threshold),
+                                (id, *eligible(settings)),
                             ).fetchone()
                             if job is None:
                                 return
                             try:
                                 await drafts.write(
-                                    db, job, kind(job), None, settings, self.data_dir
+                                    db,
+                                    job,
+                                    kind(job),
+                                    None,
+                                    settings,
+                                    self.data_dir,
+                                    self.auth,
                                 )
                                 drafted += 1
                             except ai.AIError as error:
@@ -238,7 +238,7 @@ class Scanner:
                     await asyncio.gather(*map(draft, ctx.inserted))
                     if drafted:
                         try:
-                            await self.telegram.alert(drafted, settings.alert_threshold)
+                            await self.telegram.alert(drafted, settings)
                         except Exception:
                             logger.exception("Telegram alert failed")
                 status = "done"
