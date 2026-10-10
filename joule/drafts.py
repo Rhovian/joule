@@ -19,7 +19,8 @@ RULES = (
     "Job. When the Job asks for a video such as a Loom, give the best-fitting video "
     "link from portfolio.yaml; if none fits, write [LOOM LINK]. Never invent a URL. "
     "In a Proposal, never include email, phone, LinkedIn or other contact details; "
-    "GitHub and portfolio links are fine. "
+    "GitHub and portfolio links are fine. Nothing is attached to a Proposal: never "
+    "say a CV or resume is attached; give the cv link from portfolio.yaml instead. "
 )
 
 
