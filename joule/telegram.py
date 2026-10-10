@@ -14,10 +14,11 @@ from joule.sources import upwork
 from joule.upwork_auth import UpworkNotConnected
 
 logger = logging.getLogger(__name__)
+# A Job added to the queue from the dashboard skips the Fit Score and filters.
 ELIGIBLE = (
-    "primary_id IS NULL AND filtered_reason IS NULL AND state='new' "
-    "AND content_purged_at IS NULL AND source='upwork' "
-    "AND (score >= ? OR (score IS NULL AND ?))"
+    "primary_id IS NULL AND state='new' "
+    "AND content_purged_at IS NULL AND source='upwork' AND (queued OR "
+    "(filtered_reason IS NULL AND (score >= ? OR (score IS NULL AND ?))))"
 )
 
 
@@ -85,6 +86,11 @@ class Telegram:
             [{"text": "Start", "callback_data": "start"}],
         )
 
+    async def start(self):
+        self.awaiting = None
+        with closing(connect(self.data_dir / "joule.db")) as db:
+            return await self.card(db)
+
     async def card(self, db, job=None):
         if job is None:
             jobs = queue(db, load_settings(self.data_dir))
@@ -118,9 +124,7 @@ class Telegram:
             await self.api("answerCallbackQuery", callback_query_id=callback["id"])
             data = callback.get("data", "")
             if data == "start":
-                self.awaiting = None
-                with closing(connect(self.data_dir / "joule.db")) as db:
-                    return await self.card(db)
+                return await self.start()
             action, _, value = data.partition(":")
             if action not in ("apply", "fill", "skip", "rework", "send", "cancel"):
                 return

@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     score_fingerprint TEXT,
     extra TEXT,
     content_purged_at TEXT,
+    queued INTEGER NOT NULL DEFAULT 0,
     UNIQUE (source, source_id)
 );
 CREATE INDEX IF NOT EXISTS jobs_primary_id ON jobs(primary_id);
@@ -88,6 +89,10 @@ def init_db(path: Path) -> None:
                 )
                 connection.execute(f"PRAGMA schema_version={version + 1}")
                 connection.execute("PRAGMA writable_schema=OFF")
+            if "queued" not in sql:
+                connection.execute(
+                    "ALTER TABLE jobs ADD COLUMN queued INTEGER NOT NULL DEFAULT 0"
+                )
             connection.execute(
                 "UPDATE scans SET status='interrupted', finished_at=? "
                 "WHERE status='running'",

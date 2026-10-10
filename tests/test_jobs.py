@@ -1,7 +1,7 @@
 import json
 from contextlib import closing
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -102,10 +102,14 @@ def test_patch(client):
     assert client.patch("/api/jobs/1").status_code == 422
 
 
-def test_applied_migration(tmp_path):
+def test_migrations(tmp_path):
     path = tmp_path / "joule.db"
     with closing(connect(path)) as db, db:
-        db.executescript(SCHEMA.replace(", 'applied'", ""))
+        db.executescript(
+            SCHEMA.replace(", 'applied'", "").replace(
+                "    queued INTEGER NOT NULL DEFAULT 0,\n", ""
+            )
+        )
         db.execute(
             "INSERT INTO jobs (source, source_id, link, title, first_seen_at) "
             "VALUES ('hotfix', '1', 'https://example.com', 'Engineer', 'now')"
@@ -114,8 +118,8 @@ def test_applied_migration(tmp_path):
         version = db.execute("PRAGMA schema_version").fetchone()[0]
     init_db(path)
     with closing(connect(path)) as db, db:
-        assert dict(db.execute("SELECT * FROM jobs").fetchone()) == row
-        assert db.execute("PRAGMA schema_version").fetchone()[0] == version + 1
+        assert dict(db.execute("SELECT * FROM jobs").fetchone()) == row | {"queued": 0}
+        assert db.execute("PRAGMA schema_version").fetchone()[0] > version
         db.execute("UPDATE jobs SET state='applied' WHERE id=1")
         assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     before = path.read_bytes()
@@ -426,3 +430,19 @@ def test_proposal_fetches_screening_questions_once(client, monkeypatch):
         db.execute("UPDATE jobs SET extra='{}' WHERE id=1")
     response = client.post("/api/jobs/1/drafts", json={"kind": "proposal"})
     assert response.status_code == 502 and "429" in response.json()["detail"]
+
+
+def test_queue_and_start_telegram(client, monkeypatch):
+    from joule import drafts
+
+    write = AsyncMock()
+    monkeypatch.setattr(drafts, "write", write)
+    assert client.post("/api/jobs/1/queue", json={}).status_code == 400
+    with closing(connect(client.app.state.data_dir / "joule.db")) as db, db:
+        db.execute("UPDATE jobs SET source='upwork', state='seen', score=10 WHERE id=1")
+    job = client.post("/api/jobs/1/queue", json={}).json()
+    assert (job["queued"], job["state"], write.await_count) == (1, "new", 1)
+    assert client.post("/api/telegram/start", json={}).status_code == 409
+    client.app.state.telegram = Mock(start=AsyncMock())
+    assert client.post("/api/telegram/start", json={}).status_code == 200
+    client.app.state.telegram.start.assert_awaited_once()

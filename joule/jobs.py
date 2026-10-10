@@ -155,6 +155,44 @@ async def write_draft(request: Request, job_id: int, body: DraftRequest):
     return await get_job(request, job_id)
 
 
+@router.post("/jobs/{job_id}/queue")
+async def queue_job(request: Request, job_id: int, body: StrictModel):
+    directory = request.app.state.data_dir
+    with closing(connect(directory / "joule.db")) as db:
+        job = primary(db, job_id)
+        if job["source"] != "upwork" or job["content_purged_at"]:
+            raise HTTPException(400, "Only live Upwork Jobs can be queued")
+        with db:
+            db.execute("UPDATE jobs SET queued=1, state='new' WHERE id=?", (job_id,))
+        if not db.execute(
+            "SELECT 1 FROM drafts WHERE job_id=? AND kind='proposal'", (job_id,)
+        ).fetchone():
+            try:
+                await drafts.write(
+                    db,
+                    job,
+                    "proposal",
+                    None,
+                    load_settings(directory),
+                    directory,
+                    request.app.state.upwork_auth,
+                )
+            except ai.AIError as error:
+                raise HTTPException(502, str(error)) from error
+    return await get_job(request, job_id)
+
+
+@router.post("/telegram/start")
+async def start_telegram(request: Request, body: StrictModel):
+    if request.app.state.telegram is None:
+        raise HTTPException(409, "Telegram not configured")
+    try:
+        await request.app.state.telegram.start()
+    except RuntimeError as error:
+        raise HTTPException(502, str(error)) from error
+    return {}
+
+
 class AskRequest(StrictModel):
     question: str = Field(min_length=1, max_length=2000)
 
