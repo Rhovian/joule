@@ -25,7 +25,7 @@ from joule.sources import (
     weworkremotely,
     workingnomads,
 )
-from joule.telegram import ELIGIBLE, eligible, kind
+from joule.telegram import ELIGIBLE, eligible
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -206,24 +206,18 @@ class Scanner:
                             save()
 
                 await asyncio.gather(*map(grade, jobs[: settings.max_scored_per_scan]))
-                if self.telegram:
+                if self.telegram and "upwork" in sources:
                     drafted = 0
 
-                    async def draft(item):
+                    async def draft(job):
                         nonlocal drafted
-                        id, source, _ = item
+                        id, source = job["id"], job["source"]
                         async with limit:
-                            job = db.execute(
-                                f"SELECT * FROM jobs WHERE id=? AND {ELIGIBLE}",
-                                (id, *eligible(settings)),
-                            ).fetchone()
-                            if job is None:
-                                return
                             try:
                                 await drafts.write(
                                     db,
                                     job,
-                                    kind(job),
+                                    "proposal",
                                     None,
                                     settings,
                                     self.data_dir,
@@ -235,7 +229,15 @@ class Scanner:
                                     f"Draft {id}: {error}"
                                 )
 
-                    await asyncio.gather(*map(draft, ctx.inserted))
+                    # Every eligible Job still without a draft, so a failed draft
+                    # is retried on the next Scan of its Source.
+                    undrafted = db.execute(
+                        f"SELECT * FROM jobs WHERE {ELIGIBLE} "
+                        "AND NOT EXISTS (SELECT 1 FROM drafts WHERE job_id=jobs.id "
+                        "AND kind='proposal')",
+                        eligible(settings),
+                    ).fetchall()
+                    await asyncio.gather(*map(draft, undrafted))
                     if drafted:
                         try:
                             await self.telegram.alert(drafted, settings)
