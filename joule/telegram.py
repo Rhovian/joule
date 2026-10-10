@@ -14,18 +14,14 @@ from joule.upwork_auth import UpworkNotConnected
 logger = logging.getLogger(__name__)
 ELIGIBLE = (
     "primary_id IS NULL AND filtered_reason IS NULL AND state='new' "
-    "AND content_purged_at IS NULL "
-    "AND (score >= ? OR (source='upwork' AND score IS NULL AND ?))"
+    "AND content_purged_at IS NULL AND source='upwork' "
+    "AND (score >= ? OR (score IS NULL AND ?))"
 )
 
 
 def eligible(settings):
     # Unscored Upwork Jobs qualify only while Upwork scoring is off.
     return settings.alert_threshold, not settings.upwork.scoring
-
-
-def kind(job):
-    return "proposal" if job["source"] == "upwork" else "cover_letter"
 
 
 def blanks(content):
@@ -37,8 +33,7 @@ def blanks(content):
 def queue(db, settings):
     return db.execute(
         f"SELECT * FROM jobs WHERE {ELIGIBLE} AND EXISTS "
-        "(SELECT 1 FROM drafts WHERE job_id=jobs.id AND kind=CASE "
-        "WHEN jobs.source='upwork' THEN 'proposal' ELSE 'cover_letter' END) "
+        "(SELECT 1 FROM drafts WHERE job_id=jobs.id AND kind='proposal') "
         f"ORDER BY {score.RANK} DESC NULLS LAST, posted_at DESC",
         eligible(settings),
     ).fetchall()
@@ -47,7 +42,7 @@ def queue(db, settings):
 def proposal(db, job):
     draft = db.execute(
         "SELECT text FROM drafts WHERE job_id=? AND kind=? ORDER BY id DESC LIMIT 1",
-        (job["id"], kind(job)),
+        (job["id"], "proposal"),
     ).fetchone()
     content = json.loads(draft["text"])
     questions = json.loads(job["extra"] or "{}").get("screening_questions", [])
@@ -164,14 +159,14 @@ class Telegram:
                 with db:
                     db.execute(
                         "INSERT INTO drafts (job_id,kind,text,note,model,created_at) VALUES (?,?,?,'filled',NULL,?)",
-                        (job_id, kind(job), text, datetime.now(UTC).isoformat()),
+                        (job_id, "proposal", text, datetime.now(UTC).isoformat()),
                     )
                 self.awaiting = None
                 return await self.card(db, job)
             if action == "rework":
                 self.awaiting = ("note", job_id)
                 return await self.send(f"Send direction for {job['title']}")
-            if action == "apply" and job["source"] == "upwork":
+            if action == "apply":
                 self.awaiting = ("bid", job_id)
                 values = (job["pay_min"], job["pay_max"])
                 amounts = "–".join(f"{v:g}" for v in values if v is not None)
@@ -198,14 +193,14 @@ class Telegram:
             self.awaiting = None
             if action == "cancel":
                 return await self.card(db, job)
-            if action == "send" and job["source"] == "upwork":
+            if action == "send":
                 return await self.submit(db, job, value)
             if action == "note":
                 settings = load_settings(self.data_dir)
                 await drafts.write(
                     db,
                     job,
-                    kind(job),
+                    "proposal",
                     message["text"],
                     settings,
                     self.data_dir,
@@ -214,12 +209,9 @@ class Telegram:
                 return await self.card(db, job)
             with db:
                 db.execute(
-                    "UPDATE jobs SET state=? WHERE id=? AND primary_id IS NULL"
-                    + (" AND state='new'" if action == "skip" else ""),
-                    ("applied" if action == "apply" else "seen", job_id),
+                    "UPDATE jobs SET state='seen' WHERE id=? AND primary_id IS NULL AND state='new'",
+                    (job_id,),
                 )
-            if action == "apply":
-                await self.send(f"Marked applied — submit here: {job['link']}")
             await self.card(db)
 
     async def submit(self, db, job, value):

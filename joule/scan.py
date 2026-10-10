@@ -25,7 +25,7 @@ from joule.sources import (
     weworkremotely,
     workingnomads,
 )
-from joule.telegram import ELIGIBLE, eligible, kind
+from joule.telegram import ELIGIBLE, eligible
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -206,7 +206,7 @@ class Scanner:
                             save()
 
                 await asyncio.gather(*map(grade, jobs[: settings.max_scored_per_scan]))
-                if self.telegram:
+                if self.telegram and "upwork" in sources:
                     drafted = 0
 
                     async def draft(job):
@@ -217,7 +217,7 @@ class Scanner:
                                 await drafts.write(
                                     db,
                                     job,
-                                    kind(job),
+                                    "proposal",
                                     None,
                                     settings,
                                     self.data_dir,
@@ -233,10 +233,9 @@ class Scanner:
                     # is retried on the next Scan of its Source.
                     undrafted = db.execute(
                         f"SELECT * FROM jobs WHERE {ELIGIBLE} "
-                        f"AND source IN ({','.join('?' * len(sources))}) "
                         "AND NOT EXISTS (SELECT 1 FROM drafts WHERE job_id=jobs.id "
-                        "AND kind IN ('proposal', 'cover_letter'))",
-                        (*eligible(settings), *sources),
+                        "AND kind='proposal')",
+                        eligible(settings),
                     ).fetchall()
                     await asyncio.gather(*map(draft, undrafted))
                     if drafted:

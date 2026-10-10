@@ -6,9 +6,10 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from joule import ai, drafts
+from joule import ai, drafts, scan
 from joule.config import Settings
 from joule.db import connect, init_db
+from joule.sources import Candidate
 from joule.telegram import Telegram, queue
 from joule.upwork_auth import UpworkAuth, UpworkNotConnected
 from tests.test_scan import setup  # noqa: F401 — registers the shared pytest fixture
@@ -34,7 +35,7 @@ def bot(tmp_path):
     asyncio.run(client.aclose())
 
 
-def seed(db, id=1, source="hn", **fields):
+def seed(db, id=1, source="upwork", **fields):
     db.execute(
         "INSERT INTO jobs (id,source,source_id,title,link,first_seen_at,score,posted_at) "
         "VALUES (?,?,?,'Engineer','url','now',80,?)",
@@ -42,7 +43,7 @@ def seed(db, id=1, source="hn", **fields):
     )
     for key, value in fields.items():
         db.execute(f"UPDATE jobs SET {key}=? WHERE id=?", (value, id))
-    seed_draft(db, id, "proposal" if source == "upwork" else "cover_letter")
+    seed_draft(db, id)
 
 
 def callback(data, chat=42):
@@ -66,19 +67,16 @@ def test_queue_rule_and_order(bot):
         zip(keys + ["score"] * 2, [1, "no", "seen", "now", 74, None]), 4
     ):
         seed(db, id, **{key: value})
-    seed(db, 10)
-    db.execute("UPDATE drafts SET kind='proposal' WHERE job_id=10")
+    seed(db, 10, source="hn")
     seed(db, 11)
     db.execute("DELETE FROM drafts WHERE job_id=11")
     seed(db, 12, score=90, posted_at="0")
     assert [r["id"] for r in queue(db, Settings())] == [2, 1, 12]
     unscored = Settings(upwork={"scoring": False})
-    assert [r["id"] for r in queue(db, unscored)] == [2, 1, 12, 3]
+    assert [r["id"] for r in queue(db, unscored)] == [2, 1, 12, 9, 3]
 
 
-@pytest.mark.parametrize(
-    "case", ["apply new applied", "skip new seen", "skip applied applied"]
-)
+@pytest.mark.parametrize("case", ["skip new seen", "skip applied applied"])
 def test_actions(bot, case):
     action, before, state = case.split()
     telegram, db, sent = bot
@@ -86,8 +84,6 @@ def test_actions(bot, case):
     asyncio.run(telegram.handle(callback(f"{action}:1")))
     assert db.execute("SELECT state FROM jobs").fetchone()[0] == state
     assert sent[-1]["text"] == "Queue empty"
-    if action == "apply":
-        assert sent[-2]["text"] == "Marked applied — submit here: url"
 
 
 def test_start_rework_chat_and_split(bot, monkeypatch):
@@ -173,6 +169,11 @@ def test_scan_drafts_and_alert(request, bot, monkeypatch, mode):
     telegram, _, sent = bot
     telegram.data_dir = scanner.data_dir
     scanner.telegram = telegram if configured else None
+
+    async def upwork_jobs(ctx):
+        return [Candidate(source="upwork", source_id="u", title="U", link="x")]
+
+    monkeypatch.setitem(scan.ADAPTERS, "upwork", (upwork_jobs, None))
     if fail:
         monkeypatch.setattr(
             telegram, "api", AsyncMock(side_effect=httpx.HTTPError("offline"))
@@ -181,10 +182,12 @@ def test_scan_drafts_and_alert(request, bot, monkeypatch, mode):
     monkeypatch.setattr(drafts, "write", write)
     if mode == "retry":
         monkeypatch.setattr(drafts, "write", AsyncMock(side_effect=ai.AIError("x")))
-        run(["hotfix"], Settings(alert_threshold=threshold))
+        run(["upwork"], Settings(alert_threshold=threshold))
         assert not rows("drafts")
         monkeypatch.setattr(drafts, "write", write)
     run(["hotfix"], Settings(alert_threshold=threshold))
+    assert not rows("drafts") and write.await_count == 0
+    run(["upwork"], Settings(alert_threshold=threshold))
     assert write.await_count == int(configured and threshold <= 70)
     assert rows("scans")[0]["status"] == "done"
     assert [p["text"] for p in sent] == (
@@ -192,7 +195,7 @@ def test_scan_drafts_and_alert(request, bot, monkeypatch, mode):
     )
 
 
-def seed_draft(db, job_id, kind="cover_letter"):
+def seed_draft(db, job_id, kind="proposal"):
     with db:
         db.execute(
             "INSERT INTO drafts (job_id,kind,text,created_at) VALUES (?,?,'{}','now')",
