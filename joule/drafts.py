@@ -5,6 +5,8 @@ from pydantic import Field, create_model
 
 from joule import ai, cv, score
 from joule.config import StrictModel
+from joule.sources import upwork
+from joule.upwork_auth import UpworkNotConnected
 
 KINDS = {
     "cover_letter": "Cover Letter",
@@ -60,7 +62,23 @@ async def answer(job, question, settings, data_dir):
     return result.answer
 
 
-async def write(db, job, kind, note, settings, data_dir):
+async def write(db, job, kind, note, settings, data_dir, auth=None):
+    # Screening questions are fetched once, on the first Proposal, not during Scans.
+    if kind == "proposal" and "screening_questions" not in json.loads(
+        job["extra"] or "{}"
+    ):
+        try:
+            questions = await upwork.screening_questions(auth, job["source_id"])
+        except (upwork.UpworkError, UpworkNotConnected) as error:
+            raise ai.AIError(f"Screening questions: {error!r}") from error
+        with db:
+            db.execute(
+                "UPDATE jobs SET extra=json_set(coalesce(extra, '{}'), "
+                "'$.screening_questions', json(?)) "
+                "WHERE id=? AND content_purged_at IS NULL",
+                (json.dumps(questions), job["id"]),
+            )
+        job = db.execute("SELECT * FROM jobs WHERE id=?", (job["id"],)).fetchone()
     count = len(json.loads(job["extra"] or "{}").get("screening_questions", []))
     schema = (
         CoverLetter
@@ -74,6 +92,17 @@ async def write(db, job, kind, note, settings, data_dir):
     )
     if kind == "tailored_cv":
         master, schema = cv.prepare(data_dir)
+    openings = ""
+    if kind != "tailored_cv":
+        recent = db.execute(
+            "SELECT text FROM drafts WHERE kind IN ('proposal', 'cover_letter') "
+            "ORDER BY id DESC LIMIT 10"
+        ).fetchall()
+        openings = "Recent openings of other drafts; lead with different experience "
+        openings += "unless this Job clearly calls for the same:\n" + "".join(
+            f"- {(c.get('cover') or c.get('text', ''))[:200]}\n"
+            for c in (json.loads(text) for (text,) in recent)
+        )
     prompt = (
         f"Write a {KINDS[kind]} in the owner's voice from the Profile. {RULES}"
         "For a Proposal, give one answer per screening "
@@ -81,7 +110,7 @@ async def write(db, job, kind, note, settings, data_dir):
         "this Job, ordered as they should appear. Rewrite selected source bullets and "
         "descriptions; never invent facts, numbers, employers, titles or dates. "
         "Keep it to about two pages.\n"
-        f"Owner's note: {note or ''}\n{context(job, data_dir)}"
+        f"{openings}Owner's note: {note or ''}\n{context(job, data_dir)}"
     )
     result = await ai.retry_structured(settings.models.drafts, prompt, schema)
     document = (
