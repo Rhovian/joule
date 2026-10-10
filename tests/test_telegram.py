@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from joule import drafts
+from joule import ai, drafts
 from joule.config import Settings
 from joule.db import connect, init_db
 from joule.telegram import Telegram, queue
@@ -165,7 +165,7 @@ def test_run_drops_backlog_then_handles(bot):
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("mode", ["off", "below", "on", "fail"])
+@pytest.mark.parametrize("mode", ["off", "below", "on", "fail", "retry"])
 def test_scan_drafts_and_alert(request, bot, monkeypatch, mode):
     configured, fail = mode != "off", mode == "fail"
     threshold = 75 if mode == "below" else 60
@@ -179,6 +179,11 @@ def test_scan_drafts_and_alert(request, bot, monkeypatch, mode):
         )
     write = AsyncMock(side_effect=lambda db, job, *args: seed_draft(db, job["id"]))
     monkeypatch.setattr(drafts, "write", write)
+    if mode == "retry":
+        monkeypatch.setattr(drafts, "write", AsyncMock(side_effect=ai.AIError("x")))
+        run(["hotfix"], Settings(alert_threshold=threshold))
+        assert not rows("drafts")
+        monkeypatch.setattr(drafts, "write", write)
     run(["hotfix"], Settings(alert_threshold=threshold))
     assert write.await_count == int(configured and threshold <= 70)
     assert rows("scans")[0]["status"] == "done"
