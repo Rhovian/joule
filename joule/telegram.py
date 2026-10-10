@@ -77,8 +77,9 @@ class Telegram:
         questions = json.loads(job["extra"] or "{}").get("screening_questions", [])
         for question, answer in zip(questions, content.get("answers", [])):
             text += f"\n\nQ: {question}\nA: {answer}"
+        flag = "⚠ needs Loom video\n" if "[LOOM LINK]" in text else ""
         await self.send(
-            f"{job['title']}\n{job['company'] or ''}\n{job['source']}\n"
+            f"{flag}{job['title']}\n{job['company'] or ''}\n{job['source']}\n"
             f"Fit Score: {job['score'] if job['score'] is not None else 'unscored'} "
             f"— {job['score_reason'] or ''}\n{job['link']}\n\n{text}",
             [

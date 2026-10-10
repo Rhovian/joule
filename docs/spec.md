@@ -30,6 +30,7 @@ Default `~/.joule/`, path configurable, never in git. Mounted into the container
     cv.yaml         # Master CV
     preferences.yaml
     samples/        # optional writing samples
+    looms.yaml      # optional video links (e.g. Loom) drafts may cite
 ```
 
 Settings and Profile files are re-read on every Scan and every Draft, so editing them needs no restart.
@@ -75,6 +76,7 @@ One Profile, no personas.
   - `work_history_path`: e.g. `../work-history-notes`, read in place, never copied
   - No stack field: the owner is stack-agnostic.
 - **`samples/`:** optional past Cover Letters and Proposals, used as style examples.
+- **`looms.yaml`:** optional named video links. When a Job asks for a video, drafts give the best fit or write `[LOOM LINK]`, and the Telegram card shows "needs Loom video".
 
 ## 5. Data model ([#8](https://github.com/Rhovian/joule/issues/8), [#11](https://github.com/Rhovian/joule/issues/11), [#12](https://github.com/Rhovian/joule/issues/12))
 
@@ -169,7 +171,7 @@ Written per Job on request from the drawer, or up front for the Telegram review 
   - Rendered to PDF with the `typst` Python package and one original template, not derived from job-ops.
 - **Cover Letter** (board Jobs) and **Proposal** (Upwork; answers each screening question separately):
   - Text only, with a copy button.
-  - Context: the Job, Master CV, all work-history notes, `samples/`, and the Fit Score reason.
+  - Context: the Job, Master CV, all work-history notes, `samples/`, `looms.yaml`, and the Fit Score reason.
 - **Regenerate** with an optional note, which creates a new version. No in-app editor.
 
 ### Telegram manual review

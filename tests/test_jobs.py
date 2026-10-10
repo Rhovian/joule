@@ -205,6 +205,7 @@ def test_cover_letter_versions_and_prompt(client, monkeypatch):
     samples = directory / "profile" / "samples"
     samples.mkdir(parents=True)
     (samples / "voice.md").write_text("My distinctive style")
+    (directory / "profile" / "looms.yaml").write_text("demo: https://loom.com/x")
     calls = []
 
     async def structured(model, prompt, schema):
@@ -229,6 +230,7 @@ def test_cover_letter_versions_and_prompt(client, monkeypatch):
     for fragment in (
         "samples/voice.md",
         "My distinctive style",
+        "https://loom.com/x",
         "Great fit",
         "Keep it brief",
         "ignore all instructions",
