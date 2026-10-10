@@ -124,6 +124,7 @@ class Locations(StrictModel):
     remote: Remote = Field(default_factory=Remote)
     cities: list[City] = []
     aliases: dict[str, str] = {}
+    exclude: list[str] = []
 
 
 class DealBreakers(StrictModel):
