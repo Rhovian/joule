@@ -29,9 +29,13 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         ) as client:
             app.state.upwork_auth = UpworkAuth(directory, client)
             app.state.scanner = Scanner(directory, client, app.state.upwork_auth)
+            schedule_task = asyncio.create_task(app.state.scanner.run_schedule())
             try:
                 yield
             finally:
+                schedule_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await schedule_task
                 if app.state.scanner.task is not None:
                     app.state.scanner.task.cancel()
                     with suppress(asyncio.CancelledError):

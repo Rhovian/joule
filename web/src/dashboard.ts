@@ -5,7 +5,7 @@ type Source = { name: string; last: (Omit<Scan, 'sources' | 'per_source'> & { co
 type DraftKind = 'cover_letter' | 'proposal' | 'tailored_cv';
 type Draft = { id: number; content: { text?: string; cover?: string; answers?: string[] }; note: string | null };
 type Job = {
-  drafts?: Partial<Record<DraftKind, Draft>>;
+  drafts?: Partial<Record<DraftKind, Draft>>; content_purged_at?: string | null;
   id: number; title: string; company: string | null; source: string; link: string; state: string;
   score_stale?: boolean; score_points?: { stance: string; text: string }[]; score: number | null; score_reason: string | null; filtered_reason: string | null;
   location_raw: string | null; location_unclear: number | null; pay_min: number | null;
@@ -64,7 +64,7 @@ const scoreAgain = (j: Job) => j.score === null && !j.filtered_reason ? `<button
 const dismiss = (j: Job) => `<button data-action="state" data-id="${escape(j.id)}">${j.state === 'dismissed' ? 'Restore' : 'Dismiss'}</button>`;
 const score = (j: Job) => `<span class="score ${j.score === null ? 'unscored' : j.score >= 75 ? 'high' : j.score >= 50 ? 'mid' : 'low'}">${escape(j.score ?? '—')}</span>`;
 const links = (j: Job) => `<div class="source-links">Primary · ${external(j.link, j.source)}${j.duplicates.map(d => `<span>Duplicate · ${external(d.link, d.source)}</span>`).join('')}</div>`;
-const flags = (j: Job) => `<span class="state ${['new', 'seen', 'dismissed'].includes(j.state) ? j.state : ''}">${escape(j.state)}</span>${j.score_stale ? '<span class="flag">score out of date</span>' : ''}${j.location_unclear ? '<span class="flag">location unclear</span>' : ''}${j.filtered_reason ? '<span class="flag">Filtered</span>' : ''}`;
+const flags = (j: Job) => `<span class="state ${['new', 'seen', 'dismissed'].includes(j.state) ? j.state : ''}">${escape(j.state)}</span>${j.score_stale ? '<span class="flag">score out of date</span>' : ''}${j.content_purged_at ? '<span class="flag">expired; open on Upwork</span>' : ''}${j.location_unclear ? '<span class="flag">location unclear</span>' : ''}${j.filtered_reason ? '<span class="flag">Filtered</span>' : ''}`;
 const reason = (j: Job) => `<p class="reason">${escape(j.score_reason)}</p>${j.filtered_reason ? `<p class="reason">Filtered · ${escape(j.filtered_reason)}</p>` : ''}`;
 function pay(j: Job) {
   const values = [j.pay_min, j.pay_max].filter((n): n is number => n !== null);
@@ -129,7 +129,7 @@ function renderDraft(j: Job) {
   const draft = j.drafts?.[kind], pending = pendingDrafts.has(`${j.id}:${kind}`);
   const button = `<button data-action="draft" data-kind="${escape(kind)}" data-id="${escape(j.id)}" ${pending ? 'disabled' : ''}>${pending ? 'Writing…' : draft ? 'Regenerate' : kind === 'tailored_cv' ? 'Write Tailored CV' : kind === 'proposal' ? 'Write Proposal' : 'Write Cover Letter'}</button>`;
   const text = (value: string | undefined, index: number) => `<div class="draft-text">${escape(value)}</div><button data-action="copy-draft" data-index="${escape(index)}">Copy</button>`;
-  return `<div><h4>${kind === 'tailored_cv' ? 'Tailored CV' : kind === 'proposal' ? 'Proposal' : 'Cover Letter'}</h4>${draft ? `${kind === 'tailored_cv' ? '' : text(draft.content.text ?? draft.content.cover, -1)}<a href="/api/drafts/${escape(draft.id)}/pdf" target="_blank" rel="noopener noreferrer">Open PDF ↗</a> <a href="/api/drafts/${escape(draft.id)}/pdf" download>Download PDF</a>${(draft.content.answers ?? []).map((answer, i) => `<h4>${escape(j.extra?.screening_questions?.[i])}</h4>${text(answer, i)}`).join('')}<label>Note for regeneration<input id="draft-note-${escape(kind)}" maxlength="2000" value="${escape(draft.note)}" ${pending ? 'disabled' : ''}></label>` : ''}${button}</div>`;
+  return `<div><h4>${kind === 'tailored_cv' ? 'Tailored CV' : kind === 'proposal' ? 'Proposal' : 'Cover Letter'}</h4>${draft ? `${kind === 'tailored_cv' ? '' : text(draft.content.text ?? draft.content.cover, -1)}<a href="/api/drafts/${escape(draft.id)}/pdf" target="_blank" rel="noopener noreferrer">Open PDF ↗</a> <a href="/api/drafts/${escape(draft.id)}/pdf" download>Download PDF</a>${(draft.content.answers ?? []).map((answer, i) => `<h4>${escape(j.extra?.screening_questions?.[i] ?? `Question ${i + 1}`)}</h4>${text(answer, i)}`).join('')}<label>Note for regeneration<input id="draft-note-${escape(kind)}" maxlength="2000" value="${escape(draft.note)}" ${pending ? 'disabled' : ''}></label>` : ''}${button}</div>`;
   }).join('')}</section>`;
 }
 async function writeDraft(id: number, kind: DraftKind) {
