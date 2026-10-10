@@ -4,7 +4,7 @@ import logging
 import re
 from contextlib import closing, suppress
 
-from joule import drafts
+from joule import drafts, score
 from joule.config import load_settings
 from joule.db import connect
 from joule.sources import upwork
@@ -27,7 +27,7 @@ def queue(db, threshold):
         f"SELECT * FROM jobs WHERE {ELIGIBLE} AND EXISTS "
         "(SELECT 1 FROM drafts WHERE job_id=jobs.id AND kind=CASE "
         "WHEN jobs.source='upwork' THEN 'proposal' ELSE 'cover_letter' END) "
-        "ORDER BY posted_at DESC NULLS LAST, score DESC",
+        f"ORDER BY {score.RANK} DESC NULLS LAST, posted_at DESC",
         (threshold,),
     ).fetchall()
 

@@ -36,13 +36,13 @@ async def list_jobs(
     stamp = score.fingerprint(directory, load_settings(directory))
     with closing(connect(directory / "joule.db")) as db:
         rows = db.execute(
-            "SELECT * FROM jobs WHERE primary_id IS NULL "
+            f"SELECT *, {score.RANK} AS rank FROM jobs WHERE primary_id IS NULL "
             "AND (? OR score IS NOT NULL) AND (? OR filtered_reason IS NULL) "
             "AND (? OR state != 'dismissed') "
             "AND (? OR state != 'applied') "
             "AND (? IS NULL OR source = ? OR EXISTS "
             "(SELECT 1 FROM jobs d WHERE d.primary_id = jobs.id AND d.source = ?)) "
-            "ORDER BY score DESC NULLS LAST, posted_at DESC LIMIT 500",
+            "ORDER BY rank DESC NULLS LAST, posted_at DESC LIMIT 500",
             (unscored, filtered, dismissed, applied, source, source, source),
         ).fetchall()
         return [

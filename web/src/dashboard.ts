@@ -7,7 +7,7 @@ type Draft = { id: number; content: { text?: string; cover?: string; answers?: s
 type Job = {
   drafts?: Partial<Record<DraftKind, Draft>>; content_purged_at?: string | null;
   id: number; title: string; company: string | null; source: string; link: string; state: string;
-  score_stale?: boolean; score_points?: { stance: string; text: string }[]; score: number | null; score_reason: string | null; filtered_reason: string | null;
+  score_stale?: boolean; score_points?: { stance: string; text: string }[]; score: number | null; rank?: number | null; score_reason: string | null; filtered_reason: string | null;
   location_raw: string | null; location_unclear: number | null; pay_min: number | null;
   pay_max: number | null; pay_currency: string | null; pay_period: string | null;
   duplicates: { id: number; source: string; link: string }[]; description?: string | null;
@@ -74,7 +74,7 @@ function pay(j: Job) {
 function renderJobs() {
   element('job-count').textContent = `${jobs.length} visible`;
   replace('jobs', `<table class="triage-table"><thead><tr><th>Primary Job / Sources</th><th>Fit Score / reasoning</th><th>Location / pay</th><th>State / actions</th></tr></thead><tbody>${jobs.map(j =>
-    `<tr class="${j.id === selected ? 'selected' : ''} ${j.state === 'dismissed' ? 'is-dismissed' : ''}" data-job="${escape(j.id)}"><td><button class="job-title" data-action="open" data-id="${escape(j.id)}">${escape(j.title)}</button><p class="company">${escape(j.company)}</p>${links(j)}</td><td><div class="table-score">${score(j)}<span>${j.score === null ? 'unscored' : 'Fit Score'}</span></div>${reason(j)}</td><td><p>${escape(j.location_raw)}</p><small>${escape(pay(j))}</small></td><td><div class="flags">${flags(j)}</div><div class="row-actions">${dismiss(j)}${applied(j)}${scoreAgain(j)}</div></td></tr>`).join('')}</tbody></table>${jobs.length ? '' : '<p class="empty">No visible Jobs. Run a Scan or adjust the toggles.</p>'}`);
+    `<tr class="${j.id === selected ? 'selected' : ''} ${j.state === 'dismissed' ? 'is-dismissed' : ''}" data-job="${escape(j.id)}"><td><button class="job-title" data-action="open" data-id="${escape(j.id)}">${escape(j.title)}</button><p class="company">${escape(j.company)}</p>${links(j)}</td><td><div class="table-score">${score(j)}<span>${j.score === null ? 'unscored' : 'Fit Score'}${j.rank == null ? '' : ` · rank ${Math.round(j.rank)}`}</span></div>${reason(j)}</td><td><p>${escape(j.location_raw)}</p><small>${escape(pay(j))}</small></td><td><div class="flags">${flags(j)}</div><div class="row-actions">${dismiss(j)}${applied(j)}${scoreAgain(j)}</div></td></tr>`).join('')}</tbody></table>${jobs.length ? '' : '<p class="empty">No visible Jobs. Run a Scan or adjust the toggles.</p>'}`);
 }
 async function loadJobs() {
   const version = ++jobsVersion;
