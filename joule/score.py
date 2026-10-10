@@ -21,6 +21,10 @@ RUBRIC = """| Part | Points |
 | `scoring_notes` | 10 |"""
 
 
+# Ranking: Fit Score minus 0.5 points per hour since posting.
+RANK = "score - 12 * (julianday('now') - julianday(coalesce(posted_at, 'now')))"
+
+
 class Point(StrictModel):
     stance: Literal["for", "against"]
     text: str = Field(max_length=300)

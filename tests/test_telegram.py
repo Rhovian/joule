@@ -70,7 +70,8 @@ def test_queue_rule_and_order(bot):
     db.execute("UPDATE drafts SET kind='proposal' WHERE job_id=10")
     seed(db, 11)
     db.execute("DELETE FROM drafts WHERE job_id=11")
-    assert [r["id"] for r in queue(db, 75)] == [3, 2, 1]
+    seed(db, 12, score=90, posted_at="0")
+    assert [r["id"] for r in queue(db, 75)] == [2, 1, 12, 3]
 
 
 @pytest.mark.parametrize(
