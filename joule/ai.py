@@ -1,5 +1,8 @@
 import asyncio
 import json
+import os
+import signal
+from contextlib import suppress
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -7,7 +10,7 @@ from pydantic import BaseModel, ValidationError
 
 from joule.config import Model
 
-TIMEOUT = 180
+TIMEOUT = 300
 
 
 class AIError(Exception):
@@ -66,13 +69,16 @@ async def structured[T: BaseModel](model: Model, prompt: str, schema: type[T]) -
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
+                start_new_session=True,
             )
         except OSError as error:
             raise AIError("Could not start Codex") from error
         try:
             await asyncio.wait_for(process.communicate(prompt.encode()), TIMEOUT)
         except (TimeoutError, asyncio.CancelledError) as error:
-            process.kill()
+            # Codex runs a native child under its node wrapper; kill the whole group.
+            with suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
             await process.wait()
             if isinstance(error, asyncio.CancelledError):
                 raise
