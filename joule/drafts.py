@@ -15,7 +15,9 @@ KINDS = {
 
 RULES = (
     "Use samples as style examples only. Never state pay floors or preferences. "
-    "Never invent experience. "
+    "Never invent experience. When the Job asks for a video such as a Loom, give "
+    "the best-fitting link from looms.yaml; if none fits, write [LOOM LINK]. "
+    "Never invent a URL. "
 )
 
 
@@ -29,11 +31,14 @@ class Answer(StrictModel):
 
 def context(job, data_dir):
     samples = data_dir / "profile" / "samples"
+    looms = data_dir / "profile" / "looms.yaml"
     files = score.profile_files(data_dir) + [
         (f"samples/{p.relative_to(samples).as_posix()}", p.read_bytes())
         for p in sorted(samples.rglob("*"))
         if p.is_file() and p.suffix in {".md", ".txt", ".yaml"}
     ]
+    if looms.is_file():
+        files.append(("looms.yaml", looms.read_bytes()))
     profile = "\n".join(f"## {name}\n{contents.decode()}" for name, contents in files)
     return (
         f"Profile:\n{profile}\nFit Score reason: {job['score_reason'] or ''}\n"

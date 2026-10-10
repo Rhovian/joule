@@ -4,7 +4,7 @@ The destination of [Wayfinder: joule build spec](https://github.com/Rhovian/joul
 
 ## 1. What joule is
 
-A single-user, self-hosted tool that Scans job boards and Upwork, filters Jobs against the owner's Preferences, gives each a Fit Score, and writes Drafts (Tailored CV, Cover Letter, Proposal) on request. It never submits anything.
+A single-user, self-hosted tool that Scans job boards and Upwork, filters Jobs against the owner's Preferences, gives each a Fit Score, and writes Drafts (Tailored CV, Cover Letter, Proposal) on request. It submits only an Upwork Proposal the owner confirms in Telegram; auto-submitting is out of scope.
 
 Out of scope: auto-submitting; application tracking and inbox sync; multiple users, accounts or in-app login; adding Jobs by hand; tracking AI spend or token usage; scraping Upwork.
 
@@ -30,6 +30,7 @@ Default `~/.joule/`, path configurable, never in git. Mounted into the container
     cv.yaml         # Master CV
     preferences.yaml
     samples/        # optional writing samples
+    looms.yaml      # optional video links (e.g. Loom) drafts may cite
 ```
 
 Settings and Profile files are re-read on every Scan and every Draft, so editing them needs no restart.
@@ -75,6 +76,7 @@ One Profile, no personas.
   - `work_history_path`: e.g. `../work-history-notes`, read in place, never copied
   - No stack field: the owner is stack-agnostic.
 - **`samples/`:** optional past Cover Letters and Proposals, used as style examples.
+- **`looms.yaml`:** optional named video links. When a Job asks for a video, drafts give the best fit or write `[LOOM LINK]`, and the Telegram card shows "needs Loom video".
 
 ## 5. Data model ([#8](https://github.com/Rhovian/joule/issues/8), [#11](https://github.com/Rhovian/joule/issues/11), [#12](https://github.com/Rhovian/joule/issues/12))
 
@@ -169,7 +171,7 @@ Written per Job on request from the drawer, or up front for the Telegram review 
   - Rendered to PDF with the `typst` Python package and one original template, not derived from job-ops.
 - **Cover Letter** (board Jobs) and **Proposal** (Upwork; answers each screening question separately):
   - Text only, with a copy button.
-  - Context: the Job, Master CV, all work-history notes, `samples/`, and the Fit Score reason.
+  - Context: the Job, Master CV, all work-history notes, `samples/`, `looms.yaml`, and the Fit Score reason.
 - **Regenerate** with an optional note, which creates a new version. No in-app editor.
 
 ### Telegram manual review
@@ -178,11 +180,11 @@ Set both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in the data dir `.env`, the
 
 The queue contains Primaries with no Filtered reason, state `new`, no purged content, and at least one Draft of the matching kind (`proposal` for Upwork, otherwise `cover_letter`). Their Fit Score must meet `alert_threshold`, or they must be unscored Upwork Jobs. Order: Fit Score descending (unscored last), then posted date descending. Existing Jobs without Drafts stay out.
 
-Start shows the queue head: title, company, Source, Fit Score and reason, link, and latest Draft (including screening answers). Apply marks the Job `applied`, replies "Marked applied — submit here: <link>", and shows the next card; the owner submits it manually. Skip marks it `seen` and shows the next card. Rework asks for direction, uses the owner's next text as a regenerate note, and resends that Job's card. An empty queue says "Queue empty". State changes are Primary-only and last-write-wins with dashboard edits; repeated Apply/Skip is idempotent. Rework direction is held in memory until the next text or action, and lost on restart.
+Start shows the queue head: title, company, Source, Fit Score and reason, link, and latest Draft (including screening answers). For board Jobs, Apply marks the Job `applied`, replies "Marked applied — submit here: <link>", and shows the next card; the owner submits it manually. For Upwork Jobs, Apply asks for the bid amount and optional boost Connects, showing pay and the Connects balance when available. Invalid replies get "Reply like: 95 or 95 10" and keep waiting. A valid reply shows the amount, hourly/fixed contract type and boost with Send and Cancel buttons. Send carries the Job ID, amount and boost in its callback, so confirmation needs no server state. Send claims the Job as `applied` only if its state still matches the state read and it is not already applied; a double Send submits once. It submits the latest Proposal cover and screening answers with that bid and boost. Success replies "Submitted — proposal <newProposalId> (<status>)" and shows the next card. Failure restores the prior state and replies "Upwork rejected: <message>"; a disconnected account gets "Upwork not connected — reconnect in the dashboard". Cancel resends that Job’s card. Skip marks it `seen` and shows the next card. Rework asks for direction, uses the owner's next text as a regenerate note, and resends that Job's card. An empty queue says "Queue empty". State changes are Primary-only; board Apply/Skip remains idempotent. One pending Rework direction or bid is held in memory until the next text or action, and lost on restart.
 
 ## 10. Upwork ([#2](https://github.com/Rhovian/joule/issues/2), [#16](https://github.com/Rhovian/joule/issues/16), [#9](https://github.com/Rhovian/joule/issues/9))
 
-- **Scopes:** Read marketplace Job Postings, Common Entities (read), Job Details Entities (read), View UserDetails, Ontology (read). Nothing that writes.
+- **Scopes:** Read marketplace Job Postings, Common Entities (read), Job Details Entities (read), View UserDetails, Ontology (read), Submit Proposal, Ad Credits and Connects (read).
 - **Sign-in:** OAuth2 Authorization Code with PKCE from a "Connect Upwork" button. The callback is `UPWORK_REDIRECT_URI`, used identically in authorize and token exchange:
   - Locally: `http://localhost:8000/auth/upwork/callback`.
   - On a server: `https://<host>.<tailnet>.ts.net/auth/upwork/callback`.
