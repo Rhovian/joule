@@ -58,11 +58,13 @@ def test_tick_purges_only_expired_upwork_content(setup):
 
 
 @pytest.mark.parametrize(
-    "skip", [None, "deadline", "token", "disabled", "source", "busy"]
+    "skip", [None, "deadline", "token", "off", "disabled", "source", "busy"]
 )
 def test_tick_schedule_conditions_and_busy_retry(setup, monkeypatch, skip):
     _, scanner, _, _, _ = setup
     scanner.auth.path.touch()
+    if skip != "off":
+        scanner.schedule_flag.touch()
     monkeypatch.setattr(scan.time, "monotonic", lambda: 100.0)
     if skip == "deadline":
         scanner.next_upwork = 101.0

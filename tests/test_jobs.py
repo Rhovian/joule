@@ -103,6 +103,7 @@ def test_sources(client):
             for name in ("hotfix", "hn", "remoteok", "upwork")
         ],
         "running": None,
+        "scheduled": False,
     }
     counts = {"new": 2, "duplicate": 1, "filtered": 3, "errors": ["error"]}
     with closing(connect(directory / "joule.db")) as db, db:
@@ -360,3 +361,10 @@ def test_cover_letter_pdf_name(client):
     assert pdf.headers["content-disposition"] == (
         'inline; filename="JB_CL_Coalition_Security_Inc.pdf"'
     )
+
+
+def test_schedule_toggle(client):
+    assert client.get("/api/sources").json()["scheduled"] is False
+    for on in (True, True, False, False):
+        assert client.put("/api/schedule", json={"upwork": on}).json() == {"upwork": on}
+        assert client.get("/api/sources").json()["scheduled"] is on
