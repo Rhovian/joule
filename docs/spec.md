@@ -50,7 +50,7 @@ Settings and Profile files are re-read on every Scan and every Draft, so editing
 | `alert_threshold` | 75 | Telegram alert at or above this Fit Score |
 | `max_scored_per_scan` | 100 | newest first; the rest stay unscored |
 | `results_per_search` | 50 | per JobSpy search |
-| `max_age_days` | 14 | first Scan of a Source only |
+| `max_age_days` | 3 | every Scan: older postings are skipped |
 | `source_timeout_seconds` | 120 | per Source within a Scan; detail calls run 5 at a time |
 
 ## 4. Profile ([#6](https://github.com/Rhovian/joule/issues/6))
@@ -133,7 +133,7 @@ Out of scope for now: Google Jobs (unavailable).
 
 A Scan starts when the owner clicks Scan in the dashboard (any Source) or on the schedule (Upwork only, once enabled). For each Source in turn, each with its own timeout (a failing Source is recorded and the rest continue):
 
-1. **Fetch** candidates; on a Source's first Scan, keep only those within `max_age_days`.
+1. **Fetch** candidates; keep only those posted within `max_age_days` (postings without a date are kept).
 2. **Insert** new `(source, source_id)` rows; already-seen IDs are ignored.
 3. **Link Duplicates:** match on tidied company + title (lowercase, punctuation stripped, Inc./Ltd dropped) **and** a compatible location (both remote, or the same city) against existing Primaries. Upwork Jobs are never matched. A match sets `primary_id`; the Duplicate takes the Primary's state and score.
 4. **Cheap filters**, in order: deal-breakers (companies and industries by tidied name; keywords as whole words, case-insensitive, in title + description, no regex) → work type → pay floor (only when pay is given) → location rules → Upwork client floors. A failure sets `filtered_reason`. Matching is city + country plus aliases, no geocoding; a missing or unclear location sets `location_unclear` and passes.

@@ -155,15 +155,14 @@ def setup(tmp_path, monkeypatch):
         scanner.client = original
 
 
-def test_first_scan_age_enrichment_then_seen_ids(setup):
+def test_age_cutoff_enrichment_then_seen_ids(setup):
     client, _scanner, calls, rows, run = setup
     assert run(["hotfix"])[0] is False
     assert len(rows()) == 1 and rows()[0]["description"] == "Full description"
     assert rows()[0]["first_seen_at"].endswith("+00:00")
     assert rows()[0]["remote"] == 1 and rows()[0]["location_unclear"] == 0
-    # The age cutoff stops applying once this Source has a Job.
     run(["hotfix"])
-    assert len(rows()) == 2
+    assert len(rows()) == 1
     calls.clear()
     _, id = run(["hotfix"])
     assert calls == ["/v1/jobs"]

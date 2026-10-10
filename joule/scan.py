@@ -259,15 +259,12 @@ class Scanner:
                 )
 
     async def _scan_source(self, db, source, settings, ctx, counts):
-        first = not db.execute(
-            "SELECT 1 FROM jobs WHERE source=? LIMIT 1", (source,)
-        ).fetchone()
         cutoff = datetime.now(UTC) - timedelta(days=settings.max_age_days)
         fetch, enrich = ADAPTERS[source]
         new = [
             candidate
             for candidate in await fetch(ctx)
-            if not (first and candidate.posted_at and candidate.posted_at < cutoff)
+            if not (candidate.posted_at and candidate.posted_at < cutoff)
             and not db.execute(
                 "SELECT 1 FROM jobs WHERE source=? AND source_id=?",
                 (candidate.source, candidate.source_id),
