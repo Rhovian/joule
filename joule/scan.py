@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from functools import partial
@@ -100,6 +101,42 @@ class Scanner:
         self.path = data_dir / "joule.db"
         self.busy = False
         self.task = None
+        self.next_upwork = 0.0
+
+    def tick(self):
+        settings = load_settings(self.data_dir)
+        now = datetime.now(UTC)
+        cutoff = now - timedelta(hours=settings.upwork.retention_hours)
+        with closing(connect(self.path)) as db, db:
+            db.execute(
+                "UPDATE jobs SET description=NULL, pay_min=NULL, pay_max=NULL, "
+                "pay_currency=NULL, pay_period=NULL, extra=NULL, content_purged_at=? "
+                "WHERE source='upwork' AND content_purged_at IS NULL "
+                "AND first_seen_at < ?",
+                (now.isoformat(), cutoff.isoformat()),
+            )
+        minutes = settings.schedule.upwork_minutes
+        if (
+            minutes is not None
+            and "upwork" in settings.sources
+            and self.auth.path.exists()
+            and time.monotonic() >= self.next_upwork
+        ):
+            try:
+                self.start(
+                    ["upwork"], "scheduled", settings, load_preferences(self.data_dir)
+                )
+            except ScanInProgress:
+                return
+            self.next_upwork = time.monotonic() + minutes * 60
+
+    async def run_schedule(self):
+        while True:
+            await asyncio.sleep(60)
+            try:
+                self.tick()
+            except Exception:
+                logger.exception("Scheduled Scan/purge tick failed")
 
     def start(self, sources, trigger, settings, preferences):
         if self.busy:

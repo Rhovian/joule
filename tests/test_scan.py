@@ -2,6 +2,7 @@ import asyncio
 import json
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
+from unittest.mock import Mock
 
 import httpx
 import pytest
@@ -13,6 +14,83 @@ from joule.config import Preferences, Settings
 from joule.db import connect
 from joule.score import Score
 from joule.sources import Candidate
+
+
+def test_tick_purges_only_expired_upwork_content(setup):
+    _, scanner, _, rows, _ = setup
+    now = datetime.now(UTC)
+    fields = [
+        "description",
+        "pay_min",
+        "pay_max",
+        "pay_currency",
+        "pay_period",
+        "extra",
+    ]
+    with closing(connect(scanner.path)) as db, db:
+        for id, source, age in [(1, "upwork", 3), (2, "upwork", 1), (3, "hn", 3)]:
+            db.execute(
+                "INSERT INTO jobs (id, source, source_id, title, link, first_seen_at, "
+                "description, pay_min, pay_max, pay_currency, pay_period, extra, "
+                "state, score, score_reason) "
+                "VALUES (?, ?, ?, 'Engineer', 'https://example.com', ?, "
+                "'content', 10, 20, 'USD', 'hour', '{}', 'seen', 70, 'fit')",
+                (id, source, str(id), (now - timedelta(hours=age)).isoformat()),
+            )
+        db.execute(
+            "INSERT INTO drafts (job_id, kind, text, created_at) "
+            "VALUES (1, 'proposal', 'draft', ?)",
+            (now.isoformat(),),
+        )
+    (scanner.data_dir / "settings.yaml").write_text("upwork: {retention_hours: 2}\n")
+    before = rows()
+    scanner.tick()
+    old, recent, board = rows()
+    assert all(old[field] is None for field in fields)
+    assert datetime.fromisoformat(old["content_purged_at"]) >= now
+    assert old == before[0] | dict.fromkeys(fields) | {
+        "content_purged_at": old["content_purged_at"]
+    }
+    assert [recent, board] == before[1:]
+    assert rows("drafts")[0]["text"] == "draft"
+    scanner.tick()
+    assert rows()[0] == old
+
+
+@pytest.mark.parametrize(
+    "skip", [None, "deadline", "token", "disabled", "source", "busy"]
+)
+def test_tick_schedule_conditions_and_busy_retry(setup, monkeypatch, skip):
+    _, scanner, _, _, _ = setup
+    scanner.auth.path.touch()
+    monkeypatch.setattr(scan.time, "monotonic", lambda: 100.0)
+    if skip == "deadline":
+        scanner.next_upwork = 101.0
+    if skip == "token":
+        scanner.auth.path.unlink()
+    if skip in ("disabled", "source"):
+        (scanner.data_dir / "settings.yaml").write_text(
+            "schedule: {upwork_minutes: null}"
+            if skip == "disabled"
+            else "sources: [hn]"
+        )
+    if skip == "busy":
+        scanner.busy = True
+        scanner.tick()
+        assert scanner.next_upwork == 0.0
+        scanner.busy = False
+    start = Mock()
+    monkeypatch.setattr(scanner, "start", start)
+    scanner.tick()
+    if skip not in (None, "busy"):
+        start.assert_not_called()
+    else:
+        start.assert_called_once_with(
+            ["upwork"], "scheduled", Settings(), Preferences(roles=["Engineer"])
+        )
+        assert scanner.next_upwork == 100.0 + 15 * 60
+        scanner.tick()
+        assert start.call_count == 1
 
 
 @pytest.fixture
