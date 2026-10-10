@@ -208,6 +208,7 @@ def test_cover_letter_versions_and_prompt(client, monkeypatch):
     samples.mkdir(parents=True)
     (samples / "voice.md").write_text("My distinctive style")
     (directory / "profile" / "portfolio.yaml").write_text("demo: https://loom.com/x")
+    (directory / "profile" / "answers.yaml").write_text("- question: Banked?")
     calls = []
 
     async def structured(model, prompt, schema):
@@ -233,6 +234,7 @@ def test_cover_letter_versions_and_prompt(client, monkeypatch):
         "samples/voice.md",
         "My distinctive style",
         "https://loom.com/x",
+        "Banked?",
         "Great fit",
         "Keep it brief",
         "- Letter 1",
