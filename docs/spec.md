@@ -180,7 +180,7 @@ Written only on request, per Job, from the drawer.
   - On a server: `https://<host>.<tailnet>.ts.net/auth/upwork/callback`.
 - **Tokens:** kept in `upwork-token.json` (owner-only permissions), written atomically (temp file + rename). Refreshed shortly before the 24h access expiry, keeping any replacement refresh token. If the refresh token is dead (unused for over 2 weeks), the dashboard shows "Connect Upwork" again.
 - **Refresh races:** check-then-act on token expiry — guarded by a single in-process lock around refresh, since one process owns all Upwork calls.
-- **Scheduled Scans and scoring ([#9](https://github.com/Rhovian/joule/issues/9)):** Upwork approved the key with the requested scopes and callbacks but sent no written answer on scheduled search, scoring or retention. The owner treats them as permitted: scheduled Upwork Scans and Upwork scoring are on by default; retention stays 24h. Each remains a setting.
+- **Scheduled Scans and scoring ([#9](https://github.com/Rhovian/joule/issues/9)):** Upwork approved the key with the requested scopes and callbacks but sent no written answer on scheduled search, scoring or retention. The owner treats them as permitted. Scheduled Upwork Scans are off until switched on from the dashboard Scan sidebar; Upwork scoring is on by default; retention stays 24h.
 
 ## 11. Dashboard ([#10](https://github.com/Rhovian/joule/issues/10))
 

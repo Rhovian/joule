@@ -40,7 +40,7 @@ async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> 
   return data as T;
 }
 let jobs: Job[] = [], sources: Source[] = [], selected = 0, detail: Job | null = null;
-let detailId = 0, jobsVersion = 0, connected = true, runningId: number | null = null, scan: Scan | null = null, starting = false;
+let scheduled = false, detailId = 0, jobsVersion = 0, connected = true, runningId: number | null = null, scan: Scan | null = null, starting = false;
 let noticeTimer: ReturnType<typeof setTimeout>, pollTimer: ReturnType<typeof setTimeout>;
 function notice(error: unknown) {
   element('notice').textContent = error instanceof Error ? error.message : String(error);
@@ -88,11 +88,15 @@ function counts(c?: Counts | null) {
   return c ? `<p class="scan-counts">${escape(c.new)} new · ${escape(c.duplicate)} Duplicate · ${escape(c.filtered)} Filtered · ${escape(c.scored ?? 0)} scored</p>${(c.errors ?? []).map(e => `<p class="scan-error">${escape(e)}</p>`).join('')}` : '';
 }
 function renderSources() {
-  replace('a-scans', `<section class="scan-panel"><div class="section-heading"><h2>Scans</h2><button data-action="scan" ${runningId || starting ? 'disabled' : ''}>Scan all</button></div><p class="muted">Discover Jobs from each Source.</p>${runningId ? `<div class="scan-progress" role="status"><strong>Scan in progress</strong>${scan ? scan.sources.map(name => `<div>${escape(name)}${counts(scan?.per_source[name])}</div>`).join('') : '<span>Waiting for Source counts…</span>'}</div>` : '<p class="scan-idle">Ready for a new Scan</p>'}<div class="scan-sources">${sources.map(s => `<article class="scan-source"><div><strong>${escape(s.name)}</strong><button data-action="scan" data-source="${escape(s.name)}" ${runningId || starting ? 'disabled' : ''}>Scan</button></div>${s.last ? `<small>Last Scan · ${escape(s.last.finished_at ?? s.last.started_at)} · ${escape(s.last.status)}</small>${counts(s.last.counts)}` : '<small>No Scan yet</small>'}${s.name === 'upwork' ? `<p class="connect">${connected ? '<span class="connected">● Upwork connected</span>' : '<button data-action="connect">Connect Upwork</button>'}</p>` : ''}</article>`).join('')}</div></section>`);
+  replace('a-scans', `<section class="scan-panel"><div class="section-heading"><h2>Scans</h2><button data-action="scan" ${runningId || starting ? 'disabled' : ''}>Scan all</button></div><p class="muted">Discover Jobs from each Source.</p>${runningId ? `<div class="scan-progress" role="status"><strong>Scan in progress</strong>${scan ? scan.sources.map(name => `<div>${escape(name)}${counts(scan?.per_source[name])}</div>`).join('') : '<span>Waiting for Source counts…</span>'}</div>` : '<p class="scan-idle">Ready for a new Scan</p>'}<div class="scan-sources">${sources.map(s => `<article class="scan-source"><div><strong>${escape(s.name)}</strong><button data-action="scan" data-source="${escape(s.name)}" ${runningId || starting ? 'disabled' : ''}>Scan</button></div>${s.last ? `<small>Last Scan · ${escape(s.last.finished_at ?? s.last.started_at)} · ${escape(s.last.status)}</small>${counts(s.last.counts)}` : '<small>No Scan yet</small>'}${s.name === 'upwork' ? `<p class="connect">${connected ? '<span class="connected">● Upwork connected</span>' : '<button data-action="connect">Connect Upwork</button>'}</p><button data-action="schedule" aria-pressed="${scheduled}">Scheduled Scans: ${scheduled ? 'On' : 'Off'}</button>` : ''}</article>`).join('')}</div></section>`);
+}
+async function toggleSchedule() {
+  scheduled = (await api<{ upwork: boolean }>('schedule', 'PUT', { upwork: !scheduled })).upwork;
+  renderSources();
 }
 async function loadSources() {
-  const result = await api<{ sources: Source[]; running: number | null }>('sources');
-  sources = result.sources;
+  const result = await api<{ sources: Source[]; running: number | null; scheduled: boolean }>('sources');
+  sources = result.sources; scheduled = result.scheduled;
   if (sources.some(s => s.name === 'upwork')) connected = (await api<{ connected: boolean }>('upwork/status')).connected;
   renderSources();
   if (result.running && !runningId) watchScan(result.running);
@@ -213,6 +217,7 @@ root.addEventListener('click', event => {
   const id = Number(target.dataset.id);
   if (target.dataset.action === 'open') void openJob(id).catch(notice);
   if (target.dataset.action === 'draft') void writeDraft(id, target.dataset.kind as DraftKind).catch(notice);
+  if (target.dataset.action === 'schedule') void toggleSchedule().catch(notice);
   if (target.dataset.action === 'ask') void ask(id).catch(notice);
   if (target.dataset.action === 'copy-answer') void navigator.clipboard.writeText(asks.get(detailId)?.[Number(target.dataset.index)]?.answer ?? '').catch(notice);
   if (target.dataset.action === 'copy-draft') void copyDraft(Number(target.dataset.index)).catch(notice);

@@ -217,4 +217,8 @@ async def get_sources(request: Request):
                 last["counts"] = json.loads(row["per_source"] or "{}").get(name)
                 break
         sources.append({"name": name, "last": last})
-    return {"sources": sources, "running": running["id"] if running else None}
+    return {
+        "sources": sources,
+        "running": running["id"] if running else None,
+        "scheduled": request.app.state.scanner.schedule_flag.exists(),
+    }

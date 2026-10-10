@@ -102,6 +102,8 @@ class Scanner:
         self.busy = False
         self.task = None
         self.next_upwork = 0.0
+        # Present only while the owner has scheduled Upwork Scans switched on.
+        self.schedule_flag = data_dir / "upwork-schedule-on"
 
     def tick(self):
         settings = load_settings(self.data_dir)
@@ -118,6 +120,7 @@ class Scanner:
         minutes = settings.schedule.upwork_minutes
         if (
             minutes is not None
+            and self.schedule_flag.exists()
             and "upwork" in settings.sources
             and self.auth.path.exists()
             and time.monotonic() >= self.next_upwork
@@ -308,6 +311,20 @@ async def start_scan(request: Request, body: ScanRequest):
         return {"id": scanner.start(sources, "manual", settings, preferences)}
     except ScanInProgress:
         raise HTTPException(409, "Scan in progress") from None
+
+
+class ScheduleRequest(StrictModel):
+    upwork: bool
+
+
+@router.put("/api/schedule")
+async def set_schedule(request: Request, body: ScheduleRequest):
+    flag = request.app.state.scanner.schedule_flag
+    if body.upwork:
+        flag.touch()
+    else:
+        flag.unlink(missing_ok=True)
+    return {"upwork": body.upwork}
 
 
 @router.get("/api/scans/{scan_id}")

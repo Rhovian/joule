@@ -16,7 +16,9 @@ Working now:
 - **Upwork** OAuth sign-in with token refresh; job search and screening questions.
 - **Drafts** from the Job drawer: Cover Letter (board Jobs) or Proposal with one answer per screening question (Upwork), and a Tailored CV rendered to PDF from `profile/cv.yaml`. Regenerate with a note keeps every version.
 
-Not built yet: Telegram alerts, web3.career, scheduled Upwork Scans and the 24h Upwork purge.
+- **Scheduled Upwork Scans** every `schedule.upwork_minutes`, off until switched on in the Scan sidebar; Upwork content is purged after `upwork.retention_hours`.
+
+Not built yet: Telegram alerts, web3.career.
 
 ## Run
 
