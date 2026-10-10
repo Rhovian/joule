@@ -38,7 +38,8 @@ def cities(name="New York", country="US", arrangements=None, aliases=None):
 
 
 def client(**values):
-    return {"source": "upwork", "extra": {"client": values}}
+    us = {"location": {"country": "United States"}}
+    return {"source": "upwork", "extra": {"client": us | values}}
 
 
 def limits(**values):
@@ -74,8 +75,8 @@ def limits(**values):
         ({"title": "axb"}, breakers(keywords=["a.b"]), None),
         ({}, breakers(keywords=["java"], industries=["software"]), None),
         ({"source": "upwork"}, {"work_types": ["full-time"]}, "work_type"),
-        ({"source": "upwork"}, {"work_types": ["freelance"]}, None),
-        ({"source": "upwork"}, {}, None),
+        (client(), {"work_types": ["freelance"]}, None),
+        (client(), {}, None),
         ({}, {"work_types": ["freelance"]}, None),
         (pay("hour", 10, 20), floor(hourly_floor=30), "pay"),
         (pay("hour", 10, 30), floor(hourly_floor=30), None),
@@ -133,6 +134,16 @@ def limits(**values):
         ),
         (client(payment_verified=True), limits(payment_verified=True), None),
         (client(payment_verified=False), limits(payment_verified=False), None),
+        (client(payment_verified=True), {}, None),
+        (client(payment_verified=False), {}, "upwork_client"),
+        (client(location={"country": "India"}), {}, "upwork_client"),
+        (client(location=None, total_hires=0), {}, "upwork_client"),
+        (client(location={"country": "India"}, total_hires=1), {}, None),
+        (
+            client(location={"country": "India"}),
+            limits(require_hires_outside_us=False),
+            None,
+        ),
         (
             client(),
             limits(min_spend=20, min_hire_rate=0.5, payment_verified=True),

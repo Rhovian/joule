@@ -70,7 +70,7 @@ One Profile, no personas.
       aliases: { NYC: New York }
     ```
   - `deal_breakers`: keywords, companies, industries
-  - `upwork_client`: minimum spend, minimum hire rate, payment verified
+  - `upwork_client`: minimum spend, minimum hire rate, payment verified (default on), at least one hire for clients outside the US (default on)
   - `scoring_notes`: free text for the scorer
   - `work_history_path`: e.g. `../work-history-notes`, read in place, never copied
   - No stack field: the owner is stack-agnostic.
