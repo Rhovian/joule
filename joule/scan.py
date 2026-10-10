@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 from fastapi import APIRouter, HTTPException, Request
 
-from joule import ai, filters, score
+from joule import ai, drafts, filters, score
 from joule.config import StrictModel, load_env, load_preferences, load_settings
 from joule.db import connect
 from joule.sources import (
@@ -25,6 +25,7 @@ from joule.sources import (
     weworkremotely,
     workingnomads,
 )
+from joule.telegram import ELIGIBLE, kind
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -95,7 +96,8 @@ class ScanInProgress(Exception):
 
 
 class Scanner:
-    def __init__(self, data_dir, client, auth):
+    def __init__(self, data_dir, client, auth, telegram=None):
+        self.telegram = telegram
         self.client, self.auth = client, auth
         self.data_dir = data_dir
         self.path = data_dir / "joule.db"
@@ -210,6 +212,35 @@ class Scanner:
                             save()
 
                 await asyncio.gather(*map(grade, jobs[: settings.max_scored_per_scan]))
+                if self.telegram:
+                    drafted = 0
+
+                    async def draft(item):
+                        nonlocal drafted
+                        id, source, _ = item
+                        async with limit:
+                            job = db.execute(
+                                f"SELECT * FROM jobs WHERE id=? AND {ELIGIBLE}",
+                                (id, settings.alert_threshold),
+                            ).fetchone()
+                            if job is None:
+                                return
+                            try:
+                                await drafts.write(
+                                    db, job, kind(job), None, settings, self.data_dir
+                                )
+                                drafted += 1
+                            except ai.AIError as error:
+                                progress[source]["errors"].append(
+                                    f"Draft {id}: {error}"
+                                )
+
+                    await asyncio.gather(*map(draft, ctx.inserted))
+                    if drafted:
+                        try:
+                            await self.telegram.alert(drafted, settings.alert_threshold)
+                        except Exception:
+                            logger.exception("Telegram alert failed")
                 status = "done"
         except asyncio.CancelledError:
             status = "interrupted"
