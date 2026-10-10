@@ -136,7 +136,9 @@ async def write(db, job, kind, note, settings, data_dir, auth=None):
             "Pick the one or two most relevant facts; never list credentials. For a "
             "Proposal, give one answer per screening question, in order, each two to "
             "four sentences like the samples' answers; if you lack an example, say "
-            "what you would do instead of saying you lack it.\n"
+            "what you would do instead of saying you lack it. Never repeat a fact, "
+            "example or phrase across the cover and answers: each uses evidence the "
+            "others haven't, or none.\n"
         )
         + f"{openings}Owner's note: {note or ''}\n{context(job, data_dir)}"
     )
