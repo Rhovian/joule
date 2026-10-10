@@ -61,10 +61,11 @@ function replace(id: string, html: string) {
 }
 const pendingScores = new Set<number>();
 const scoreAgain = (j: Job) => j.score === null && !j.filtered_reason ? `<button data-action="score" data-id="${escape(j.id)}" ${pendingScores.has(j.id) ? 'disabled' : ''}>Score again</button>` : '';
-const dismiss = (j: Job) => `<button data-action="state" data-id="${escape(j.id)}">${j.state === 'dismissed' ? 'Restore' : 'Dismiss'}</button>`;
+const dismiss = (j: Job) => `<button data-action="state" data-state="${j.state === 'dismissed' ? 'seen' : 'dismissed'}" data-id="${escape(j.id)}">${j.state === 'dismissed' ? 'Restore' : 'Dismiss'}</button>`;
+const applied = (j: Job) => `<button data-action="state" data-state="${j.state === 'applied' ? 'seen' : 'applied'}" data-id="${escape(j.id)}">${j.state === 'applied' ? 'Unmark applied' : 'Mark applied'}</button>`;
 const score = (j: Job) => `<span class="score ${j.score === null ? 'unscored' : j.score >= 75 ? 'high' : j.score >= 50 ? 'mid' : 'low'}">${escape(j.score ?? '—')}</span>`;
 const links = (j: Job) => `<div class="source-links">Primary · ${external(j.link, j.source)}${j.duplicates.map(d => `<span>Duplicate · ${external(d.link, d.source)}</span>`).join('')}</div>`;
-const flags = (j: Job) => `<span class="state ${['new', 'seen', 'dismissed'].includes(j.state) ? j.state : ''}">${escape(j.state)}</span>${j.score_stale ? '<span class="flag">score out of date</span>' : ''}${j.content_purged_at ? '<span class="flag">expired; open on Upwork</span>' : ''}${j.location_unclear ? '<span class="flag">location unclear</span>' : ''}${j.filtered_reason ? '<span class="flag">Filtered</span>' : ''}`;
+const flags = (j: Job) => `<span class="state ${['new', 'seen', 'dismissed', 'applied'].includes(j.state) ? j.state : ''}">${escape(j.state)}</span>${j.score_stale ? '<span class="flag">score out of date</span>' : ''}${j.content_purged_at ? '<span class="flag">expired; open on Upwork</span>' : ''}${j.location_unclear ? '<span class="flag">location unclear</span>' : ''}${j.filtered_reason ? '<span class="flag">Filtered</span>' : ''}`;
 const reason = (j: Job) => `<p class="reason">${escape(j.score_reason)}</p>${j.filtered_reason ? `<p class="reason">Filtered · ${escape(j.filtered_reason)}</p>` : ''}`;
 function pay(j: Job) {
   const values = [j.pay_min, j.pay_max].filter((n): n is number => n !== null);
@@ -73,7 +74,7 @@ function pay(j: Job) {
 function renderJobs() {
   element('job-count').textContent = `${jobs.length} visible`;
   replace('jobs', `<table class="triage-table"><thead><tr><th>Primary Job / Sources</th><th>Fit Score / reasoning</th><th>Location / pay</th><th>State / actions</th></tr></thead><tbody>${jobs.map(j =>
-    `<tr class="${j.id === selected ? 'selected' : ''} ${j.state === 'dismissed' ? 'is-dismissed' : ''}" data-job="${escape(j.id)}"><td><button class="job-title" data-action="open" data-id="${escape(j.id)}">${escape(j.title)}</button><p class="company">${escape(j.company)}</p>${links(j)}</td><td><div class="table-score">${score(j)}<span>${j.score === null ? 'unscored' : 'Fit Score'}</span></div>${reason(j)}</td><td><p>${escape(j.location_raw)}</p><small>${escape(pay(j))}</small></td><td><div class="flags">${flags(j)}</div><div class="row-actions">${dismiss(j)}${scoreAgain(j)}</div></td></tr>`).join('')}</tbody></table>${jobs.length ? '' : '<p class="empty">No visible Jobs. Run a Scan or adjust the toggles.</p>'}`);
+    `<tr class="${j.id === selected ? 'selected' : ''} ${j.state === 'dismissed' ? 'is-dismissed' : ''}" data-job="${escape(j.id)}"><td><button class="job-title" data-action="open" data-id="${escape(j.id)}">${escape(j.title)}</button><p class="company">${escape(j.company)}</p>${links(j)}</td><td><div class="table-score">${score(j)}<span>${j.score === null ? 'unscored' : 'Fit Score'}</span></div>${reason(j)}</td><td><p>${escape(j.location_raw)}</p><small>${escape(pay(j))}</small></td><td><div class="flags">${flags(j)}</div><div class="row-actions">${dismiss(j)}${applied(j)}${scoreAgain(j)}</div></td></tr>`).join('')}</tbody></table>${jobs.length ? '' : '<p class="empty">No visible Jobs. Run a Scan or adjust the toggles.</p>'}`);
 }
 async function loadJobs() {
   const version = ++jobsVersion;
@@ -170,7 +171,7 @@ function renderDetail() {
   if (!detailId) { element('detail').innerHTML = ''; return; }
   const j = detail;
   const client = j?.extra?.client;
-  replace('detail', `<div class="drawer-backdrop" data-action="close"></div><aside class="job-detail drawer" role="dialog" aria-modal="false" aria-label="Job detail" tabindex="-1"><div class="detail-top"><span class="eyebrow">PRIMARY JOB · ${escape(detailId)}</span><button data-action="close" aria-label="Close Job detail">Close ×</button></div>${j ? `<div class="detail-heading">${score(j)}<div><h2>${escape(j.title)}</h2><p>${escape(j.company)}</p></div></div><div class="flags">${flags(j)}</div><p class="job-meta">${escape(j.location_raw)} · ${escape(pay(j))}</p>${links(j)}${reason(j)}<ul class="score-points">${(j.score_points ?? []).map(p => `<li>${escape(p.stance)} · ${escape(p.text)}</li>`).join('')}</ul>${renderDraft(j)}${renderAsk(j)}${client ? `<div class="client-stats">Client · ${Object.entries(client).map(([key, value]) => `${escape(key.replaceAll('_', ' '))}: ${escape(typeof value === 'object' && value !== null ? JSON.stringify(value) : value)}`).join(' · ')}</div>` : ''}<div class="detail-actions">${dismiss(j)}${scoreAgain(j)}${external(j.link, 'Open Primary Job')}${j.extra?.apply_url ? external(j.extra.apply_url, 'Apply') : ''}</div><section class="job-content"><h3>Job detail</h3><p class="description">${escape(descriptionText(j.description ?? ''))}</p>${j.extra?.screening_questions?.length ? `<h4>Screening questions</h4><ol>${j.extra.screening_questions.map(q => `<li>${escape(q)}</li>`).join('')}</ol>` : ''}</section>` : '<p class="muted">Loading Job…</p>'}</aside>`);
+  replace('detail', `<div class="drawer-backdrop" data-action="close"></div><aside class="job-detail drawer" role="dialog" aria-modal="false" aria-label="Job detail" tabindex="-1"><div class="detail-top"><span class="eyebrow">PRIMARY JOB · ${escape(detailId)}</span><button data-action="close" aria-label="Close Job detail">Close ×</button></div>${j ? `<div class="detail-heading">${score(j)}<div><h2>${escape(j.title)}</h2><p>${escape(j.company)}</p></div></div><div class="flags">${flags(j)}</div><p class="job-meta">${escape(j.location_raw)} · ${escape(pay(j))}</p>${links(j)}${reason(j)}<ul class="score-points">${(j.score_points ?? []).map(p => `<li>${escape(p.stance)} · ${escape(p.text)}</li>`).join('')}</ul>${renderDraft(j)}${renderAsk(j)}${client ? `<div class="client-stats">Client · ${Object.entries(client).map(([key, value]) => `${escape(key.replaceAll('_', ' '))}: ${escape(typeof value === 'object' && value !== null ? JSON.stringify(value) : value)}`).join(' · ')}</div>` : ''}<div class="detail-actions">${dismiss(j)}${applied(j)}${scoreAgain(j)}${external(j.link, 'Open Primary Job')}${j.extra?.apply_url ? external(j.extra.apply_url, 'Apply') : ''}</div><section class="job-content"><h3>Job detail</h3><p class="description">${escape(descriptionText(j.description ?? ''))}</p>${j.extra?.screening_questions?.length ? `<h4>Screening questions</h4><ol>${j.extra.screening_questions.map(q => `<li>${escape(q)}</li>`).join('')}</ol>` : ''}</section>` : '<p class="muted">Loading Job…</p>'}</aside>`);
 }
 async function openJob(id: number) {
   selected = id; detailId = id; detail = null; renderJobs(); renderDetail();
@@ -188,10 +189,9 @@ function closeDetail() {
   const id = detailId; detailId = 0; detail = null; renderDetail();
   root.querySelector<HTMLElement>(`[data-action="open"][data-id="${id}"]`)?.focus({ preventScroll: true });
 }
-async function changeState(id: number) {
+async function changeState(id: number, state: string) {
   const j = detail?.id === id ? detail : jobs.find(job => job.id === id);
   if (!j) return;
-  const state = j.state === 'dismissed' ? 'seen' : 'dismissed';
   await api(`jobs/${id}`, 'PATCH', { state });
   j.state = state;
   if (detail?.id === id) { detail.state = state; renderDetail(); }
@@ -222,7 +222,7 @@ root.addEventListener('click', event => {
   if (target.dataset.action === 'copy-answer') void navigator.clipboard.writeText(asks.get(detailId)?.[Number(target.dataset.index)]?.answer ?? '').catch(notice);
   if (target.dataset.action === 'copy-draft') void copyDraft(Number(target.dataset.index)).catch(notice);
   if (target.dataset.action === 'score') void scoreJob(id).catch(notice);
-  if (target.dataset.action === 'state') void changeState(id).catch(notice);
+  if (target.dataset.action === 'state') void changeState(id, target.dataset.state!).catch(notice);
   if (target.dataset.action === 'close') closeDetail();
   if (target.dataset.action === 'scan') void startScan(target.dataset.source).catch(notice);
   if (target.dataset.action === 'connect') window.open('/auth/upwork/connect', 'upwork-connect', 'popup,width=640,height=760');
@@ -240,13 +240,14 @@ document.addEventListener('keydown', event => {
   if ((event.target as HTMLElement).closest('input, textarea, select, [contenteditable]') || event.ctrlKey || event.metaKey || event.altKey) return;
   if (event.key === 's') { event.preventDefault(); focusScans(); return; }
   if (detailId || !jobs.length) return;
-  if (['j', 'k', 'o', 'd'].includes(event.key)) event.preventDefault();
+  if (['j', 'k', 'o', 'd', 'a'].includes(event.key)) event.preventDefault();
+  const index = jobs.findIndex(j => j.id === selected);
   if (event.key === 'j' || event.key === 'k') {
-    const index = jobs.findIndex(j => j.id === selected);
     selected = jobs[Math.max(0, Math.min(jobs.length - 1, index + (event.key === 'j' ? 1 : -1)))].id;
     renderJobs(); root.querySelector(`[data-job="${selected}"]`)?.scrollIntoView({ block: 'nearest' });
   }
   if (event.key === 'o') void openJob(selected).catch(notice);
-  if (event.key === 'd') void changeState(selected).catch(notice);
+  if (event.key === 'a') void changeState(selected, jobs[index]?.state === 'applied' ? 'seen' : 'applied').catch(notice);
+  if (event.key === 'd') void changeState(selected, jobs[index]?.state === 'dismissed' ? 'seen' : 'dismissed').catch(notice);
 });
 void Promise.allSettled([loadJobs(), loadSources()]).then(results => results.forEach(r => { if (r.status === 'rejected') notice(r.reason); }));

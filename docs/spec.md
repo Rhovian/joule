@@ -89,7 +89,7 @@ One Profile, no personas.
 | `location_raw`, `remote`, `city`, `country`, `arrangement`, `location_unclear` | parsed location |
 | `pay_min`, `pay_max`, `pay_currency`, `pay_period` | `pay_period` is hour, year or fixed. Zero from a Source counts as unknown |
 | `posted_at`, `first_seen_at` | |
-| `state` | new / seen / dismissed; lives on the Primary only |
+| `state` | new / seen / dismissed / applied; lives on the Primary only |
 | `primary_id` | null on a Primary; set on a Duplicate |
 | `filtered_reason` | null unless Filtered |
 | `score`, `score_reason`, `score_points`, `scored_at`, `score_fingerprint` | Fit Score columns |
@@ -197,14 +197,14 @@ Layout A from branch `prototype/dashboard` (`0c14dd1`), rewritten for production
   - Source links for each Duplicate.
   - Fit Score and reason; state.
   - Flags: location unclear, out-of-date score, Upwork expired.
-  - Toggles: show unscored, show Filtered (with reason), show dismissed.
+  - Toggles: show unscored, show Filtered (with reason), show dismissed, show applied.
 - **Right drawer, over the table:**
   - Job detail, including Upwork client stats and screening questions.
   - For/against points.
   - Draft buttons; version list; regenerate with note; copy; PDF link.
   - Unlink, on a Duplicate.
   - Score again, on an unscored Job.
-- **Keys:** `j`/`k` move, `o` open, `d` dismiss (and restore), `s` focus Scans.
+- **Keys:** `j`/`k` move, `o` open, `d` dismiss (and restore), `a` applied (and unmark), `s` focus Scans.
 
 Opening a Job's drawer marks it seen.
 
