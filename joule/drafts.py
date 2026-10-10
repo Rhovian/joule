@@ -41,7 +41,9 @@ RANK_RULE = (
     "entry's, and a missing tag counts as 3. Decide which tags this Job is about and "
     "rate each experience by its highest rank among them. Never cite experience "
     "rated 0; lead with the highest rated that fits. Whenever you cite experience "
-    "that has a url, give its url. "
+    "that has a url, name it and give the url in parentheses, as in bloXroute "
+    "(bloxroute.com). Never use a url as a name, and drop https:// and www. from "
+    "every link. "
 )
 
 
