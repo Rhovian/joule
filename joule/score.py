@@ -14,7 +14,10 @@ from joule.sources import Candidate
 
 RUBRIC = (
     "how well the Master CV and work history match the skills, experience "
-    "and seniority the Job needs. Ignore pay, location, arrangement and work type."
+    "and seniority the Job needs. Ignore pay, location, arrangement and work type. "
+    "Skills listed in the CV count as experience. A tool's platform or close "
+    "equivalent counts as that tool (Express means Node.js, Supabase is PostgreSQL); "
+    "do not mark down one missing tool when the rest of the stack matches."
 )
 
 

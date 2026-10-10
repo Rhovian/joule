@@ -149,7 +149,7 @@ The same timer loop runs the **Upwork purge**: content (description, pay, client
 ## 8. Fit Score ([#7](https://github.com/Rhovian/joule/issues/7), [#4](https://github.com/Rhovian/joule/issues/4))
 
 - **Output:** 0–100, a one-line reason, and up to three for/against points.
-- **Prompt rubric:** how well the Master CV and work history match the skills, experience and seniority the Job needs. Pay, location, arrangement and work type are ignored; the cheap filters handle them, and Preferences are not sent to the scorer.
+- **Prompt rubric:** how well the Master CV and work history match the skills, experience and seniority the Job needs. Listed skills count as experience, a tool's platform or close equivalent counts as that tool, and one missing tool is not marked down when the rest of the stack matches. Pay, location, arrangement and work type are ignored; the cheap filters handle them, and Preferences are not sent to the scorer.
 - **Missing fields:** the scorer is told which fields are missing.
 - **Failure:** one automatic retry, then the Job is left unscored (never scored low), with a "score again" action.
 - **Fingerprint:** `score_fingerprint` hashes the Master CV, work-history notes and scoring model. A mismatch marks the score out of date.
