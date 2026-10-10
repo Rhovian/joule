@@ -31,6 +31,7 @@ async def list_jobs(
     dismissed: bool = False,
     applied: bool = False,
     source: Annotated[list[str] | None, Query()] = None,
+    sort: Literal["rank", "score"] = "rank",
 ):
     directory = request.app.state.data_dir
     stamp = score.fingerprint(directory, load_settings(directory))
@@ -43,7 +44,7 @@ async def list_jobs(
             "AND (? OR source IN (SELECT value FROM json_each(?)) OR EXISTS "
             "(SELECT 1 FROM jobs d WHERE d.primary_id = jobs.id "
             "AND d.source IN (SELECT value FROM json_each(?)))) "
-            "ORDER BY rank DESC NULLS LAST, posted_at DESC LIMIT 500",
+            f"ORDER BY {sort} DESC NULLS LAST, posted_at DESC LIMIT 500",
             (
                 unscored,
                 filtered,

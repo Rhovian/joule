@@ -41,6 +41,7 @@ async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> 
 }
 let jobs: Job[] = [], sources: Source[] = [], selected = 0, detail: Job | null = null;
 let scheduled = false, detailId = 0, jobsVersion = 0, connected = true, runningId: number | null = null, scan: Scan | null = null, starting = false;
+let byScore = false;
 let noticeTimer: ReturnType<typeof setTimeout>, pollTimer: ReturnType<typeof setTimeout>;
 function notice(error: unknown) {
   element('notice').textContent = error instanceof Error ? error.message : String(error);
@@ -73,7 +74,7 @@ function pay(j: Job) {
 }
 function renderJobs() {
   element('job-count').textContent = `${jobs.length} visible`;
-  replace('jobs', `<table class="triage-table"><thead><tr><th>Primary Job / Sources</th><th>Fit Score / reasoning</th><th>Location / pay</th><th>State / actions</th></tr></thead><tbody>${jobs.map(j =>
+  replace('jobs', `<table class="triage-table"><thead><tr><th>Primary Job / Sources</th><th><button class="sort" data-action="sort" aria-pressed="${byScore}" title="Sort by rank or Fit Score">${byScore ? 'Fit Score ▼' : 'Fit Score'} / reasoning</button></th><th>Location / pay</th><th>State / actions</th></tr></thead><tbody>${jobs.map(j =>
     `<tr class="${j.id === selected ? 'selected' : ''} ${j.state === 'dismissed' ? 'is-dismissed' : ''}" data-job="${escape(j.id)}"><td><button class="job-title" data-action="open" data-id="${escape(j.id)}">${escape(j.title)}</button><p class="company">${escape(j.company)}</p>${links(j)}</td><td><div class="table-score">${score(j)}<span>${j.score === null ? 'unscored' : 'Fit Score'}${j.rank == null ? '' : ` · rank ${Math.round(j.rank)}`}</span></div>${reason(j)}</td><td><p>${escape(j.location_raw)}</p><small>${escape(pay(j))}</small></td><td><div class="flags">${flags(j)}</div><div class="row-actions">${dismiss(j)}${applied(j)}${scoreAgain(j)}</div></td></tr>`).join('')}</tbody></table>${jobs.length ? '' : '<p class="empty">No visible Jobs. Run a Scan or adjust the toggles.</p>'}`);
 }
 async function loadJobs() {
@@ -81,6 +82,7 @@ async function loadJobs() {
   const query = new URLSearchParams(Array.from(root.querySelectorAll<HTMLInputElement>('.controls > label input'), input => [input.name, String(input.checked)]));
   const picks = Array.from(root.querySelectorAll<HTMLInputElement>('.source-picks input'));
   const checked = picks.filter(p => p.checked).map(p => p.value);
+  if (byScore) query.set('sort', 'score');
   if (checked.length < picks.length) checked.forEach(name => query.append('source', name));
   const next = picks.length && !checked.length ? [] : await api<Job[]>(`jobs?${query}`);
   if (version !== jobsVersion) return;
@@ -221,6 +223,7 @@ root.addEventListener('click', event => {
   const target = (event.target as HTMLElement).closest<HTMLElement>('[data-action]');
   if (!target || target instanceof HTMLInputElement) return;
   const id = Number(target.dataset.id);
+  if (target.dataset.action === 'sort') { byScore = !byScore; void loadJobs().catch(notice); }
   if (target.dataset.action === 'open') void openJob(id).catch(notice);
   if (target.dataset.action === 'draft') void writeDraft(id, target.dataset.kind as DraftKind).catch(notice);
   if (target.dataset.action === 'schedule') void toggleSchedule().catch(notice);
