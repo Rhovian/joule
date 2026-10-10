@@ -60,6 +60,8 @@ input[type=checkbox] { accent-color: var(--green); width: 15px; height: 15px; }
 .table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .triage-table { width: 100%; border-collapse: collapse; min-width: 860px; }
 .triage-table th { text-align: left; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); background: #edf1ea; padding: 14px 18px; }
+.triage-table th .sort { background: none; border: 0; padding: 0; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; }
+.triage-table th .sort[aria-pressed=true] { color: var(--green); }
 .triage-table td { padding: 14px 18px; border-top: 1px solid var(--line); vertical-align: top; font-size: 12px; }
 .triage-table td:nth-child(1) { width: 30%; }
 .triage-table td:nth-child(2) { width: 32%; }

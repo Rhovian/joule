@@ -16,7 +16,7 @@ def client(tmp_path):
     with TestClient(create_app(tmp_path), base_url="http://localhost") as client:
         with closing(connect(tmp_path / "joule.db")) as db, db:
             for id, score, posted, reason, state, primary in [
-                (1, 80, "2026-01-01", None, "new", None),
+                (1, 85, "2026-01-01", None, "new", None),
                 (2, 80, "2026-01-02", None, "new", None),
                 (3, None, "2026-01-03", None, "new", None),
                 (4, 90, "2026-01-04", "pay", "new", None),
@@ -59,6 +59,7 @@ def client(tmp_path):
         ("?source=hn", [1]),
         ("?source=hotfix", [1, 3]),
         ("?source=hn&source=remoteok", [2, 1]),
+        ("?sort=score", [1, 2, 3]),
     ],
 )
 def test_list(client, query, ids):
