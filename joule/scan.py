@@ -61,7 +61,7 @@ async def enrich_hotfix(ctx, candidate):
 async def fetch_upwork(ctx):
     p = ctx.preferences
     floors = (p.pay.hourly_floor, p.pay.fixed_floor, p.upwork_client.payment_verified)
-    return await upwork.search(ctx.auth, p.roles, *floors)
+    return await upwork.search(ctx.auth, p.upwork_searches or p.roles, *floors)
 
 
 async def enrich_upwork(ctx, candidate):
@@ -259,15 +259,12 @@ class Scanner:
                 )
 
     async def _scan_source(self, db, source, settings, ctx, counts):
-        first = not db.execute(
-            "SELECT 1 FROM jobs WHERE source=? LIMIT 1", (source,)
-        ).fetchone()
         cutoff = datetime.now(UTC) - timedelta(days=settings.max_age_days)
         fetch, enrich = ADAPTERS[source]
         new = [
             candidate
             for candidate in await fetch(ctx)
-            if not (first and candidate.posted_at and candidate.posted_at < cutoff)
+            if not (candidate.posted_at and candidate.posted_at < cutoff)
             and not db.execute(
                 "SELECT 1 FROM jobs WHERE source=? AND source_id=?",
                 (candidate.source, candidate.source_id),

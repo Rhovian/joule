@@ -2,7 +2,8 @@ import asyncio
 import json
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
-from unittest.mock import Mock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
@@ -154,15 +155,14 @@ def setup(tmp_path, monkeypatch):
         scanner.client = original
 
 
-def test_first_scan_age_enrichment_then_seen_ids(setup):
+def test_age_cutoff_enrichment_then_seen_ids(setup):
     client, _scanner, calls, rows, run = setup
     assert run(["hotfix"])[0] is False
     assert len(rows()) == 1 and rows()[0]["description"] == "Full description"
     assert rows()[0]["first_seen_at"].endswith("+00:00")
     assert rows()[0]["remote"] == 1 and rows()[0]["location_unclear"] == 0
-    # The age cutoff stops applying once this Source has a Job.
     run(["hotfix"])
-    assert len(rows()) == 2
+    assert len(rows()) == 1
     calls.clear()
     _, id = run(["hotfix"])
     assert calls == ["/v1/jobs"]
@@ -416,3 +416,14 @@ def test_scoring_duplicates_and_concurrency(setup, monkeypatch):
     assert maximum == 3
     assert len([r for r in rows() if r["score"] is not None]) == 4
     assert rows()[-1]["primary_id"] is not None and rows()[-1]["score"] is None
+
+
+@pytest.mark.parametrize(
+    "searches, used", [([], ["Role"]), (["Rust", "Go"], ["Rust", "Go"])]
+)
+def test_upwork_searches_fall_back_to_roles(monkeypatch, searches, used):
+    search = AsyncMock(return_value=[])
+    monkeypatch.setattr(scan.upwork, "search", search)
+    preferences = Preferences(roles=["Role"], upwork_searches=searches)
+    asyncio.run(scan.fetch_upwork(SimpleNamespace(auth=None, preferences=preferences)))
+    assert search.call_args.args[1] == used

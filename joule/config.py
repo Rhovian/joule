@@ -88,7 +88,7 @@ class Settings(StrictModel):
     alert_threshold: int = 75
     max_scored_per_scan: int = 100
     results_per_search: int = 50
-    max_age_days: int = 14
+    max_age_days: int = 3
     source_timeout_seconds: int = 120
 
 
@@ -147,6 +147,7 @@ class Preferences(StrictModel):
     locations: Locations = Field(default_factory=Locations)
     deal_breakers: DealBreakers = Field(default_factory=DealBreakers)
     upwork_client: UpworkClient = Field(default_factory=UpworkClient)
+    upwork_searches: list[str] = []
     scoring_notes: str | None = None
     work_history_path: Path | None = None
 
