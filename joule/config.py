@@ -38,6 +38,11 @@ class Model(StrictModel):
     model: str | None = None
 
 
+class Files(StrictModel):
+    cv_prefix: str = "CV"
+    cover_letter_prefix: str = "Cover_Letter"
+
+
 class Models(StrictModel):
     scoring: Model = Field(
         default_factory=lambda: Model(provider="codex", model="gpt-6-luna")
@@ -79,6 +84,7 @@ class Settings(StrictModel):
     schedule: Schedule = Field(default_factory=Schedule)
     upwork: Upwork = Field(default_factory=Upwork)
     models: Models = Field(default_factory=Models)
+    files: Files = Field(default_factory=Files)
     alert_threshold: int = 75
     max_scored_per_scan: int = 100
     results_per_search: int = 50

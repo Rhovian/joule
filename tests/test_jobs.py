@@ -270,7 +270,7 @@ def test_tailored_cv_and_pdf(client, monkeypatch):
     (profile / "cv.yaml").write_text("""basics: {name: Owner}
 work:
   - {id: a, name: a, position: Engineer, startDate: '2020', summary: Original summary}
-  - {id: b, name: b, position: Engineer, startDate: '2020'}
+  - {id: b, name: b, position: Engineer, startDate: '2020', highlights: [{id: b1, text: x}]}
 projects:
   - {id: p, name: Project, url: 'https://example.com'}
 skills: [{name: Python, keywords: [APIs]}]
@@ -321,3 +321,42 @@ def test_missing_master_cv(client, monkeypatch):
     assert response.status_code == 400 and response.json() == {
         "detail": "Master CV not found"
     }
+
+
+def test_ask(client, monkeypatch):
+    from joule import ai
+
+    prompts = []
+
+    async def structured(model, prompt, schema):
+        prompts.append(prompt)
+        return schema(answer="Because")
+
+    monkeypatch.setattr(ai, "structured", structured)
+    question = {"question": "Why are you interested in joining?"}
+    response = client.post("/api/jobs/1/ask", json=question)
+    assert response.json() == {"answer": "Because"}
+    assert question["question"] in prompts[0] and "<UNTRUSTED_JOB>" in prompts[0]
+    assert client.post("/api/jobs/6/ask", json=question).status_code == 404
+    assert client.get("/api/jobs/1").json()["drafts"] == {}
+
+
+def test_cover_letter_pdf_name(client):
+    directory = client.app.state.data_dir
+    (directory / "settings.yaml").write_text("files: {cover_letter_prefix: JB_CL}\n")
+    with closing(connect(directory / "joule.db")) as db, db:
+        db.execute("UPDATE jobs SET company='Coalition Security, Inc.' WHERE id=1")
+        db.execute(
+            "INSERT INTO drafts (id, job_id, kind, text, created_at) "
+            """VALUES (7, 1, 'cover_letter', '{"text": "Dear team,\\n\\nHi #x ]"}', 'now')"""
+        )
+        db.execute(
+            "INSERT INTO drafts (id, job_id, kind, text, created_at) "
+            """VALUES (8, 1, 'proposal', '{"cover": "Hi", "answers": []}', 'now')"""
+        )
+    assert client.get("/api/drafts/8/pdf").content.startswith(b"%PDF")
+    pdf = client.get("/api/drafts/7/pdf")
+    assert pdf.content.startswith(b"%PDF")
+    assert pdf.headers["content-disposition"] == (
+        'inline; filename="JB_CL_Coalition_Security_Inc.pdf"'
+    )

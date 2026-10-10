@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -10,9 +11,13 @@ from pydantic import Field, create_model
 from joule.config import StrictModel
 
 
-def prepare(data_dir):
+def load(data_dir):
     path = data_dir / "profile" / "cv.yaml"
-    cv = yaml.safe_load(path.read_text()) if path.is_file() else None
+    return yaml.safe_load(path.read_text()) if path.is_file() else None
+
+
+def prepare(data_dir):
+    cv = load(data_dir)
     if not isinstance(cv, dict) or not any(
         entry.get("id") for key in ("work", "projects") for entry in cv.get(key, [])
     ):
@@ -51,7 +56,7 @@ def resolve(cv, result):
     }
     for key, fields in (
         ("work", ("name", "position", "startDate", "endDate", "summary")),
-        ("projects", ("name", "entity", "roles", "url")),
+        ("projects", ("type", "name", "entity", "roles", "url", "relevance")),
     ):
         sources = {entry["id"]: entry for entry in cv.get(key, []) if entry.get("id")}
         selected = {}
@@ -60,17 +65,41 @@ def resolve(cv, result):
                 continue
             source = sources[item.id]
             entry = {field: source[field] for field in fields if field in source}
-            entry |= {"bullets": item.bullets} if key == "work" else {"text": item.text}
+            entry |= (
+                # Entries without highlights are Earlier Experience, shown as written.
+                {"bullets": item.bullets if "highlights" in source else []}
+                if key == "work"
+                else {"text": item.text}
+            )
             selected[item.id] = entry
         document[key] = list(selected.values())
     return document
 
 
-def render(document):
-    template = Path(__file__).with_name("cv.typ")
+def render(document, name="cv.typ"):
+    template = Path(__file__).with_name(name)
     return typst.compile(
         str(template),
         root=str(template.parent),
         ignore_system_fonts=True,
         sys_inputs={"document": json.dumps(document)},
     )
+
+
+def render_letter(text, data_dir):
+    cv = load(data_dir)
+    return render(
+        {
+            "basics": cv.get("basics", {}) if isinstance(cv, dict) else {},
+            "text": text,
+        },
+        "letter.typ",
+    )
+
+
+def filename(prefix, company):
+    parts = (
+        re.sub(r"[^A-Za-z0-9]+", "_", part or "").strip("_")
+        for part in (prefix, company)
+    )
+    return "_".join(part for part in parts if part) + ".pdf"
