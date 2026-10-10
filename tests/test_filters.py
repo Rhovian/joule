@@ -41,6 +41,10 @@ def exclude(*terms):
     return {"locations": {"exclude": list(terms)}}
 
 
+def onsite(*countries):
+    return {"locations": {"onsite_countries": list(countries)}}
+
+
 def client(**values):
     us = {"location": {"country": "United States"}}
     return {"source": "upwork", "extra": {"client": us | values}}
@@ -123,6 +127,11 @@ def limits(**values):
         ({"location_raw": "NYC", "remote": False}, exclude("nyc"), "location"),
         ({"location_raw": "Atlanta, GA"}, exclude("LA"), None),
         ({"location_raw": "New York", "remote": True}, exclude("new york"), None),
+        ({"remote": True, "country": "India"}, exclude("india"), "location"),
+        ({"remote": False, "country": "India"}, onsite("United States"), "location"),
+        ({"remote": False, "country": "united states"}, onsite("United States"), None),
+        ({"remote": True, "country": "India"}, onsite("United States"), None),
+        ({"remote": False}, onsite("United States"), None),
         ({"city": "Boston", "remote": None}, cities(), None),
         (client(total_spent=10), limits(min_spend=20), "upwork_client"),
         (client(total_spent=20), limits(min_spend=20), None),

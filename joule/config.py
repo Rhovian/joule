@@ -125,6 +125,7 @@ class Locations(StrictModel):
     cities: list[City] = []
     aliases: dict[str, str] = {}
     exclude: list[str] = []
+    onsite_countries: list[str] = []
 
 
 class DealBreakers(StrictModel):

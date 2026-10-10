@@ -70,8 +70,9 @@ One Profile, no personas.
         - { city: Lisbon, country: PT, arrangements: [onsite, hybrid] }
       aliases: { NYC: New York }
       exclude: [Chicago, New York, NYC]
+      onsite_countries: [United States]
     ```
-    `exclude` Filters any Job not marked remote whose raw location contains one of the words (whole word, any case), even among several cities.
+    `exclude` Filters any Job whose country is one of the words, and any Job not marked remote whose raw location contains one (whole word, any case), even among several cities. `onsite_countries`, when set, Filters any Job not marked remote whose country is known and not listed.
   - `deal_breakers`: keywords, companies, industries
   - `upwork_searches`: Upwork-only search terms; empty uses `roles`
   - `upwork_client`: minimum spend, minimum hire rate, payment verified (default on), at least one hire for clients outside the US (default on)
