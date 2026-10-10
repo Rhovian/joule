@@ -91,7 +91,8 @@ class Telegram:
         text = content.get("text", content.get("cover", ""))
         for question, answer in (a.values() for a in answers):
             text += f"\n\nQ: {question}\nA: {answer}"
-        flag = "⚠ needs Loom video\n" if "[LOOM LINK]" in text else ""
+        blanks = dict.fromkeys(re.findall(r"\[([A-Z][A-Z0-9 ,/&'-]*)\]", text))
+        flag = f"⚠ fill in: {', '.join(blanks)}\n" if blanks else ""
         await self.send(
             f"{flag}{job['title']}\n{job['company'] or ''}\n{job['source']}\n"
             f"Fit Score: {job['score'] if job['score'] is not None else 'unscored'} "

@@ -93,7 +93,7 @@ def test_actions(bot, case):
 def test_start_rework_chat_and_split(bot, monkeypatch):
     telegram, db, sent = bot
     seed(db, source="upwork", extra='{"screening_questions":["Why?"]}')
-    content = {"cover": "x" * 8000, "answers": ["[LOOM LINK]"]}
+    content = {"cover": "x" * 8000 + "[HOURLY RATE]", "answers": ["[LOOM LINK]"]}
     db.execute("UPDATE drafts SET text=?", (json.dumps(content),))
     monkeypatch.setattr(drafts, "write", AsyncMock())
     asyncio.run(telegram.handle(callback("start", 99)))
@@ -102,7 +102,7 @@ def test_start_rework_chat_and_split(bot, monkeypatch):
     parts = [p for p in sent if "text" in p]
     assert all(len(p["text"]) <= 4000 for p in parts)
     assert all("reply_markup" not in p for p in parts[:-1])
-    assert parts[0]["text"].startswith("⚠ needs Loom video\n")
+    assert parts[0]["text"].startswith("⚠ fill in: HOURLY RATE, LOOM LINK\n")
     assert "Q: Why?\nA: [LOOM LINK]" in parts[-1]["text"]
     asyncio.run(telegram.handle(callback("rework:1")))
     assert sent[-1]["text"] == "Send direction for Engineer"
