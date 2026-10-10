@@ -135,7 +135,8 @@ class DealBreakers(StrictModel):
 class UpworkClient(StrictModel):
     min_spend: float | None = None
     min_hire_rate: float | None = None
-    payment_verified: bool = False
+    payment_verified: bool = True
+    require_hires_outside_us: bool = True
 
 
 class Preferences(StrictModel):

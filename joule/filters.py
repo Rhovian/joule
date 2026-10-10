@@ -4,6 +4,8 @@ import re
 from joule.config import Preferences
 from joule.sources import Candidate
 
+US_NAMES = {"us", "usa", "united states", "united states of america"}
+
 
 def plain_text(text: str) -> str:
     return html.unescape(re.sub(r"<[^>]*>", " ", text))
@@ -106,4 +108,11 @@ def filter_reason(candidate: Candidate, preferences: Preferences) -> str | None:
             return "upwork_client: hire rate below minimum"
         if limits.payment_verified and client.get("payment_verified") is False:
             return "upwork_client: payment unverified"
+        country = (client.get("location") or {}).get("country") or ""
+        if (
+            limits.require_hires_outside_us
+            and country.casefold() not in US_NAMES
+            and not client.get("total_hires")
+        ):
+            return "upwork_client: no hires outside US"
     return None
