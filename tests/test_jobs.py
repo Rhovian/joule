@@ -270,7 +270,7 @@ def test_tailored_cv_and_pdf(client, monkeypatch):
     (profile / "cv.yaml").write_text("""basics: {name: Owner}
 work:
   - {id: a, name: a, position: Engineer, startDate: '2020', summary: Original summary}
-  - {id: b, name: b, position: Engineer, startDate: '2020'}
+  - {id: b, name: b, position: Engineer, startDate: '2020', highlights: [{id: b1, text: x}]}
 projects:
   - {id: p, name: Project, url: 'https://example.com'}
 skills: [{name: Python, keywords: [APIs]}]

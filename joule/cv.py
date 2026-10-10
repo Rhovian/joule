@@ -56,7 +56,7 @@ def resolve(cv, result):
     }
     for key, fields in (
         ("work", ("name", "position", "startDate", "endDate", "summary")),
-        ("projects", ("name", "entity", "roles", "url")),
+        ("projects", ("type", "name", "entity", "roles", "url", "relevance")),
     ):
         sources = {entry["id"]: entry for entry in cv.get(key, []) if entry.get("id")}
         selected = {}
@@ -65,7 +65,12 @@ def resolve(cv, result):
                 continue
             source = sources[item.id]
             entry = {field: source[field] for field in fields if field in source}
-            entry |= {"bullets": item.bullets} if key == "work" else {"text": item.text}
+            entry |= (
+                # Entries without highlights are Earlier Experience, shown as written.
+                {"bullets": item.bullets if "highlights" in source else []}
+                if key == "work"
+                else {"text": item.text}
+            )
             selected[item.id] = entry
         document[key] = list(selected.values())
     return document
