@@ -197,7 +197,7 @@ Layout A from branch `prototype/dashboard` (`0c14dd1`), rewritten for production
   - Source links for each Duplicate.
   - Fit Score and reason; state.
   - Flags: location unclear, out-of-date score, Upwork expired.
-  - Toggles: show unscored, show Filtered (with reason), show dismissed, show applied.
+  - Toggles: show unscored, show Filtered (with reason), show dismissed, show applied; Source picker (matches the Primary or any Duplicate).
 - **Right drawer, over the table:**
   - Job detail, including Upwork client stats and screening questions.
   - For/against points.

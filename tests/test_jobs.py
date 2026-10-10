@@ -40,6 +40,7 @@ def client(tmp_path):
                         "[]",
                     ),
                 )
+            db.execute("UPDATE jobs SET source='hn' WHERE id=6")
         yield client
 
 
@@ -52,6 +53,8 @@ def client(tmp_path):
         ("?dismissed=true", [5, 2, 1, 3]),
         ("?applied=true", [7, 2, 1, 3]),
         ("?filtered=true&dismissed=true", [5, 4, 2, 1, 3]),
+        ("?source=hn", [1]),
+        ("?source=hotfix", [2, 1, 3]),
     ],
 )
 def test_list(client, query, ids):
@@ -61,7 +64,7 @@ def test_list(client, query, ids):
     assert type(rows[0]["remote"]) is int and rows[0]["location_unclear"] == 0
     primary = next(row for row in rows if row["id"] == 1)
     assert primary["duplicates"] == [
-        {"id": 6, "source": "hotfix", "link": "https://example.com"}
+        {"id": 6, "source": "hn", "link": "https://example.com"}
     ]
 
 

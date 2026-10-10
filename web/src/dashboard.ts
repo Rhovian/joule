@@ -79,6 +79,8 @@ function renderJobs() {
 async function loadJobs() {
   const version = ++jobsVersion;
   const query = new URLSearchParams(Array.from(root.querySelectorAll<HTMLInputElement>('.controls input'), input => [input.name, String(input.checked)]));
+  const source = root.querySelector<HTMLSelectElement>('.controls select')!.value;
+  if (source) query.set('source', source);
   const next = await api<Job[]>(`jobs?${query}`);
   if (version !== jobsVersion) return;
   jobs = next;
@@ -98,6 +100,8 @@ async function toggleSchedule() {
 async function loadSources() {
   const result = await api<{ sources: Source[]; running: number | null; scheduled: boolean }>('sources');
   sources = result.sources; scheduled = result.scheduled;
+  const pick = root.querySelector<HTMLSelectElement>('.controls select')!;
+  if (pick.options.length !== sources.length + 1) pick.innerHTML = `<option value="">All Sources</option>${sources.map(s => `<option ${s.name === pick.value ? 'selected' : ''}>${escape(s.name)}</option>`).join('')}`;
   if (sources.some(s => s.name === 'upwork')) connected = (await api<{ connected: boolean }>('upwork/status')).connected;
   renderSources();
   if (result.running && !runningId) watchScan(result.running);
