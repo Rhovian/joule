@@ -74,9 +74,7 @@ def test_profile_prompt_and_fingerprint(tmp_path):
         text = score.prompt(job, tmp_path)
     for fragment in (
         score.RUBRIC,
-        "pay not stated",
         "pay_min",
-        "Rust engineer",
         "skills: Rust",
         "Built a compiler",
         "Led a team",
@@ -87,7 +85,7 @@ def test_profile_prompt_and_fingerprint(tmp_path):
     ):
         assert fragment in text
     assert "<b>" not in text and "not read" not in text
-    assert text.count("roles: [Rust engineer]") == 1
+    assert "Rust engineer" not in text
     # A Job cannot close the untrusted block early.
     assert text.count("</UNTRUSTED_JOB>") == 1
     assert '"roles"' not in text
