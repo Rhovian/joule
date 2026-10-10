@@ -54,6 +54,12 @@ def filter_reason(candidate: Candidate, preferences: Preferences) -> str | None:
         return f"pay: {max(amounts):g} below {floor:g} per {candidate.pay_period}"
 
     locations = preferences.locations
+    if candidate.remote is not True:
+        for term in locations.exclude:
+            if re.search(
+                rf"\b{re.escape(term)}\b", candidate.location_raw or "", re.IGNORECASE
+            ):
+                return f"location: {term} excluded"
     if candidate.remote is True:
         if not locations.remote.ok:
             return "location: remote not allowed"

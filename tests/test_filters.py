@@ -37,6 +37,10 @@ def cities(name="New York", country="US", arrangements=None, aliases=None):
     return {"locations": {"cities": [entry], "aliases": aliases or {}}}
 
 
+def exclude(*terms):
+    return {"locations": {"exclude": list(terms)}}
+
+
 def client(**values):
     us = {"location": {"country": "United States"}}
     return {"source": "upwork", "extra": {"client": us | values}}
@@ -115,6 +119,10 @@ def limits(**values):
         (city(arrangement="onsite"), cities(arrangements=["onsite"]), None),
         (city(), cities(arrangements=[]), None),
         ({"remote": False}, cities(), None),
+        ({"location_raw": "SF; New York, NY"}, exclude("new york"), "location"),
+        ({"location_raw": "NYC", "remote": False}, exclude("nyc"), "location"),
+        ({"location_raw": "Atlanta, GA"}, exclude("LA"), None),
+        ({"location_raw": "New York", "remote": True}, exclude("new york"), None),
         ({"city": "Boston", "remote": None}, cities(), None),
         (client(total_spent=10), limits(min_spend=20), "upwork_client"),
         (client(total_spent=20), limits(min_spend=20), None),
