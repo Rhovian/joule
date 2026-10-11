@@ -11,6 +11,7 @@ Skills under `.claude/skills/` are vendored from [mattpocock/skills](https://git
 Working now:
 
 - **Scans** from the dashboard, per Source or all at once: HN Who's Hiring, We Work Remotely, RemoteOK, Hotfix, Upwork, Working Nomads, FreeHire, Golang Jobs, getarustjob, plus opt-in Indeed, LinkedIn, Glassdoor and Adzuna US. New Jobs are deduplicated across Sources (Duplicates link to their Primary) and run through the cheap filters (deal-breakers, work type, pay floor, location, Upwork client floors).
+  We Work Remotely uses the full-stack, back-end, DevOps/sysadmin and programming category RSS feeds, with repeated Jobs returned once.
 - **Fit Score** from Codex, with a reason and for/against points; new surviving Primaries score during Scans, with manual retry and stale-score flags.
 - **Dashboard** at `/`: triage table with unscored / Filtered / dismissed / applied toggles and Source checkboxes, Job drawer, Scan sidebar with live progress and last-Scan counts per Source, Connect Upwork in a popup. Keys: `j`/`k` move, `o` open, `d` dismiss/restore, `a` applied/unmark, `s` Scans, `Esc` close.
 - **Upwork** OAuth sign-in with token refresh; job search and screening questions.
