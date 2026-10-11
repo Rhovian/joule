@@ -99,7 +99,7 @@ async def search(
     payment_verified: bool,
 ) -> list[Candidate]:
     filters = {
-        "pagination_eq": {"first": 50},
+        "pagination_eq": {"first": 100},
         "verifiedPaymentOnly_eq": payment_verified,
     }
     if hourly_floor is not None:

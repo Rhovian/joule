@@ -77,7 +77,7 @@ def test_search(tmp_path, ciphertext, kind, amount, expected):
         assert "screeningQuestions" not in request["query"]
         assert request["variables"]["filter"] == {
             "searchExpression_eq": role,
-            "pagination_eq": {"first": 50},
+            "pagination_eq": {"first": 100},
             "hourlyRate_eq": {"rangeStart": 26},
             "budgetRange_eq": {"rangeStart": 100},
             "verifiedPaymentOnly_eq": True,
