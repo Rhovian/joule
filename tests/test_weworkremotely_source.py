@@ -5,7 +5,14 @@ import httpx
 import pytest
 
 from joule.sources import BROWSER_USER_AGENT
-from joule.sources.weworkremotely import JOBS_URL, search
+from joule.sources.weworkremotely import JOBS_URLS, search
+
+EXPECTED_URLS = [
+    "https://weworkremotely.com/categories/remote-full-stack-programming-jobs.rss",
+    "https://weworkremotely.com/categories/remote-back-end-programming-jobs.rss",
+    "https://weworkremotely.com/categories/remote-devops-sysadmin-jobs.rss",
+    "https://weworkremotely.com/categories/remote-programming-jobs.rss",
+]
 
 
 def run(handler):
@@ -27,7 +34,7 @@ def test_search(split):
 
     def respond(request):
         requests.append(request)
-        assert request.method == "GET" and str(request.url) == JOBS_URL
+        assert request.method == "GET"
         assert request.headers["User-Agent"] == BROWSER_USER_AGENT
         return httpx.Response(
             200,
@@ -42,7 +49,8 @@ def test_search(split):
         )
 
     jobs = run(respond)
-    assert len(requests) == len(jobs) == 1
+    assert [str(request.url) for request in requests] == EXPECTED_URLS
+    assert len(jobs) == 1
     job = jobs[0]
     assert job.source == "weworkremotely"
     assert job.link == "https://weworkremotely.com/remote-jobs/synthetic"
@@ -56,6 +64,42 @@ def test_search(split):
     assert (job.pay_min, job.pay_max, job.pay_currency, job.pay_period) == (None,) * 4
 
 
-def test_errors():
+def test_merges_categories_and_keeps_first_duplicate():
+    def respond(request):
+        index = EXPECTED_URLS.index(str(request.url))
+        return httpx.Response(
+            200,
+            text=f"""
+            <rss><channel>
+            <item><guid>shared-id</guid><title>Shared role {index}</title>
+            <link>https://weworkremotely.com/remote-jobs/shared</link></item>
+            <item><guid>unique-{index}</guid><title>Unique role {index}</title>
+            <link>https://weworkremotely.com/remote-jobs/unique-{index}</link></item>
+            </channel></rss>
+            """,
+        )
+
+    jobs = run(respond)
+    assert [job.source_id for job in jobs] == [
+        "shared-id",
+        "unique-0",
+        "unique-1",
+        "unique-2",
+        "unique-3",
+    ]
+    assert jobs[0].title == "Shared role 0"
+
+
+def test_empty_categories():
+    assert run(lambda r: httpx.Response(200, text="<rss><channel /></rss>")) == []
+
+
+@pytest.mark.parametrize("failed_url", JOBS_URLS)
+def test_errors(failed_url):
     with pytest.raises(httpx.HTTPStatusError, match="403"):
-        run(lambda r: httpx.Response(403))
+        run(
+            lambda r: httpx.Response(
+                403 if str(r.url) == failed_url else 200,
+                text="<rss><channel /></rss>",
+            )
+        )

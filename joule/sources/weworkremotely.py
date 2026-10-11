@@ -5,7 +5,12 @@ import httpx
 
 from joule.sources import BROWSER_USER_AGENT, Candidate
 
-JOBS_URL = "https://weworkremotely.com/remote-jobs.rss"
+JOBS_URLS = (
+    "https://weworkremotely.com/categories/remote-full-stack-programming-jobs.rss",
+    "https://weworkremotely.com/categories/remote-back-end-programming-jobs.rss",
+    "https://weworkremotely.com/categories/remote-devops-sysadmin-jobs.rss",
+    "https://weworkremotely.com/categories/remote-programming-jobs.rss",
+)
 
 
 def _candidate(item: ElementTree.Element) -> Candidate:
@@ -28,7 +33,12 @@ def _candidate(item: ElementTree.Element) -> Candidate:
 
 
 async def search(client: httpx.AsyncClient) -> list[Candidate]:
-    response = await client.get(JOBS_URL, headers={"User-Agent": BROWSER_USER_AGENT})
-    response.raise_for_status()
-    feed = ElementTree.fromstring(response.content)
-    return [_candidate(item) for item in feed.findall("./channel/item")]
+    candidates = {}
+    for url in JOBS_URLS:
+        response = await client.get(url, headers={"User-Agent": BROWSER_USER_AGENT})
+        response.raise_for_status()
+        feed = ElementTree.fromstring(response.content)
+        for item in feed.findall("./channel/item"):
+            candidate = _candidate(item)
+            candidates.setdefault(candidate.source_id, candidate)
+    return list(candidates.values())
