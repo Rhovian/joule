@@ -261,7 +261,8 @@ class Scanner:
                 )
 
     async def _scan_source(self, db, source, settings, ctx, counts):
-        cutoff = datetime.now(UTC) - timedelta(days=settings.max_age_days)
+        days = settings.source_max_age_days.get(source, settings.max_age_days)
+        cutoff = datetime.now(UTC) - timedelta(days=days)
         fetch, enrich = ADAPTERS[source]
         new = [
             candidate

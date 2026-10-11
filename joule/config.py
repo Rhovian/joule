@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 import yaml
 from dotenv import dotenv_values
@@ -50,25 +50,26 @@ class Models(StrictModel):
     drafts: Model = Field(default_factory=lambda: Model(provider="codex"))
 
 
+Source = Literal[
+    "hn",
+    "weworkremotely",
+    "remoteok",
+    "web3career",
+    "indeed",
+    "linkedin",
+    "glassdoor",
+    "upwork",
+    "hotfix",
+    "workingnomads",
+    "freehire",
+    "golangjobs",
+    "getarustjob",
+    "adzuna",
+]
+
+
 class Settings(StrictModel):
-    sources: list[
-        Literal[
-            "hn",
-            "weworkremotely",
-            "remoteok",
-            "web3career",
-            "indeed",
-            "linkedin",
-            "glassdoor",
-            "upwork",
-            "hotfix",
-            "workingnomads",
-            "freehire",
-            "golangjobs",
-            "getarustjob",
-            "adzuna",
-        ]
-    ] = Field(
+    sources: list[Source] = Field(
         default_factory=lambda: [
             "hn",
             "weworkremotely",
@@ -89,6 +90,9 @@ class Settings(StrictModel):
     max_scored_per_scan: int = 100
     results_per_search: int = 50
     max_age_days: int = 3
+    source_max_age_days: dict[Source, Annotated[int, Field(ge=0)]] = Field(
+        default_factory=lambda: {"golangjobs": 7, "getarustjob": 7}
+    )
     source_timeout_seconds: int = 120
 
 

@@ -427,3 +427,46 @@ def test_upwork_searches_fall_back_to_roles(monkeypatch, searches, used):
     preferences = Preferences(roles=["Role"], upwork_searches=searches)
     asyncio.run(scan.fetch_upwork(SimpleNamespace(auth=None, preferences=preferences)))
     assert search.call_args.args[1] == used
+
+
+@pytest.mark.parametrize(
+    "source, overrides, days",
+    [
+        ("golangjobs", None, 7),
+        ("getarustjob", None, 7),
+        ("remoteok", None, 3),
+        ("golangjobs", {"golangjobs": 10}, 10),
+        ("getarustjob", {"getarustjob": 2}, 2),
+        ("remoteok", {"remoteok": 0}, 0),
+        ("golangjobs", {}, 3),
+    ],
+)
+def test_per_source_age_cutoff(setup, monkeypatch, source, overrides, days):
+    _, _, _, rows, run = setup
+    now = datetime.now(UTC)
+    monkeypatch.setattr(scan, "datetime", Mock(now=lambda tz: now))
+    cutoff = now - timedelta(days=days)
+
+    async def fetch(ctx):
+        return [
+            Candidate(
+                source=source,
+                source_id=id,
+                title=id,
+                link="https://example.com",
+                posted_at=posted_at,
+            )
+            for id, posted_at in [
+                ("older", cutoff - timedelta(seconds=1)),
+                ("boundary", cutoff),
+                ("newer", cutoff + timedelta(seconds=1)),
+                ("undated", None),
+            ]
+        ]
+
+    enrich = AsyncMock()
+    monkeypatch.setitem(scan.ADAPTERS, source, (fetch, enrich))
+    values = {} if overrides is None else {"source_max_age_days": overrides}
+    run([source], Settings(max_scored_per_scan=0, **values))
+    assert {row["source_id"] for row in rows()} == {"boundary", "newer", "undated"}
+    assert enrich.await_count == 3

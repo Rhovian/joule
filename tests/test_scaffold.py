@@ -23,6 +23,8 @@ def test_missing_settings_use_defaults(tmp_path):
         "golangjobs",
         "getarustjob",
     ]
+    assert settings.max_age_days == 3
+    assert settings.source_max_age_days == {"golangjobs": 7, "getarustjob": 7}
     assert settings.models.scoring.model == "gpt-6-luna"
     assert settings.models.scoring.provider == "codex"
     assert settings.models.drafts.model is None
@@ -131,3 +133,23 @@ def test_codex_model_override_is_optional(tmp_path):
     settings = load_settings(tmp_path)
     assert settings.models.scoring.model is None
     assert settings.models.drafts.model == "chosen"
+
+
+def test_source_age_overrides_replace_defaults_and_reread(tmp_path):
+    path = tmp_path / "settings.yaml"
+    path.write_text("source_max_age_days: {golangjobs: 10, remoteok: 5}\n")
+    assert load_settings(tmp_path).source_max_age_days == {
+        "golangjobs": 10,
+        "remoteok": 5,
+    }
+    path.write_text("source_max_age_days: {}\n")
+    assert load_settings(tmp_path).source_max_age_days == {}
+
+
+@pytest.mark.parametrize(
+    "override", ["{typo: 7}", "{golangjobs: -1}", "{golangjobs: 1.5}"]
+)
+def test_invalid_source_age_overrides_raise(tmp_path, override):
+    (tmp_path / "settings.yaml").write_text(f"source_max_age_days: {override}\n")
+    with pytest.raises(ValidationError):
+        load_settings(tmp_path)
