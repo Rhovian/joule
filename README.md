@@ -48,7 +48,7 @@ Everything joule reads and writes lives in `~/.joule`, mounted into the containe
 
 Scoring uses the host’s Codex login; work history must live under `~/.joule` to be visible in Docker.
 
-`settings.yaml` and `preferences.yaml` are re-read on every Scan; no restart needed.
+`settings.yaml` and `preferences.yaml` are re-read on every Scan; no restart needed. Job age cutoffs default to 3 days, with 7-day overrides for `golangjobs` and `getarustjob`; edit `source_max_age_days` in `settings.yaml` (spec §3) to change them.
 
 ## Develop
 
