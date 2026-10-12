@@ -11,7 +11,7 @@ from joule import ai, drafts, scan
 from joule.config import Settings
 from joule.db import connect, init_db
 from joule.sources import Candidate
-from joule.telegram import Telegram, queue
+from joule.telegram import Telegram, blanks, queue
 from joule.upwork_auth import UpworkAuth, UpworkNotConnected
 from tests.test_scan import setup  # noqa: F401 — registers the shared pytest fixture
 
@@ -56,6 +56,65 @@ def callback(data, chat=42):
             "message": {"chat": {"id": chat}},
         }
     }
+
+
+def test_blanks_preserves_unicode_ranges_and_order():
+    names = ["AVAILABILITY OVER NEXT 4–8 WEEKS", "RATE—USD", "HOURLY RATE"]
+    content = {
+        "cover": " ".join(f"[{name}]" for name in names),
+        "answers": [f"[{names[0]}]", "[ordinary aside]", "[95]"],
+    }
+    assert blanks(content) == names
+
+
+@pytest.mark.parametrize("field", ["cover", "answers"])
+def test_unicode_placeholder_card_send_guard_and_fill(bot, monkeypatch, field):
+    telegram, db, sent = bot
+    seed(db, extra=json.dumps({"screening_questions": ["Availability?"]}))
+    name = "AVAILABILITY OVER NEXT 4–8 WEEKS"
+    text = f"I'm available 30–40 hours a week, starting immediately, with [{name}]."
+    content = {
+        "cover": text if field == "cover" else "Hello",
+        "answers": [text if field == "answers" else "Available"],
+    }
+    db.execute("UPDATE drafts SET text=?", (json.dumps(content),))
+    submit = AsyncMock()
+    monkeypatch.setattr("joule.telegram.upwork.submit_proposal", submit)
+
+    asyncio.run(telegram.handle(callback("start")))
+    assert sent[-1]["text"].startswith(f"⚠ fill in: {name}\n")
+    assert sent[-1]["reply_markup"]["inline_keyboard"][0][0]["text"] == "Fill"
+    asyncio.run(telegram.handle(callback("send:1:95:0")))
+    assert sent[-1]["text"] == f"Fill in placeholders first: {name}"
+    submit.assert_not_awaited()
+    assert db.execute("SELECT state FROM jobs").fetchone()[0] == "new"
+
+    asyncio.run(telegram.handle(callback("fill:1")))
+    assert sent[-1]["text"] == f"Reply one line per blank, in order: {name}"
+    (telegram.data_dir / "profile").mkdir()
+    value = 'no planned leave for 4–8 weeks ("confirmed")'
+    asyncio.run(
+        telegram.handle(
+            {"message": {"chat": {"id": 42}, "from": {"id": 42}, "text": value}}
+        )
+    )
+    filled = json.loads(
+        db.execute("SELECT text FROM drafts ORDER BY id DESC").fetchone()[0]
+    )
+    assert filled == {
+        "cover": text.replace(f"[{name}]", value) if field == "cover" else "Hello",
+        "answers": [
+            text.replace(f"[{name}]", value) if field == "answers" else "Available"
+        ],
+    }
+    assert blanks(filled) == []
+    assert sent[-1]["reply_markup"]["inline_keyboard"][0][0]["text"] == "Apply"
+    bank = yaml.safe_load((telegram.data_dir / "profile" / "answers.yaml").read_text())
+    assert bank == (
+        [{"question": "Availability?", "answer": filled["answers"][0]}]
+        if field == "answers"
+        else None
+    )
 
 
 def test_queue_rule_and_order(bot):

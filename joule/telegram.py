@@ -28,8 +28,14 @@ def eligible(settings):
 
 
 def blanks(content):
+    # JSON escapes non-ASCII by default; keep punctuation visible to the matcher.
+    # https://docs.python.org/3.13/library/json.html#json.dumps
     return list(
-        dict.fromkeys(re.findall(r"\[([A-Z][A-Z0-9 ,/&'-]*)\]", json.dumps(content)))
+        dict.fromkeys(
+            re.findall(
+                r"\[([A-Z][A-Z0-9 ,/&'–—-]*)\]", json.dumps(content, ensure_ascii=False)
+            )
+        )
     )
 
 
@@ -145,7 +151,8 @@ class Telegram:
             if action in ("fill", "values"):
                 content, pairs = proposal(db, job)
                 names = blanks(content)
-                text = json.dumps(content)
+                # Match the Unicode names returned by blanks() during replacement.
+                text = json.dumps(content, ensure_ascii=False)
                 if action == "fill":
                     self.awaiting = ("values", job_id)
                     return await self.send(
