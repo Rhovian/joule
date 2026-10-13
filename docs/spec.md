@@ -6,7 +6,9 @@ The destination of [Wayfinder: joule build spec](https://github.com/Rhovian/joul
 
 A single-user, self-hosted tool that Scans job boards and Upwork, filters Jobs against the owner's Preferences, gives each a Fit Score, and writes Drafts (Tailored CV, Cover Letter, Proposal) on request. It submits only an Upwork Proposal the owner confirms in Telegram; auto-submitting is out of scope.
 
-Out of scope: auto-submitting; application tracking and inbox sync; multiple users, accounts or in-app login; adding Jobs by hand; tracking AI spend or token usage; scraping Upwork.
+Out of scope: auto-submitting; application tracking and inbox sync; multiple users, accounts or in-app login; tracking AI spend or token usage; scraping Upwork.
+
+Manual input is in scope by owner decision (2026-10-12), superseding [#15](https://github.com/Rhovian/joule/issues/15). The dashboard accepts a pasted Upwork Job description and screening questions and returns a one-off Proposal (cover text and one answer per question, in order; [#63](https://github.com/Rhovian/joule/issues/63)). Inputs and outputs are not stored as Jobs or Drafts, scored, or queued in Telegram. For other Sources, the dashboard accepts a Job title and description and offers a one-off Tailored CV PDF from `profile/cv.yaml` ([#64](https://github.com/Rhovian/joule/issues/64)); no Cover Letter is offered. The owner downloads or copies and submits the material.
 
 ## 2. Architecture
 
