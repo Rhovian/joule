@@ -15,6 +15,7 @@ from joule.config import Preferences, Settings
 from joule.db import connect
 from joule.score import Score
 from joule.sources import Candidate
+from joule.telegram import queue
 
 
 def test_tick_purges_only_expired_upwork_content(setup):
@@ -134,10 +135,10 @@ def setup(tmp_path, monkeypatch):
             with closing(connect(scanner.path)) as db:
                 return [dict(row) for row in db.execute(f"SELECT * FROM {table}")]
 
-        async def run(sources, settings=None):
+        async def run(sources, settings=None, trigger="manual"):
             id = scanner.start(
                 sources,
-                "manual",
+                trigger,
                 settings or Settings(),
                 Preferences(roles=["Engineer"]),
             )
@@ -149,7 +150,9 @@ def setup(tmp_path, monkeypatch):
             scanner,
             calls,
             rows,
-            lambda sources, settings=None: client.portal.call(run, sources, settings),
+            lambda sources, settings=None, trigger="manual": client.portal.call(
+                run, sources, settings, trigger
+            ),
         )
         client.portal.call(mocked.aclose)
         scanner.client = original
@@ -427,6 +430,104 @@ def test_upwork_searches_fall_back_to_roles(monkeypatch, searches, used):
     preferences = Preferences(roles=["Role"], upwork_searches=searches)
     asyncio.run(scan.fetch_upwork(SimpleNamespace(auth=None, preferences=preferences)))
     assert search.call_args.args[1] == used
+
+
+@pytest.mark.parametrize("cause", ["failure", "cap"])
+def test_unscored_upwork_jobs_retry_on_later_scan(setup, monkeypatch, cause):
+    _, scanner, _, rows, run = setup
+    jobs = [
+        Candidate(
+            source="upwork",
+            source_id=str(i),
+            title=str(i),
+            link="x",
+            posted_at=datetime.now(UTC) - timedelta(hours=i),
+        )
+        for i in range(3)
+    ]
+    monkeypatch.setitem(scan.ADAPTERS, "upwork", (AsyncMock(return_value=jobs), None))
+    structured = AsyncMock(return_value=Score(score=70, reason="fit", points=[]))
+    if cause == "failure":
+        structured.side_effect = ai.AIError("offline")
+    monkeypatch.setattr(ai, "structured", structured)
+    settings = Settings(max_scored_per_scan=1, alert_threshold=60)
+    run(["upwork"], settings)
+    pending = [row["id"] for row in rows() if row["score"] is None]
+    assert len(pending) == (3 if cause == "failure" else 2)
+    counts = json.loads(rows("scans")[-1]["per_source"])["upwork"]
+    assert counts["scored"] == (0 if cause == "failure" else 1)
+    assert counts["errors"] == (["Score 1: offline"] if cause == "failure" else [])
+
+    # Even with a Draft, an unscored Job stays out of the Telegram queue.
+    with closing(connect(scanner.path)) as db, db:
+        for id in pending:
+            db.execute(
+                "INSERT INTO drafts (job_id, kind, text, created_at) "
+                "VALUES (?, 'proposal', '{}', 'now')",
+                (id,),
+            )
+        assert not queue(db, settings)
+
+    structured.side_effect = None
+    structured.reset_mock()
+    for id in pending:
+        run(["upwork"], settings)
+        counts = json.loads(rows("scans")[-1]["per_source"])["upwork"]
+        assert counts["new"] == 0
+        assert counts["scored"] == 1 and counts["errors"] == []
+        assert next(row for row in rows() if row["id"] == id)["score"] == 70
+    assert structured.await_count == len(pending)
+    run(["upwork"], settings)
+    assert structured.await_count == len(pending)
+    with closing(connect(scanner.path)) as db:
+        assert {row["id"] for row in queue(db, settings)} == set(pending)
+
+
+def test_upwork_rescoring_only_selects_eligible_jobs(setup, monkeypatch):
+    _, scanner, _, rows, run = setup
+    monkeypatch.setitem(scan.ADAPTERS, "upwork", (AsyncMock(return_value=[]), None))
+    variants = [
+        {},
+        {"filtered_reason": "no"},
+        {"state": "seen"},
+        {"state": "dismissed"},
+        {"state": "applied"},
+        {"content_purged_at": "now"},
+        {"primary_id": 1},
+        {"score": 0},
+        {"source": "remoteok"},
+    ]
+    with closing(connect(scanner.path)) as db, db:
+        for id, variant in enumerate(variants, 1):
+            values = {
+                "id": id,
+                "source": "upwork",
+                "source_id": str(id),
+                "title": str(id),
+                "link": "x",
+                "first_seen_at": datetime.now(UTC).isoformat(),
+            } | variant
+            db.execute(
+                f"INSERT INTO jobs ({', '.join(values)}) "
+                f"VALUES ({', '.join('?' for _ in values)})",
+                tuple(values.values()),
+            )
+    run(["hotfix"])
+    assert rows()[0]["score"] is None
+    run(["upwork"], Settings(upwork={"scoring": False}))
+    assert rows()[0]["score"] is None
+    run(["upwork"])
+    assert [row["score"] for row in rows()[: len(variants)]] == [
+        70,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        0,
+        None,
+    ]
 
 
 @pytest.mark.parametrize(

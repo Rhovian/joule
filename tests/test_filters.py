@@ -208,3 +208,63 @@ def test_filter_reason(job, preferences, expected):
     else:
         assert reason is not None and reason.startswith(f"{expected}: ")
         assert reason.removeprefix(f"{expected}: ").strip()
+
+
+@pytest.mark.parametrize(
+    "country, excluded",
+    [
+        ("India", "india"),
+        ("IND", "india"),
+        ("in", "india"),
+        ("Ukraine", "ukraine"),
+        ("UKR", "ukraine"),
+        ("UA", "ukraine"),
+        ("Philippines", "philippines"),
+        ("PHL", "philippines"),
+        ("PH", "philippines"),
+        ("United States", "usa"),
+        ("USA", "united states"),
+        ("United Kingdom", "gbr"),
+        ("GBR", "united kingdom"),
+        ("CAN", "canada"),
+        ("Canada", "ca"),
+        ("DEU", "germany"),
+        ("Germany", "de"),
+        ("Republic of India", "IND"),
+        (" Unknown Country ", "unknown country"),
+    ],
+)
+def test_upwork_client_country_excluded(country, excluded):
+    candidate = Candidate(
+        source="upwork",
+        source_id="1",
+        title="Engineer",
+        link="x",
+        remote=True,
+        extra={"client": {"location": {"country": country}}},
+    )
+    preferences = Preferences(roles=[], locations={"exclude": [excluded]})
+    assert filter_reason(candidate, preferences) == f"location: {excluded} excluded"
+
+
+@pytest.mark.parametrize(
+    "source, extra",
+    [
+        ("upwork", {}),
+        ("upwork", {"client": None}),
+        ("upwork", {"client": {"location": None}}),
+        ("upwork", {"client": {"location": {"country": None}}}),
+        ("upwork", {"client": {"location": {"country": "Canada"}}}),
+        ("hotfix", {"client": {"location": {"country": "India"}}}),
+    ],
+)
+def test_client_country_excludes_leave_other_jobs_alone(source, extra):
+    candidate = Candidate(
+        source=source, source_id="1", title="Engineer", link="x", extra=extra
+    )
+    preferences = Preferences(
+        roles=[],
+        locations={"exclude": ["india"], "remote": {"countries": ["US"]}},
+        upwork_client={"require_hires_outside_us": False},
+    )
+    assert filter_reason(candidate, preferences) is None
