@@ -283,7 +283,12 @@ def test_proposal_guidance_is_scoped(client, monkeypatch, kind):
     path = "/api/jobs/1/ask" if kind == "ask" else "/api/jobs/1/drafts"
     payload = {"question": "Why?"} if kind == "ask" else {"kind": kind}
     assert client.post(path, json=payload).status_code == 200
-    for fragment in ("Use past tense", "Reserve words", drafts.RANK_RULE):
+    for fragment in (
+        "Use past tense",
+        "Reserve words",
+        "For experience related to your [need], at [company] I...",
+        drafts.RANK_RULE,
+    ):
         assert (fragment in prompts[0]) == (kind == "proposal")
     assert ("one-line greeting" in prompts[0]) == (kind == "cover_letter")
 
