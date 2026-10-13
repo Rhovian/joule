@@ -135,10 +135,10 @@ def setup(tmp_path, monkeypatch):
             with closing(connect(scanner.path)) as db:
                 return [dict(row) for row in db.execute(f"SELECT * FROM {table}")]
 
-        async def run(sources, settings=None):
+        async def run(sources, settings=None, trigger="manual"):
             id = scanner.start(
                 sources,
-                "manual",
+                trigger,
                 settings or Settings(),
                 Preferences(roles=["Engineer"]),
             )
@@ -150,7 +150,9 @@ def setup(tmp_path, monkeypatch):
             scanner,
             calls,
             rows,
-            lambda sources, settings=None: client.portal.call(run, sources, settings),
+            lambda sources, settings=None, trigger="manual": client.portal.call(
+                run, sources, settings, trigger
+            ),
         )
         client.portal.call(mocked.aclose)
         scanner.client = original

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 from fastapi import APIRouter, HTTPException, Request
 
-from joule import ai, drafts, filters, score
+from joule import ai, drafts, filters, scan_alerts, score
 from joule.config import StrictModel, load_env, load_preferences, load_settings
 from joule.db import connect
 from joule.sources import (
@@ -147,6 +147,7 @@ class Scanner:
                 (json.dumps(sources), trigger, datetime.now(UTC).isoformat()),
             ).lastrowid
         ctx = SimpleNamespace(
+            trigger=trigger,
             client=self.client,
             auth=self.auth,
             preferences=preferences,
@@ -256,17 +257,22 @@ class Scanner:
             status = "interrupted"
             raise
         finally:
-            self.busy = False
-            with closing(connect(self.path)) as db, db:
-                db.execute(
-                    "UPDATE scans SET status=?, finished_at=?, per_source=? WHERE id=?",
-                    (
-                        status,
-                        datetime.now(UTC).isoformat(),
-                        json.dumps(progress),
-                        scan_id,
-                    ),
+            try:
+                with closing(connect(self.path)) as db, db:
+                    db.execute(
+                        "UPDATE scans SET status=?, finished_at=?, per_source=? WHERE id=?",
+                        (
+                            status,
+                            datetime.now(UTC).isoformat(),
+                            json.dumps(progress),
+                            scan_id,
+                        ),
+                    )
+                await scan_alerts.scheduled_upwork(
+                    self.data_dir, self.telegram, ctx.trigger, status, progress
                 )
+            finally:
+                self.busy = False
 
     async def _scan_source(self, db, source, settings, ctx, counts):
         days = settings.source_max_age_days.get(source, settings.max_age_days)
