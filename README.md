@@ -15,6 +15,7 @@ Working now:
 - **Fit Score** from Codex, with a reason and for/against points; new surviving Primaries score during Scans, with manual retry and stale-score flags.
 - **Dashboard** at `/`: triage table with unscored / Filtered / dismissed / applied toggles and Source checkboxes, Job drawer, Scan sidebar with live progress and last-Scan counts per Source, Connect Upwork in a popup. Keys: `j`/`k` move, `o` open, `d` dismiss/restore, `a` applied/unmark, `s` Scans, `Esc` close.
 - **Upwork** OAuth sign-in with token refresh; job search and screening questions.
+- **Manual input** in the dashboard: paste an Upwork Job description and screening questions for a one-off Proposal (cover text and answers), or a Job title and description from another Source for a Tailored CV PDF. Copy or download the output before leaving; inputs and outputs are not saved or queued.
 - **Drafts** from the Job drawer: Cover Letter (board Jobs) or Proposal with one answer per screening question (Upwork), and a Tailored CV rendered to PDF from `profile/cv.yaml`. Regenerate with a note keeps every version.
 
 - **Scheduled Upwork Scans** every `schedule.upwork_minutes`, off until switched on in the Scan sidebar; Upwork content is purged after `upwork.retention_hours`.

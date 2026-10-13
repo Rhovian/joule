@@ -99,6 +99,30 @@ async def write(db, job, kind, note, settings, data_dir, auth=None):
                 (json.dumps(questions), job["id"]),
             )
         job = db.execute("SELECT * FROM jobs WHERE id=?", (job["id"],)).fetchone()
+    recent = (
+        db.execute(
+            "SELECT text FROM drafts WHERE kind IN ('proposal', 'cover_letter') "
+            "ORDER BY id DESC LIMIT 10"
+        ).fetchall()
+        if kind != "tailored_cv"
+        else []
+    )
+    document = await generate(job, kind, note, settings, data_dir, recent)
+    with db:
+        db.execute(
+            "INSERT INTO drafts (job_id,kind,text,note,model,created_at) VALUES (?,?,?,?,?,?)",
+            (
+                job["id"],
+                kind,
+                json.dumps(document),
+                note,
+                settings.models.drafts.model,
+                datetime.now(UTC).isoformat(),
+            ),
+        )
+
+
+async def generate(job, kind, note, settings, data_dir, recent=()):
     count = len(json.loads(job["extra"] or "{}").get("screening_questions", []))
     schema = (
         CoverLetter
@@ -114,10 +138,6 @@ async def write(db, job, kind, note, settings, data_dir, auth=None):
         master, schema = cv.prepare(data_dir)
     openings = ""
     if kind != "tailored_cv":
-        recent = db.execute(
-            "SELECT text FROM drafts WHERE kind IN ('proposal', 'cover_letter') "
-            "ORDER BY id DESC LIMIT 10"
-        ).fetchall()
         openings = "Recent openings of other drafts; lead with different experience "
         openings += "unless this Job clearly calls for the same:\n" + "".join(
             f"- {(c.get('cover') or c.get('text', ''))[:200]}\n"
@@ -190,18 +210,4 @@ async def write(db, job, kind, note, settings, data_dir, auth=None):
         + f"{openings}Owner's note: {note or ''}\n{context(job, data_dir)}"
     )
     result = await ai.retry_structured(settings.models.drafts, prompt, schema)
-    document = (
-        cv.resolve(master, result) if kind == "tailored_cv" else result.model_dump()
-    )
-    with db:
-        db.execute(
-            "INSERT INTO drafts (job_id,kind,text,note,model,created_at) VALUES (?,?,?,?,?,?)",
-            (
-                job["id"],
-                kind,
-                json.dumps(document),
-                note,
-                settings.models.drafts.model,
-                datetime.now(UTC).isoformat(),
-            ),
-        )
+    return cv.resolve(master, result) if kind == "tailored_cv" else result.model_dump()

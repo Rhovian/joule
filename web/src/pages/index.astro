@@ -8,6 +8,7 @@ import '../dashboard.css';
     <header class="app-header"><a class="brand" href="/">joule<span class="brand-dot">.</span></a><span class="header-divider"></span><span>Jobs</span></header>
     <main id="dashboard" class="variant-a">
       <div class="page-title"><div><span class="eyebrow">01 / TRIAGE</span><h1>Find the next good fit.</h1><p>Scan the details. Keep the Jobs worth a closer look.</p></div><div class="keyboard-hint"><kbd>j</kbd> / <kbd>k</kbd> move · <kbd>o</kbd> open · <kbd>d</kbd> dismiss / restore · <kbd>a</kbd> applied · <kbd>s</kbd> Scans</div></div>
+      <section id="manual" class="job-content draft" aria-label="Manual input"></section>
       <button class="a-scans-toggle" data-action="scans" aria-controls="a-scans" aria-expanded="false">Scans</button>
       <div class="a-layout"><aside id="a-scans" class="a-scan-sidebar" tabindex="-1" aria-label="Scans"><p class="empty">Loading Sources…</p></aside><div class="a-table-area">
         <div class="controls"><label><input type="checkbox" name="unscored" checked /> Show unscored</label><label><input type="checkbox" name="filtered" /> Show Filtered</label><label><input type="checkbox" name="dismissed" /> Show dismissed</label><label><input type="checkbox" name="applied" /> Show applied</label><fieldset class="source-picks" aria-label="Sources"></fieldset><span id="job-count"></span></div>
@@ -15,6 +16,6 @@ import '../dashboard.css';
       </div></div><div id="detail"></div>
       <noscript><p>Enable JavaScript to load Jobs and run Scans.</p></noscript>
     </main><div id="notice" role="status" aria-live="polite"></div>
-    <script>import '../dashboard';</script>
+    <script>import '../dashboard'; import '../manual';</script>
   </body>
 </html>
