@@ -2,6 +2,7 @@ import html
 import re
 
 from joule.config import Preferences
+from joule.countries import country_key
 from joule.sources import Candidate
 
 US_NAMES = {"us", "usa", "united states", "united states of america"}
@@ -54,11 +55,21 @@ def filter_reason(candidate: Candidate, preferences: Preferences) -> str | None:
         return f"pay: {max(amounts):g} below {floor:g} per {candidate.pay_period}"
 
     locations = preferences.locations
+    client_country = None
+    if candidate.source == "upwork":
+        client = candidate.extra.get("client") or {}
+        client_country = (client.get("location") or {}).get("country")
     for term in locations.exclude:
-        if (candidate.country or "").casefold() == term.casefold() or (
-            candidate.remote is not True
-            and re.search(
-                rf"\b{re.escape(term)}\b", candidate.location_raw or "", re.IGNORECASE
+        if (
+            (client_country and country_key(client_country) == country_key(term))
+            or (candidate.country or "").casefold() == term.casefold()
+            or (
+                candidate.remote is not True
+                and re.search(
+                    rf"\b{re.escape(term)}\b",
+                    candidate.location_raw or "",
+                    re.IGNORECASE,
+                )
             )
         ):
             return f"location: {term} excluded"
