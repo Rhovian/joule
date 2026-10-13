@@ -252,6 +252,42 @@ def test_cover_letter_versions_and_prompt(client, monkeypatch):
     assert "\\u003c/UNTRUSTED_JOB>" in calls[-1].split("<UNTRUSTED_JOB>")[1]
 
 
+@pytest.mark.parametrize("kind", ["proposal", "cover_letter", "tailored_cv", "ask"])
+def test_proposal_guidance_is_scoped(client, monkeypatch, kind):
+    from joule import ai, drafts
+
+    profile = client.app.state.data_dir / "profile"
+    profile.mkdir()
+    (profile / "cv.yaml").write_text(
+        "basics: {name: Owner}\nwork: [{id: a, name: Example, position: Engineer}]\n"
+    )
+    source = "hotfix" if kind in {"cover_letter", "tailored_cv"} else "upwork"
+    with closing(connect(client.app.state.data_dir / "joule.db")) as db, db:
+        db.execute(
+            "UPDATE jobs SET source=?, extra=? WHERE id=1",
+            (source, '{"screening_questions": []}'),
+        )
+    prompts = []
+
+    async def structured(model, prompt, schema):
+        prompts.append(prompt)
+        if kind == "proposal":
+            return schema(cover="Proposal", answers=[])
+        if kind == "cover_letter":
+            return schema(text="Letter")
+        if kind == "ask":
+            return schema(answer="Answer")
+        return schema(headline="Engineer", summary="Summary", work=[], projects=[])
+
+    monkeypatch.setattr(ai, "structured", structured)
+    path = "/api/jobs/1/ask" if kind == "ask" else "/api/jobs/1/drafts"
+    payload = {"question": "Why?"} if kind == "ask" else {"kind": kind}
+    assert client.post(path, json=payload).status_code == 200
+    for fragment in ("Use past tense", "Reserve words", drafts.RANK_RULE):
+        assert (fragment in prompts[0]) == (kind == "proposal")
+    assert ("one-line greeting" in prompts[0]) == (kind == "cover_letter")
+
+
 @pytest.mark.parametrize("wrong", [True, False])
 def test_proposal_answer_count(client, monkeypatch, wrong):
     from joule import ai
