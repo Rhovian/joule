@@ -60,6 +60,10 @@
   }
   if (typeof module !== 'undefined') module.exports = {createWorker, allowed};
   if (typeof chrome !== 'undefined' && typeof document !== 'undefined' && allowed(location.href)) {
+    // executeScript runs again on each gesture; keep one listener/worker per isolated world.
+    // https://developer.chrome.com/docs/extensions/reference/api/scripting#method-executeScript
+    if (globalThis.jouleFillInstalled) return;
+    globalThis.jouleFillInstalled = true;
     const worker = createWorker(document);
     chrome.runtime.onMessage.addListener((message, sender, respond) => {
       if (sender.id !== chrome.runtime.id || sender.tab || !allowed(location.href)) return;

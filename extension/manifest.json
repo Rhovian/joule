@@ -7,6 +7,7 @@
   "optional_host_permissions": ["http://*/*", "https://*/*"],
   "background": {"service_worker": "background.js"},
   "action": {"default_title": "Joule Fill"},
+  "commands": {"fill-with-joule": {"suggested_key": "Ctrl+Shift+Y", "description": "Fill with Joule on the current site"}},
   "side_panel": {"default_path": "sidepanel.html"},
   "options_page": "options.html",
   "content_scripts": [{
