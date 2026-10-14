@@ -1,0 +1,100 @@
+{
+  "provenance": "Descriptor subset transcribed from the 2026-10-14 verified Reddit Greenhouse markup in ADR-0001 \u00a71; not a new full HTML capture. https://job-boards.greenhouse.io/reddit/jobs/7868511",
+  "cases": [
+    {
+      "field": {
+        "id": "first_name",
+        "autocomplete": "given-name",
+        "label": "First Name"
+      },
+      "expected": {
+        "action": "set",
+        "value": "Ada"
+      }
+    },
+    {
+      "field": {
+        "id": "last_name",
+        "autocomplete": "family-name",
+        "label": "Last Name"
+      },
+      "expected": {
+        "action": "set",
+        "value": "Lovelace"
+      }
+    },
+    {
+      "field": {
+        "id": "email",
+        "autocomplete": "email",
+        "type": "email",
+        "label": "Email"
+      },
+      "expected": {
+        "action": "set",
+        "value": "ada@example.com"
+      }
+    },
+    {
+      "field": {
+        "id": "phone",
+        "type": "tel",
+        "label": "Phone"
+      },
+      "expected": {
+        "action": "set",
+        "value": "+1 555 0100"
+      }
+    },
+    {
+      "field": {
+        "id": "question_66210918",
+        "label": "LinkedIn Profile"
+      },
+      "expected": {
+        "action": "set",
+        "value": "https://linkedin.com/in/ada"
+      }
+    },
+    {
+      "field": {
+        "type": "file",
+        "id": "resume",
+        "accept": ".pdf"
+      },
+      "expected": {
+        "action": "upload",
+        "file": "resume"
+      }
+    },
+    {
+      "field": {
+        "role": "combobox",
+        "label": "Location",
+        "required": true
+      },
+      "expected": {
+        "action": "leave",
+        "reason": "combobox"
+      }
+    },
+    {
+      "field": {
+        "type": "hidden",
+        "id": "first_name"
+      },
+      "expected": {
+        "action": "leave",
+        "reason": "hidden"
+      }
+    },
+    {
+      "field": {
+        "label": "Preferred first name"
+      },
+      "expected": {
+        "action": "ask"
+      }
+    }
+  ]
+}

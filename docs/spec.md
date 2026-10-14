@@ -232,3 +232,13 @@ Job text, `extra` and links come from outside sources: the dashboard escapes eve
 ## 12. Open
 
 Nothing open.
+
+## 13. Browser Extension ([#74](https://github.com/Rhovian/joule/issues/74))
+
+An unpacked Chrome Extension assists the owner with employer-hosted forms. The owner selects a non-Upwork Primary, clicks Fill, reviews the values and submits manually; marking applied remains the dashboard's `a` key. The design, invariants, API contract and implementation slices are in [ADR-0001](adr/0001-browser-extension-fill.md).
+
+Slice 1 ([#75](https://github.com/Rhovian/joule/issues/75)) provides `POST /api/fill/jobs/{id}/match`, accepting `{fields:[Descriptor]}` (at most 200). Descriptors carry `ref` as `[frameId,index]`, `tag`, `type`, `role`, `name`, `id`, `autocomplete`, `label`, `required`, `options`, `accept` and `maxlength`. Responses contain `job:{id,title,company,source}`, `actions:[{ref,action,value?,file?,reason?}]`, `resume_draft_id` and `cover_letter_draft_id` (latest versions or null). Actions are `set`, `upload`, `ask` or `leave`. Matching uses Master CV identity, autocomplete, ATS hints and normalized labels, without Codex. Hidden controls, comboboxes, sensitive/consent fields and missing identity values are left for the owner. Uploads identify `resume` or `cover_letter`; attaching files is explicit in a later slice.
+
+Requests reject extra keys, cap descriptor strings at 2000 characters and options at 100 entries with 200-character values/labels. Refs contain two nonnegative integers. Non-Primaries return 404; Upwork returns 400. This read-only endpoint never changes Job state, accepts JSON bodies, adds no CORS headers and uses the existing Host allowlist and tailnet perimeter with no new credential.
+
+Later slices add the Extension UI, attachment delivery, Ask, shared `profile/answers.yaml` replay/save and on-request injection. The Extension introduces plain JavaScript outside `web/`, with separate tests, as justified in ADR-0001 D14. Real ATS widget/upload/frame behavior remains the owner's manual test in slice 7.
