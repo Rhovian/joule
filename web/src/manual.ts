@@ -50,6 +50,7 @@ form.addEventListener('submit', async event => {
 const cvForm = document.createElement('form');
 cvForm.innerHTML = `<h3>Tailored CV for another Source</h3><p>Enter a Job title and description to generate a PDF from your Master CV. Download it before leaving; it is not saved.</p>
 <label>Job title<input name="title" maxlength="500" required></label>
+<label>File name suffix (JB_CV_<em>suffix</em>.pdf)<input name="suffix" maxlength="100" required></label>
 <label>Job description<textarea name="description" rows="5" maxlength="50000" required></textarea></label>
 <button type="submit">Generate Tailored CV PDF</button><p role="status" aria-live="polite"></p><div class="manual-output"></div>`;
 root.append(cvForm);
@@ -57,6 +58,7 @@ let pdfUrl: string | null = null;
 cvForm.addEventListener('submit', async event => {
   event.preventDefault();
   const fields = new FormData(cvForm);
+  const suffix = String(fields.get('suffix')).trim().replace(/[^\w-]+/g, '_');
   const controls = Array.from(cvForm.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement>('button, input, textarea'));
   const status = cvForm.querySelector('p[role="status"]')!;
   controls.forEach(control => { control.disabled = true; }); status.textContent = 'Writing Tailored CV…';
@@ -69,7 +71,7 @@ cvForm.addEventListener('submit', async event => {
     const blob = await response.blob();
     if (pdfUrl) URL.revokeObjectURL(pdfUrl);
     pdfUrl = URL.createObjectURL(blob);
-    const download = document.createElement('a'); download.href = pdfUrl; download.download = 'Tailored_CV.pdf'; download.textContent = 'Download Tailored CV PDF';
+    const download = document.createElement('a'); download.href = pdfUrl; download.download = `JB_CV_${suffix}.pdf`; download.textContent = 'Download Tailored CV PDF';
     cvForm.querySelector('.manual-output')!.replaceChildren(download);
     status.textContent = 'Ready to download.';
   } catch (error) { status.textContent = error instanceof Error ? error.message : String(error); }
