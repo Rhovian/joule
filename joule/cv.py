@@ -73,6 +73,11 @@ def resolve(cv, result):
             )
             selected[item.id] = entry
         document[key] = list(selected.values())
+    # Newest first, whatever order the model picked; no endDate means current.
+    document["work"].sort(
+        key=lambda w: (str(w.get("endDate", "9999")), str(w.get("startDate", ""))),
+        reverse=True,
+    )
     return document
 
 
