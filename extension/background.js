@@ -44,10 +44,7 @@ function createBackground(chrome, fetcher = fetch) {
     if (!trusted(sender)) throw Error('Only extension UI can request joule data');
     if (message.type === 'jobs') {
       const jobs = (await api('/api/jobs')).filter(job => job.source !== 'upwork');
-      // GET /api/jobs omits drafts; the existing detail route is the only draft read API.
-      const details = await Promise.all(jobs.map(job => api(`/api/jobs/${integer(job.id)}`)));
-      return jobs.map((job, index) => ({...job, hasDrafts: Object.keys(details[index].drafts || {}).length > 0}))
-        .sort((a, b) => Number(b.hasDrafts) - Number(a.hasDrafts) || (b.rank ?? -Infinity) - (a.rank ?? -Infinity));
+      return jobs.sort((a, b) => Number(b.has_drafts) - Number(a.has_drafts) || (b.rank ?? -Infinity) - (a.rank ?? -Infinity));
     }
     if (message.type === 'active') return (await chrome.storage.session.get('active')).active || null;
     if (message.type === 'select') {

@@ -25,7 +25,7 @@ function picker() {
   const query = element('filter').value.toLowerCase();
   element('jobs').replaceChildren(new Option('Pick a Job', ''));
   for (const job of jobs.filter(job => `${job.title} ${job.company} ${job.source}`.toLowerCase().includes(query))) {
-    element('jobs').add(new Option(`${job.hasDrafts ? 'Draft · ' : ''}${job.title} — ${job.company || ''} (${job.source})`, job.id));
+    element('jobs').add(new Option(`${job.has_drafts ? 'Draft · ' : ''}${job.title} — ${job.company || ''} (${job.source})`, job.id));
   }
   element('jobs').value = active?.id || '';
 }

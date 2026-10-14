@@ -107,8 +107,11 @@ test('Options requests one origin, reads cheap Jobs route and saves only after s
 async function setup() {
   const chrome = fakeChrome(), calls = [];
   await chrome.storage.local.set({origin: 'http://localhost:8000'});
-  const jobs = [{id: 1, title: 'High rank', company: 'A', source: 'hotfix', rank: 99},
-    {id: 2, title: 'Draft Job', company: 'B', source: 'hn', rank: 5}, {id: 3, source: 'upwork', rank: 100}];
+  const jobs = [{id: 1, title: 'High rank', company: 'A', source: 'hotfix', rank: 99, has_drafts: false},
+    {id: 2, title: 'Draft Job', company: 'B', source: 'hn', rank: 5, has_drafts: true},
+    {id: 3, source: 'upwork', rank: 100, has_drafts: true},
+    {id: 4, source: 'hotfix', rank: null, has_drafts: false},
+    {id: 5, source: 'hn', rank: 10, has_drafts: true}];
   let missing = false;
   const background = createBackground(chrome, async (url, options) => {
     calls.push({url, options});
@@ -121,13 +124,14 @@ async function setup() {
       }
       return {job: jobs[1], actions: fields.map(field => ({ref: field.ref, action: 'set', value: field.label})), resume_draft_id: null, cover_letter_draft_id: null};
     }};
-    return {ok: true, json: async () => url.endsWith('/api/jobs') ? jobs : {...jobs.find(job => job.id === id), drafts: id === 2 ? {tailored_cv: {id: 9}} : {}}};
+    return {ok: true, json: async () => url.endsWith('/api/jobs') ? jobs : jobs.find(job => job.id === id)};
   });
   return {chrome, calls, background, missing: () => { missing = true; }};
 }
 test('picker excludes Upwork, sorts Drafts first then rank, rejects page messages', async () => {
   const {background, calls} = await setup();
-  assert.deepEqual((await background.handle({type: 'jobs'}, ui)).map(job => job.id), [2, 1]);
+  assert.deepEqual((await background.handle({type: 'jobs'}, ui)).map(job => job.id), [5, 2, 1, 4]);
+  assert.deepEqual(calls.map(call => call.url), ['http://localhost:8000/api/jobs']);
   await assert.rejects(background.handle({type: 'select', id: 3}, ui), /Upwork/);
   await assert.rejects(background.handle({type: 'select', id: '../answers'}, ui), /Invalid/);
   await assert.rejects(background.handle({type: 'jobs'}, {id: 'extension', tab: {id: 1}, url: 'https://jobs.lever.co/a'}), /Only extension UI/);

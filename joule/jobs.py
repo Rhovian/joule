@@ -37,7 +37,9 @@ async def list_jobs(
     stamp = score.fingerprint(directory, load_settings(directory))
     with closing(connect(directory / "joule.db")) as db:
         rows = db.execute(
-            f"SELECT *, {score.RANK} AS rank FROM jobs WHERE primary_id IS NULL "
+            f"SELECT jobs.*, {score.RANK} AS rank, drafted.job_id IS NOT NULL AS has_drafts "
+            "FROM jobs LEFT JOIN (SELECT DISTINCT job_id FROM drafts) drafted "
+            "ON drafted.job_id=jobs.id WHERE primary_id IS NULL "
             "AND (? OR score IS NOT NULL) AND (? OR filtered_reason IS NULL) "
             "AND (? OR state != 'dismissed') "
             "AND (? OR state != 'applied') "
@@ -63,6 +65,7 @@ async def list_jobs(
             }
             | {
                 "duplicates": duplicates(db, row["id"]),
+                "has_drafts": bool(row["has_drafts"]),
                 "score_stale": row["score"] is not None
                 and row["score_fingerprint"] != stamp,
             }
