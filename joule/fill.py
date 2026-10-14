@@ -1,4 +1,4 @@
-"""Read-only identity matching for the Extension; page descriptors are data."""
+"""Extension matching, Ask and answer-bank saves; page descriptors are data."""
 
 import json
 import logging
@@ -47,6 +47,25 @@ class MatchRequest(StrictModel):
 class AskRequest(StrictModel):
     question: str = Field(min_length=1, max_length=2000)
     options: list[Option] = Field(default_factory=list, max_length=100)
+
+
+class SaveRequest(StrictModel):
+    question: str = Field(min_length=1, max_length=500)
+    answer: str = Field(min_length=1, max_length=5000)
+
+
+@router.post("/answers")
+def save(request: Request, body: SaveRequest):
+    path = request.app.state.data_dir / "profile" / "answers.yaml"
+    if path.exists() and path.stat().st_size > 200 * 1024:
+        raise HTTPException(413, "Answer bank exceeds 200 KB")
+    # PyYAML 6.0.3 emits multiple writes when given a stream; serialize first:
+    # https://github.com/yaml/pyyaml/blob/6.0.3/lib/yaml/__init__.py#L215-L254
+    entry = yaml.safe_dump([body.model_dump()], allow_unicode=True, width=1e9)
+    # ADR §6: always append once; duplicate adjacent entries are an accepted race.
+    with path.open("a", encoding="utf-8") as bank:
+        bank.write(entry)
+    return {}
 
 
 AUTOCOMPLETE = {

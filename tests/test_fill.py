@@ -353,3 +353,35 @@ def test_bank_exact_replay_last_wins_sensitive_and_options(client):
     assert actions[0]["value"] == "Python" and actions[1]["action"] == "ask"
     assert actions[2] == {"ref": [0, 2], "action": "leave", "reason": "sensitive"}
     assert actions[3]["value"] == "py" and actions[4]["action"] == "ask"
+
+
+def test_save_append_replays_without_state_changes(client):
+    directory = client.app.state.data_dir
+    with closing(connect(directory / "joule.db")) as db:
+        before = [tuple(row) for row in db.execute("SELECT * FROM jobs ORDER BY id")]
+    entries = [
+        {"question": "Favorite language", "answer": value}
+        for value in ["Old", "Python"]
+    ]
+    for entry in entries:
+        response = client.post("/api/fill/answers", json=entry)
+        assert response.status_code == 200 and response.json() == {}
+    assert (
+        yaml.safe_load((directory / "profile" / "answers.yaml").read_text()) == entries
+    )
+    assert post(client, [{"ref": [0, 0], "label": "Favorite language"}]).json()[
+        "actions"
+    ] == [{"ref": [0, 0], "action": "set", "value": "Python"}]
+    with closing(connect(directory / "joule.db")) as db:
+        assert [
+            tuple(row) for row in db.execute("SELECT * FROM jobs ORDER BY id")
+        ] == before
+
+
+def test_save_oversized_bank_is_untouched(client):
+    path = client.app.state.data_dir / "profile" / "answers.yaml"
+    before = b"#" + b" " * (200 * 1024) + b"\n"
+    path.write_bytes(before)
+    response = client.post("/api/fill/answers", json={"question": "Q", "answer": "A"})
+    assert response.status_code == 413
+    assert path.read_bytes() == before

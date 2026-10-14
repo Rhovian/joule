@@ -57,7 +57,7 @@ function createBackground(chrome, fetcher = fetch) {
       await chrome.storage.session.set({active});
       return active;
     }
-    if (!['fill', 'attach', 'resume', 'ask'].includes(message.type)) throw Error('Unknown request');
+    if (!['fill', 'attach', 'resume', 'ask', 'save'].includes(message.type)) throw Error('Unknown request');
     const {active} = await chrome.storage.session.get('active');
     if (!active || active.source === 'upwork') throw Error('Pick a non-Upwork Job first');
     async function match(fields) {
@@ -68,10 +68,17 @@ function createBackground(chrome, fetcher = fetch) {
     if (message.type === 'attach' && !['resume', 'cover_letter'].includes(message.kind)) throw Error('Invalid attachment kind');
     const tab = await chrome.tabs.get(integer(message.tabId));
     if (!allowed(tab.url)) throw Error('This host is refused');
-    if (message.type === 'ask') {
+    if (message.type === 'ask' || message.type === 'save') {
       const field = message.field;
       if (message.jobId !== active.id || !Array.isArray(field?.ref) || field.ref.length !== 2 ||
-        !field.ref.every(part => Number.isSafeInteger(part) && part >= 0)) throw Error('Fill again before Ask');
+        !field.ref.every(part => Number.isSafeInteger(part) && part >= 0)) throw Error('Fill again before Ask or Save');
+      if (message.type === 'save') {
+        const answer = await chrome.tabs.sendMessage(tab.id, {type: 'answer', expected: {...field, ref: field.ref[1]}}, {frameId: field.ref[0]});
+        if (answer.error) throw Error(answer.error);
+        if ((await chrome.tabs.get(tab.id)).url !== tab.url ||
+          (await chrome.storage.session.get('active')).active?.id !== active.id) throw Error('Fill again before Save');
+        return api('/api/fill/answers', answer);
+      }
       let result;
       try { result = await api(`/api/fill/jobs/${integer(active.id)}/ask`, {question: field.label, options: field.options || []}); }
       catch (error) { if (error.status === 404) await chrome.storage.session.remove('active'); throw error; }

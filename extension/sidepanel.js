@@ -64,9 +64,10 @@ element('fill').addEventListener('click', () => run(async () => {
   await refreshDrafts();
   element('remaining').replaceChildren();
   const descriptor = ref => result.fields.find(field => field.ref[0] === ref[0] && field.ref[1] === ref[1]);
-  const remaining = result.actions.filter(action => action.action !== 'set')
+  const remaining = result.actions.filter(action => action.action !== 'set');
+  const listed = result.actions
     .sort((a, b) => Number(descriptor(b.ref)?.required) - Number(descriptor(a.ref)?.required));
-  for (const action of remaining) {
+  for (const action of listed) {
     const field = descriptor(action.ref), item = document.createElement('li');
     item.textContent = `${field?.required ? 'Required · ' : ''}${field?.label || field?.id || 'Field'}: ${action.action}${action.reason ? ` — ${action.reason}` : ''}`;
     if (action.action === 'ask') {
@@ -76,9 +77,17 @@ element('fill').addEventListener('click', () => run(async () => {
         const answer = await send({type: 'ask', tabId: tab.id, jobId: result.job.id, field});
         element('status').textContent = answer.value === null ? answer.reason :
           answer.filled ? 'Answer filled. Review and edit the form.' : 'Field changed or already filled; Fill again to refresh.';
-        if (answer.filled) item.remove();
       }));
       item.append(button);
+    }
+    if (['ask', 'set'].includes(action.action)) {
+      const save = document.createElement('button');
+      save.textContent = 'Save to bank';
+      save.addEventListener('click', () => run(async () => {
+        await send({type: 'save', tabId: tab.id, jobId: result.job.id, field});
+        element('status').textContent = 'Saved to bank. Next Fill replays this answer.';
+      }));
+      item.append(save);
     }
     element('remaining').append(item);
   }

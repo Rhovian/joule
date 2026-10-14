@@ -85,7 +85,18 @@
       element.style.outline = '2px solid #25854a';
       return {filled: 1};
     }
-    return {describe, apply, upload};
+    function answer(expected) {
+      if (JSON.stringify(describe()[expected.ref]) !== JSON.stringify(expected)) throw Error('Fill again before Save');
+      const element = controls[expected.ref];
+      if (!element || !visible(element) || element.getAttribute('role') === 'combobox') throw Error('Field unavailable');
+      const selected = element.type === 'radio' ? radios(element).find(option => option.checked && visible(option)) : null;
+      const value = element.type === 'radio' ? selected && label(selected) :
+        element.tagName === 'SELECT' ? element.value && element.selectedOptions[0]?.textContent.trim() :
+          ['text', 'email', 'tel', 'url', 'search', 'textarea'].includes(element.type) ? element.value : null;
+      if (!value) throw Error('Answer the field before saving');
+      return {question: expected.label, answer: value};
+    }
+    return {describe, apply, upload, answer};
   }
   if (typeof module !== 'undefined') module.exports = {createWorker, allowed};
   if (typeof chrome !== 'undefined' && typeof document !== 'undefined' && allowed(location.href)) {
@@ -103,6 +114,10 @@
       }
       if (message.type === 'apply') respond(worker.apply(message.actions, message.expected));
       if (message.type === 'upload') respond(worker.upload(message.ref, message.file));
+      if (message.type === 'answer') {
+        try { respond(worker.answer(message.expected)); }
+        catch (error) { respond({error: error.message}); }
+      }
     });
     // Registration survives SW suspension in storage.session; a new frame replaces its own entry.
     chrome.runtime.sendMessage({type: 'register'}).catch(() => {});
