@@ -106,20 +106,24 @@ import collections, json, sqlite3
 from pathlib import Path
 from urllib.parse import urlsplit
 
-uri = (Path.home() / '.joule/joule.db').as_uri() + '?mode=ro'
+uri = (Path.home() / ".joule/joule.db").as_uri() + "?mode=ro"
 with sqlite3.connect(uri, uri=True) as db:
-    print(db.execute('''SELECT source, COUNT(*),
+    print(
+        db.execute("""SELECT source, COUNT(*),
         SUM(primary_id IS NULL) FROM jobs
-        WHERE source != 'upwork' GROUP BY source''').fetchall())
-    print(db.execute('''SELECT MIN(first_seen_at), MAX(first_seen_at)
-        FROM jobs WHERE source != 'upwork' ''').fetchone())
+        WHERE source != 'upwork' GROUP BY source""").fetchall()
+    )
+    print(
+        db.execute("""SELECT MIN(first_seen_at), MAX(first_seen_at)
+        FROM jobs WHERE source != 'upwork' """).fetchone()
+    )
     counts = collections.Counter()
     for source, link, extra in db.execute(
         "SELECT source, link, extra FROM jobs WHERE source != 'upwork'"
     ):
-        extra = json.loads(extra or '{}')
-        target = extra.get('apply_url') or link
-        host = (urlsplit(target).hostname or '').lower().removeprefix('www.')
+        extra = json.loads(extra or "{}")
+        target = extra.get("apply_url") or link
+        host = (urlsplit(target).hostname or "").lower().removeprefix("www.")
         counts[source, host] += 1
     for (source, host), n in sorted(counts.items()):
         print(source, host, n)
