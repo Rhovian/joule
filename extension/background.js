@@ -57,7 +57,7 @@ function createBackground(chrome, fetcher = fetch) {
       await chrome.storage.session.set({active});
       return active;
     }
-    if (!['fill', 'attach', 'resume'].includes(message.type)) throw Error('Unknown request');
+    if (!['fill', 'attach', 'resume', 'ask'].includes(message.type)) throw Error('Unknown request');
     const {active} = await chrome.storage.session.get('active');
     if (!active || active.source === 'upwork') throw Error('Pick a non-Upwork Job first');
     async function match(fields) {
@@ -68,6 +68,20 @@ function createBackground(chrome, fetcher = fetch) {
     if (message.type === 'attach' && !['resume', 'cover_letter'].includes(message.kind)) throw Error('Invalid attachment kind');
     const tab = await chrome.tabs.get(integer(message.tabId));
     if (!allowed(tab.url)) throw Error('This host is refused');
+    if (message.type === 'ask') {
+      const field = message.field;
+      if (message.jobId !== active.id || !Array.isArray(field?.ref) || field.ref.length !== 2 ||
+        !field.ref.every(part => Number.isSafeInteger(part) && part >= 0)) throw Error('Fill again before Ask');
+      let result;
+      try { result = await api(`/api/fill/jobs/${integer(active.id)}/ask`, {question: field.label, options: field.options || []}); }
+      catch (error) { if (error.status === 404) await chrome.storage.session.remove('active'); throw error; }
+      if (result.value === null) return {...result, filled: 0};
+      const current = await chrome.tabs.get(tab.id);
+      if (current.url !== tab.url || (await chrome.storage.session.get('active')).active?.id !== active.id) throw Error('Fill again before Ask');
+      const applied = await chrome.tabs.sendMessage(tab.id, {type: 'apply', expected: {...field, ref: field.ref[1]},
+        actions: [{ref: field.ref[1], action: 'set', value: result.value}]}, {frameId: field.ref[0]});
+      return {...result, filled: applied.filled};
+    }
     const key = `frames:${tab.id}`;
     await registration;
     const registered = (await chrome.storage.session.get(key))[key] || {};
