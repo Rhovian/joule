@@ -22,6 +22,8 @@ Working now:
 
 - **Telegram** Upwork-only manual review queue with automatic Drafts, Start, Apply, Rework and Skip; Apply asks for bid and boost Connects, then submits an Upwork Proposal only after Send confirmation. Add to queue in the Job drawer queues any Upwork Job; Start Telegram queue in the Scan sidebar begins review.
 
+- **Browser extension** (unpacked, `extension/`, see its README): on Greenhouse, Lever and Ashby application forms, pick the Job in the side panel and Fill your name, email, phone, LinkedIn, GitHub, site and current company from `profile/cv.yaml` into empty fields. It never submits or marks a Job applied; you review, submit and press `a`. Not for Upwork, LinkedIn, Indeed or Glassdoor. Resume attach, Ask for custom questions and unknown sites are not built yet (issue #74).
+
 Not built yet: web3.career.
 
 ## Run
@@ -56,5 +58,6 @@ Scoring uses the host’s Codex login; work history must live under `~/.joule` t
 ```sh
 uv run pytest && uv run ruff check && uv run ruff format --check
 cd web && npm install && npm run build   # dashboard → web/dist
+cd extension && npm install && npm test  # browser extension; load extension/ unpacked in Chrome
 uv run python -m joule                   # http://localhost:8000, reads ~/.joule
 ```
