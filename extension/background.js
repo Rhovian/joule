@@ -7,14 +7,22 @@ function createBackground(chrome, fetcher = fetch) {
   const trusted = sender => sender.id === chrome.runtime.id && !sender.tab &&
     ['options.html', 'sidepanel.html'].some(path => sender.url === chrome.runtime.getURL(path));
   const integer = value => { if (!Number.isSafeInteger(value) || value <= 0) throw Error('Invalid Job id'); return value; };
-  async function api(path, body) {
+  async function api(path, body, pdf = false) {
     const {origin} = await chrome.storage.local.get('origin');
     if (!origin) throw Error('Configure the joule URL in Options first');
     const response = await fetcher(`${origin}${path}`, body === undefined ? {} : {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
     });
     if (!response.ok) { const error = Error(`joule HTTP ${response.status}`); error.status = response.status; throw error; }
-    return response.json();
+    if (!pdf) return response.json();
+    // Chrome messages use JSON, not structured clone; binary PDFs need base64:
+    // https://developer.chrome.com/docs/extensions/develop/concepts/messaging#serialization
+    // The existing server emits a quoted ASCII filename (joule/jobs.py draft_pdf).
+    const name = /filename="([^"]+)"/.exec(response.headers.get('Content-Disposition') || '')?.[1];
+    if (!name) throw Error('PDF response has no filename');
+    let binary = '';
+    for (const byte of new Uint8Array(await response.arrayBuffer())) binary += String.fromCharCode(byte);
+    return {name, base64: btoa(binary)};
   }
   async function handle(message, sender) {
     if (message.type === 'register' && sender.id === chrome.runtime.id && sender.tab && allowed(sender.url) && (!sender.tab.url || allowed(sender.tab.url))) {
@@ -49,9 +57,15 @@ function createBackground(chrome, fetcher = fetch) {
       await chrome.storage.session.set({active});
       return active;
     }
-    if (message.type !== 'fill') throw Error('Unknown request');
+    if (!['fill', 'attach', 'resume'].includes(message.type)) throw Error('Unknown request');
     const {active} = await chrome.storage.session.get('active');
     if (!active || active.source === 'upwork') throw Error('Pick a non-Upwork Job first');
+    async function match(fields) {
+      try { return await api(`/api/fill/jobs/${integer(active.id)}/match`, {fields}); }
+      catch (error) { if (error.status === 404) await chrome.storage.session.remove('active'); throw error; }
+    }
+    if (message.type === 'resume') return match([]);
+    if (message.type === 'attach' && !['resume', 'cover_letter'].includes(message.kind)) throw Error('Invalid attachment kind');
     const tab = await chrome.tabs.get(integer(message.tabId));
     if (!allowed(tab.url)) throw Error('This host is refused');
     const key = `frames:${tab.id}`;
@@ -73,9 +87,26 @@ function createBackground(chrome, fetcher = fetch) {
       }
       if (!fields.length) throw Error('No supported form found. Reload the ATS page if the extension was just installed.');
       if (fields.length > 200) throw Error('Form exceeds the 200-field limit');
-      let result;
-      try { result = await api(`/api/fill/jobs/${integer(active.id)}/match`, {fields}); }
-      catch (error) { if (error.status === 404) await chrome.storage.session.remove('active'); throw error; }
+      let result = await match(fields);
+      if (message.type === 'attach') {
+        if (message.kind === 'cover_letter' && !result.cover_letter_draft_id) throw Error('no Cover Letter Draft');
+        const actions = result.actions.filter(action => action.action === 'upload' && action.file === message.kind);
+        if (!actions.length) throw Error('No matching file input found');
+        if (message.kind === 'resume' && !result.resume_draft_id) {
+          // Duplicate append-only versions across panels are an accepted race (§6); the panel disables its button.
+          await api(`/api/jobs/${integer(active.id)}/drafts`, {kind: 'tailored_cv'});
+          result = await match(fields);
+        }
+        const draftId = message.kind === 'resume' ? result.resume_draft_id : result.cover_letter_draft_id;
+        if (!draftId) throw Error('no Cover Letter Draft');
+        const file = await api(`/api/drafts/${integer(draftId)}/pdf`, undefined, true);
+        let filled = 0;
+        for (const action of actions) {
+          const applied = await chrome.tabs.sendMessage(tab.id, {type: 'upload', ref: action.ref[1], file}, {frameId: action.ref[0]});
+          filled += applied.filled;
+        }
+        return {...result, filled, fields};
+      }
       let filled = 0;
       for (const frameId of request.frames.keys()) {
         const actions = result.actions.filter(action => action.ref[0] === frameId)

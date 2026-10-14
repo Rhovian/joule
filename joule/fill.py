@@ -1,5 +1,6 @@
 """Read-only identity matching for the Extension; page descriptors are data."""
 
+import json
 import re
 from contextlib import closing
 from typing import Annotated
@@ -113,7 +114,7 @@ def identity(document):
     return values
 
 
-def classify(field, values):
+def classify(field, values, cover_letter=None):
     def leave(reason):
         return {"action": "leave", "reason": reason}
 
@@ -124,12 +125,24 @@ def classify(field, values):
     # Invariant 6 also guards identity-like labels on sensitive questions.
     if sensitive(field.label):
         return leave("sensitive")
+    if field.tag == "textarea" and "cover" in normalize(
+        f"{field.label} {field.id} {field.name}"
+    ):
+        return (
+            {"action": "set", "value": cover_letter}
+            if cover_letter
+            else leave("no Cover Letter Draft")
+        )
     if field.type == "file":
         text = normalize(f"{field.label} {field.id} {field.name}")
         if re.search(r"\b(resume|cv)\b", text):
             return {"action": "upload", "file": "resume"}
         if "cover" in text:
-            return {"action": "upload", "file": "cover_letter"}
+            return (
+                {"action": "upload", "file": "cover_letter"}
+                if cover_letter
+                else leave("no Cover Letter Draft")
+            )
         return leave("unrecognized file input")
     key = next(
         (AUTOCOMPLETE[t] for t in field.autocomplete.split() if t in AUTOCOMPLETE),
@@ -164,12 +177,23 @@ def match(request: Request, job_id: int, body: MatchRequest):
                 (job_id,),
             )
         }
+        resume = db.execute(
+            "SELECT id,created_at,(SELECT COUNT(*) FROM drafts WHERE job_id=? "
+            "AND kind='tailored_cv') AS version FROM drafts WHERE id=?",
+            (job_id, draft_ids.get("tailored_cv")),
+        ).fetchone()
+        cover = db.execute(
+            "SELECT text FROM drafts WHERE id=?", (draft_ids.get("cover_letter"),)
+        ).fetchone()
+        cover_letter = json.loads(cover["text"]).get("text") if cover else None
     values = identity(cv.load(directory) or {})
     return {
         "job": {key: job[key] for key in ("id", "title", "company", "source")},
         "actions": [
-            {"ref": field.ref} | classify(field, values) for field in body.fields
+            {"ref": field.ref} | classify(field, values, cover_letter)
+            for field in body.fields
         ],
         "resume_draft_id": draft_ids.get("tailored_cv"),
         "cover_letter_draft_id": draft_ids.get("cover_letter"),
+        "resume_draft": dict(resume) if resume else None,
     }

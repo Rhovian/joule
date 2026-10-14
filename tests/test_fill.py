@@ -70,11 +70,19 @@ def test_ats_fixtures(client, name):
     assert response.json() == {
         "job": {"id": 1, "title": "Engineer", "company": "Acme", "source": "hotfix"},
         "actions": [
-            dict(ref=[7, index], **item["expected"])
+            dict(
+                ref=[7, index],
+                **(
+                    {"action": "leave", "reason": "no Cover Letter Draft"}
+                    if item["expected"].get("file") == "cover_letter"
+                    else item["expected"]
+                ),
+            )
             for index, item in enumerate(fixture["cases"])
         ],
         "resume_draft_id": None,
         "cover_letter_draft_id": None,
+        "resume_draft": None,
     }
 
 
@@ -170,6 +178,7 @@ def test_latest_drafts_are_job_scoped_and_state_unchanged(client):
             )
     result = post(client, [{"ref": [0, 0], "type": "file", "id": "resume"}]).json()
     assert result["resume_draft_id"] == 3 and result["cover_letter_draft_id"] == 2
+    assert result["resume_draft"] == {"id": 3, "version": 2, "created_at": "now"}
     with closing(connect(client.app.state.data_dir / "joule.db")) as db:
         assert [
             tuple(row) for row in db.execute("SELECT * FROM jobs ORDER BY id")
