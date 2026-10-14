@@ -56,7 +56,18 @@
       }
       return {filled};
     }
-    return {describe, apply};
+    function upload(ref, file) {
+      const element = controls[ref];
+      if (!element || element.type !== 'file' || !visible(element) || element.files.length || element.value) return {filled: 0};
+      const bytes = Uint8Array.from(window.atob(file.base64), char => char.charCodeAt(0));
+      const transfer = new window.DataTransfer();
+      transfer.items.add(new window.File([bytes], file.name, {type: 'application/pdf'}));
+      element.files = transfer.files;
+      for (const type of ['input', 'change']) element.dispatchEvent(new window.Event(type, {bubbles: true}));
+      element.style.outline = '2px solid #25854a';
+      return {filled: 1};
+    }
+    return {describe, apply, upload};
   }
   if (typeof module !== 'undefined') module.exports = {createWorker, allowed};
   if (typeof chrome !== 'undefined' && typeof document !== 'undefined' && allowed(location.href)) {
@@ -73,6 +84,7 @@
         return true;
       }
       if (message.type === 'apply') respond(worker.apply(message.actions));
+      if (message.type === 'upload') respond(worker.upload(message.ref, message.file));
     });
     // Registration survives SW suspension in storage.session; a new frame replaces its own entry.
     chrome.runtime.sendMessage({type: 'register'}).catch(() => {});

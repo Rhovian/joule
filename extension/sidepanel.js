@@ -1,5 +1,6 @@
 const element = id => document.getElementById(id);
 let jobs = [], busy = false, active = null;
+let resumeDraft = null, coverDraftId = null;
 async function send(message) {
   const result = await chrome.runtime.sendMessage(message);
   if (result.error) throw Error(result.error);
@@ -9,6 +10,16 @@ function showActive(job) {
   active = job;
   element('active').textContent = job ? `${job.title} — ${job.company || ''} (${job.source})` : 'Pick a Job before Fill';
   element('fill').disabled = busy || !job;
+  element('attach').disabled = busy || !job;
+  element('cover').disabled = busy || !job || !coverDraftId;
+}
+async function refreshDrafts() {
+  const result = active ? await send({type: 'resume'}) : {};
+  resumeDraft = result.resume_draft;
+  coverDraftId = result.cover_letter_draft_id;
+  element('resume').textContent = resumeDraft ? `Tailored CV v${resumeDraft.version} · ${new Date(resumeDraft.created_at).toLocaleString()}` : 'Generate a Tailored CV';
+  element('attach').textContent = resumeDraft ? 'Attach resume' : 'Generate and attach resume';
+  showActive(active);
 }
 function picker() {
   const query = element('filter').value.toLowerCase();
@@ -21,7 +32,7 @@ function picker() {
 async function run(work) {
   if (busy) return;
   busy = true;
-  for (const id of ['fill', 'refresh', 'jobs']) element(id).disabled = true;
+  for (const id of ['fill', 'attach', 'cover', 'refresh', 'jobs']) element(id).disabled = true;
   element('status').textContent = 'Working…';
   try { await work(); }
   catch (error) { element('status').textContent = error.message; showActive(await send({type: 'active'})); }
@@ -34,6 +45,7 @@ async function run(work) {
 async function refresh() {
   jobs = await send({type: 'jobs'});
   showActive(await send({type: 'active'}));
+  await refreshDrafts();
   picker();
   element('status').textContent = `${jobs.length} non-Upwork Jobs`;
 }
@@ -42,12 +54,14 @@ element('filter').addEventListener('input', picker);
 element('jobs').addEventListener('change', () => run(async () => {
   if (!element('jobs').value) return;
   showActive(await send({type: 'select', id: Number(element('jobs').value)}));
+  await refreshDrafts();
   element('remaining').replaceChildren();
   element('status').textContent = 'Ready to Fill';
 }));
 element('fill').addEventListener('click', () => run(async () => {
   const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
   const result = await send({type: 'fill', tabId: tab.id});
+  await refreshDrafts();
   element('remaining').replaceChildren();
   const descriptor = ref => result.fields.find(field => field.ref[0] === ref[0] && field.ref[1] === ref[1]);
   const remaining = result.actions.filter(action => action.action !== 'set')
@@ -59,4 +73,13 @@ element('fill').addEventListener('click', () => run(async () => {
   }
   element('status').textContent = `${result.filled} filled; ${remaining.length} remaining. Review the form.`;
 }));
+for (const [id, kind] of [['attach', 'resume'], ['cover', 'cover_letter']]) {
+  element(id).addEventListener('click', () => run(async () => {
+    element('status').textContent = kind === 'resume' && !resumeDraft ? 'Generating Tailored CV… (may take up to 5 minutes)' : 'Attaching…';
+    const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+    const result = await send({type: 'attach', kind, tabId: tab.id});
+    await refreshDrafts();
+    element('status').textContent = `${result.filled} attached. Review the form.`;
+  }));
+}
 run(refresh);
