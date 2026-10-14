@@ -68,7 +68,18 @@ element('fill').addEventListener('click', () => run(async () => {
     .sort((a, b) => Number(descriptor(b.ref)?.required) - Number(descriptor(a.ref)?.required));
   for (const action of remaining) {
     const field = descriptor(action.ref), item = document.createElement('li');
-    item.textContent = `${field?.required ? 'Required · ' : ''}${field?.label || field?.id || 'Field'}: ${action.action} — ${action.reason || 'complete manually in this slice'}`;
+    item.textContent = `${field?.required ? 'Required · ' : ''}${field?.label || field?.id || 'Field'}: ${action.action}${action.reason ? ` — ${action.reason}` : ''}`;
+    if (action.action === 'ask') {
+      const button = document.createElement('button');
+      button.textContent = 'Ask';
+      button.addEventListener('click', () => run(async () => {
+        const answer = await send({type: 'ask', tabId: tab.id, jobId: result.job.id, field});
+        element('status').textContent = answer.value === null ? answer.reason :
+          answer.filled ? 'Answer filled. Review and edit the form.' : 'Field changed or already filled; Fill again to refresh.';
+        if (answer.filled) item.remove();
+      }));
+      item.append(button);
+    }
     element('remaining').append(item);
   }
   element('status').textContent = `${result.filled} filled; ${remaining.length} remaining. Review the form.`;

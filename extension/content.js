@@ -28,26 +28,44 @@
       return (explicit?.textContent || wrapping?.textContent || labelled || element.getAttribute('aria-label') ||
         element.closest('fieldset')?.querySelector('legend')?.textContent || element.getAttribute('placeholder') || '').trim();
     }
+    const radios = element => [...document.querySelectorAll('input[type=radio]')].filter(other =>
+      other.form === element.form && (element.name ? other.name === element.name : other === element));
     function describe() {
       controls = [...document.querySelectorAll('input,textarea,select')].filter(element =>
-        visible(element) && !['submit', 'button', 'reset', 'image'].includes(element.type));
+        visible(element) && !['submit', 'button', 'reset', 'image'].includes(element.type) &&
+        (element.type !== 'radio' || radios(element).find(visible) === element));
       return controls.map((element, ref) => ({
         ref, tag: element.tagName.toLowerCase(), type: element.type || '',
         role: element.getAttribute('role') || '', name: element.name || '', id: element.id || '',
-        autocomplete: element.autocomplete || '', label: label(element), required: element.required,
-        options: element.tagName === 'SELECT' ? [...element.options].map(option => ({value: option.value, label: option.textContent.trim()})) : [],
+        autocomplete: element.autocomplete || '', label: element.type === 'radio' ? element.closest('fieldset')?.querySelector('legend')?.textContent.trim() || label(element) : label(element), required: element.required,
+        options: element.type === 'radio' ? radios(element).filter(visible).map(option => ({value: option.value, label: label(option)})) :
+          element.tagName === 'SELECT' ? [...element.options].map(option => ({value: option.value, label: option.textContent.trim()})) : [],
         accept: element.accept || '', maxlength: element.maxLength >= 0 ? element.maxLength : null,
       }));
     }
-    function apply(actions) {
+    function apply(actions, expected) {
+      // Compare fresh page data after a slow Ask; navigation/edits must not retarget the answer.
+      if (expected && JSON.stringify(describe()[expected.ref]) !== JSON.stringify(expected)) return {filled: 0};
       let filled = 0;
       for (const action of actions) {
-        const element = controls[action.ref];
+        let element = controls[action.ref];
+        if (action.action === 'set' && element?.type === 'radio') {
+          if (radios(element).some(option => option.checked)) continue;
+          element = radios(element).find(option => option.value === action.value && visible(option));
+          if (!element) continue;
+          Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'checked').set.call(element, true);
+          for (const type of ['input', 'change']) element.dispatchEvent(new window.Event(type, {bubbles: true}));
+          element.style.outline = '2px solid #25854a';
+          filled++;
+          continue;
+        }
         // Recheck immediately before writing; operator typing in this tiny window is an accepted design race (§6).
         if (action.action !== 'set' || typeof action.value !== 'string' || !element || !visible(element) ||
           element.value !== '' || element.getAttribute('role') === 'combobox' ||
-          !['text', 'email', 'tel', 'url', 'search', 'textarea'].includes(element.type)) continue;
-        const prototype = element.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+          !['text', 'email', 'tel', 'url', 'search', 'textarea', 'select-one'].includes(element.type)) continue;
+        if (element.tagName === 'SELECT' && ![...element.options].some(option => option.value === action.value && !option.disabled && !option.closest('optgroup[disabled]'))) continue;
+        const prototype = element.tagName === 'SELECT' ? window.HTMLSelectElement.prototype :
+          element.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
         Object.getOwnPropertyDescriptor(prototype, 'value').set.call(element,
           element.maxLength >= 0 ? action.value.slice(0, element.maxLength) : action.value);
         for (const type of ['input', 'change']) element.dispatchEvent(new window.Event(type, {bubbles: true}));
@@ -83,7 +101,7 @@
           .then(() => respond({ok: true}), () => respond({ok: false}));
         return true;
       }
-      if (message.type === 'apply') respond(worker.apply(message.actions));
+      if (message.type === 'apply') respond(worker.apply(message.actions, message.expected));
       if (message.type === 'upload') respond(worker.upload(message.ref, message.file));
     });
     // Registration survives SW suspension in storage.session; a new frame replaces its own entry.
