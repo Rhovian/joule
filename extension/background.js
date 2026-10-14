@@ -86,13 +86,37 @@ function createBackground(chrome, fetcher = fetch) {
       return {...result, filled, fields};
     } finally { pending.delete(requestId); }
   }
-  return {handle};
+  async function inject(tab) {
+    if (!tab?.id || !allowed(tab.url) || !/^https?:/.test(tab.url)) throw Error('This host is refused');
+    // activeTab gestures grant the main origin; cross-origin embeds use the direct-URL fallback (ADR §3e).
+    // https://developer.chrome.com/docs/extensions/develop/concepts/activeTab
+    const injected = chrome.scripting.executeScript({target: {tabId: tab.id}, files: ['content.js']});
+    // Keep open() in the gesture, before awaiting injection or storage (Chrome 116+).
+    // https://developer.chrome.com/docs/extensions/reference/api/sidePanel#method-open
+    await Promise.all([injected, chrome.sidePanel.open({tabId: tab.id})]);
+  }
+  function installGestures() {
+    chrome.runtime.onInstalled.addListener(() => {
+      chrome.contextMenus.create({id: 'fill-with-joule', title: 'Fill with Joule', contexts: ['page', 'editable']});
+    });
+    const launch = tab => inject(tab).catch(error => console.error(`Joule Fill: ${error.message}`));
+    chrome.contextMenus.onClicked.addListener((info, tab) => {
+      if (info.menuItemId === 'fill-with-joule') return launch(tab);
+    });
+    // onCommand supplies the active tab, avoiding an async query that can lose the gesture.
+    // https://developer.chrome.com/docs/extensions/reference/api/commands#event-onCommand
+    chrome.commands.onCommand.addListener((command, tab) => {
+      if (command === 'fill-with-joule') return launch(tab);
+    });
+  }
+  return {handle, inject, installGestures};
 }
 if (typeof module !== 'undefined') module.exports = {createBackground};
 if (typeof chrome !== 'undefined') {
   // Lock configuration before accepting messages; content scripts never read the joule origin.
   const ready = chrome.storage.local.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'});
   const background = createBackground(chrome);
+  background.installGestures();
   chrome.sidePanel.setPanelBehavior({openPanelOnActionClick: true});
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     ready.then(() => background.handle(message, sender)).then(value => respond({value}), error => respond({error: error.message}));
