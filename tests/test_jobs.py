@@ -73,6 +73,27 @@ def test_list(client, query, ids):
     ]
 
 
+def test_list_has_drafts(client):
+    with closing(connect(client.app.state.data_dir / "joule.db")) as db, db:
+        db.executemany(
+            "INSERT INTO drafts (job_id, kind, text, created_at) VALUES (?, ?, '{}', 'now')",
+            [
+                (1, "tailored_cv"),
+                (1, "tailored_cv"),
+                (1, "cover_letter"),
+                (6, "proposal"),
+            ],
+        )
+    rows = client.get("/api/jobs").json()
+    assert [row["id"] for row in rows] == [2, 1, 3]
+    assert {row["id"]: row["has_drafts"] for row in rows} == {
+        2: False,
+        1: True,
+        3: False,
+    }
+    assert all(type(row["has_drafts"]) is bool for row in rows)
+
+
 def test_detail(client):
     row = client.get("/api/jobs/1").json()
     assert row["description"] == "text" and row["extra"] == {"a": 1}
