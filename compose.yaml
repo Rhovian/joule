@@ -5,5 +5,10 @@ services:
       - "127.0.0.1:8000:8000"
     volumes:
       - ~/.joule:/data
-      - ~/.codex:/root/.codex
+      # Own Codex home: sharing the host's ~/.codex SQLite files over the VM file share corrupts them.
+      - codex:/root/.codex
+      - ~/.codex/auth.json:/root/.codex/auth.json:ro
     restart: unless-stopped
+
+volumes:
+  codex:
