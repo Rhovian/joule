@@ -47,3 +47,9 @@ _Avoid_: Application, submission
 **Proposal**:
 A Draft for an Upwork Job: the cover text plus answers to the Job's screening questions.
 _Avoid_: Bid, cover letter (for Upwork)
+
+**Fill**:
+Writing the owner's saved identity and answers into a form on a destination site from the browser Extension; the owner reviews and submits.
+
+**Extension**:
+The unpacked Chrome extension that performs Fills.

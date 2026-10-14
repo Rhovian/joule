@@ -1,0 +1,98 @@
+{
+  "provenance": "Descriptor subset transcribed from the verified Spotify Lever apply markup documented in ADR-0001 \u00a71; no autocomplete or ARIA. Consent is a synthetic regression case.",
+  "cases": [
+    {
+      "field": {
+        "name": "name",
+        "label": "Full name \u2731"
+      },
+      "expected": {
+        "action": "set",
+        "value": "Ada Lovelace"
+      }
+    },
+    {
+      "field": {
+        "name": "email"
+      },
+      "expected": {
+        "action": "set",
+        "value": "ada@example.com"
+      }
+    },
+    {
+      "field": {
+        "name": "phone"
+      },
+      "expected": {
+        "action": "set",
+        "value": "+1 555 0100"
+      }
+    },
+    {
+      "field": {
+        "name": "org"
+      },
+      "expected": {
+        "action": "set",
+        "value": "Current"
+      }
+    },
+    {
+      "field": {
+        "name": "urls[LinkedIn]"
+      },
+      "expected": {
+        "action": "set",
+        "value": "https://linkedin.com/in/ada"
+      }
+    },
+    {
+      "field": {
+        "name": "urls[GitHub]"
+      },
+      "expected": {
+        "action": "set",
+        "value": "https://github.com/ada"
+      }
+    },
+    {
+      "field": {
+        "name": "urls[Portfolio]"
+      },
+      "expected": {
+        "action": "set",
+        "value": "https://ada.example.com"
+      }
+    },
+    {
+      "field": {
+        "type": "file",
+        "name": "resume"
+      },
+      "expected": {
+        "action": "upload",
+        "file": "resume"
+      }
+    },
+    {
+      "field": {
+        "type": "checkbox",
+        "label": "Privacy consent"
+      },
+      "expected": {
+        "action": "leave",
+        "reason": "sensitive"
+      }
+    },
+    {
+      "field": {
+        "name": "location",
+        "label": "Current location"
+      },
+      "expected": {
+        "action": "ask"
+      }
+    }
+  ]
+}

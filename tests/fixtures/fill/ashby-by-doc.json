@@ -1,0 +1,79 @@
+{
+  "provenance": "Hand-built from Ashby API-doc names, NOT live DOM capture; ADR-0001 \u00a71. Cover/file/label cases are synthetic generic controls. https://developers.ashbyhq.com/docs/creating-a-custom-careers-page",
+  "cases": [
+    {
+      "field": {
+        "name": "_systemfield_name"
+      },
+      "expected": {
+        "action": "set",
+        "value": "Ada Lovelace"
+      }
+    },
+    {
+      "field": {
+        "name": "_systemfield_email"
+      },
+      "expected": {
+        "action": "set",
+        "value": "ada@example.com"
+      }
+    },
+    {
+      "field": {
+        "label": "GitHub"
+      },
+      "expected": {
+        "action": "set",
+        "value": "https://github.com/ada"
+      }
+    },
+    {
+      "field": {
+        "label": "Portfolio"
+      },
+      "expected": {
+        "action": "set",
+        "value": "https://ada.example.com"
+      }
+    },
+    {
+      "field": {
+        "label": "Current company"
+      },
+      "expected": {
+        "action": "set",
+        "value": "Current"
+      }
+    },
+    {
+      "field": {
+        "type": "file",
+        "label": "Cover letter"
+      },
+      "expected": {
+        "action": "upload",
+        "file": "cover_letter"
+      }
+    },
+    {
+      "field": {
+        "type": "file",
+        "label": "Other attachment"
+      },
+      "expected": {
+        "action": "leave",
+        "reason": "unrecognized file input"
+      }
+    },
+    {
+      "field": {
+        "tag": "textarea",
+        "label": "Why this role?"
+      },
+      "expected": {
+        "action": "ask"
+      }
+    }
+  ]
+}

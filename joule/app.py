@@ -12,6 +12,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from joule.config import data_dir as default_data_dir
 from joule.config import load_env
 from joule.db import init_db
+from joule.fill import router as fill_router
 from joule.jobs import router as jobs_router
 from joule.manual import router as manual_router
 from joule.scan import Scanner
@@ -80,6 +81,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     app.include_router(scan_router)
     app.include_router(jobs_router)
     app.include_router(manual_router)
+    app.include_router(fill_router)
     app.mount(
         "/",
         StaticFiles(
