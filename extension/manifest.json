@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Joule Fill",
+  "version": "0.1.0",
+  "minimum_chrome_version": "116",
+  "permissions": ["storage", "activeTab", "scripting", "sidePanel", "contextMenus"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "background": {"service_worker": "background.js"},
+  "action": {"default_title": "Joule Fill"},
+  "side_panel": {"default_path": "sidepanel.html"},
+  "options_page": "options.html",
+  "content_scripts": [{
+    "matches": ["https://boards.greenhouse.io/*", "https://job-boards.greenhouse.io/*", "https://job-boards.eu.greenhouse.io/*", "https://jobs.lever.co/*", "https://jobs.ashbyhq.com/*"],
+    "js": ["content.js"],
+    "all_frames": true
+  }]
+}
