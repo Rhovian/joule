@@ -17,6 +17,20 @@ class AIError(Exception):
     pass
 
 
+async def codex_stderr(process, prompt):
+    # communicate() buffers all output: docs.python.org/3.12/library/asyncio-subprocess.html
+    with suppress(BrokenPipeError, ConnectionResetError):
+        process.stdin.write(prompt.encode())
+        process.stdin.close()
+    tail = b""
+    while chunk := await process.stderr.read(4096):
+        tail = (tail + chunk)[-8192:]
+    await process.wait()
+    # Only fixed phrases escape; stderr may contain Profile content or credentials.
+    causes = ("unauthorized", "rate limit", "unsupported model", "schema", "connection")
+    return ", ".join(cause for cause in causes if cause.encode() in tail.lower())
+
+
 def strict_schema(value):
     if isinstance(value, dict):
         value = {k: strict_schema(v) for k, v in value.items()}
@@ -68,13 +82,13 @@ async def structured[T: BaseModel](model: Model, prompt: str, schema: type[T]) -
                 cwd=directory,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
                 start_new_session=True,
             )
         except OSError as error:
             raise AIError("Could not start Codex") from error
         try:
-            await asyncio.wait_for(process.communicate(prompt.encode()), TIMEOUT)
+            diagnostic = await asyncio.wait_for(codex_stderr(process, prompt), TIMEOUT)
         except (TimeoutError, asyncio.CancelledError) as error:
             # Codex runs a native child under its node wrapper; kill the whole group.
             with suppress(ProcessLookupError):
@@ -84,7 +98,8 @@ async def structured[T: BaseModel](model: Model, prompt: str, schema: type[T]) -
                 raise
             raise AIError("Codex timed out") from None
         if process.returncode:
-            raise AIError(f"Codex exited with status {process.returncode}")
+            detail = f": {diagnostic}" if diagnostic else ""
+            raise AIError(f"Codex exited with status {process.returncode}{detail}")
         try:
             return schema.model_validate_json((path / "out.txt").read_text())
         except (OSError, UnicodeError, ValidationError) as error:

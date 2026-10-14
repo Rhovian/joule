@@ -25,7 +25,9 @@ schema = json.loads(Path(args[args.index('--output-schema')+1]).read_text())
 assert schema['additionalProperties'] is False
 assert set(schema['required']) == set(schema['properties'])
 mode = os.environ['FAKE_MODE']
-if mode == 'exit': sys.exit(7)
+if mode == 'exit':
+    sys.stderr.buffer.write(os.environ.get('CODEX_STDERR', '').encode())
+    sys.exit(7)
 if mode == 'timeout':
     import subprocess
     Path(os.environ['CHILD_PID']).write_text(str(subprocess.Popen(['sleep', '10']).pid))
@@ -47,10 +49,35 @@ if mode != 'missing':
         with pytest.raises(ai.AIError) as error:
             asyncio.run(call)
         assert "private prompt" not in str(error.value)
+        expected = {
+            "exit": "Codex exited with status 7",
+            "timeout": "Codex timed out",
+            "bad": "Codex returned missing or invalid output",
+            "missing": "Codex returned missing or invalid output",
+        }[mode]
+        assert str(error.value) == expected + os.environ.get("EXPECTED_DETAIL", "")
     if mode == "timeout":
         child = int((tmp_path / "child.pid").read_text())
         with pytest.raises(ProcessLookupError):
             os.kill(child, 0)
+
+
+@pytest.mark.parametrize(
+    ("stderr", "detail"),
+    [
+        ("401 Unauthorized Bearer secret private prompt CV", ": unauthorized"),
+        ("429 rate limit secret", ": rate limit"),
+        ("unsupported model private prompt", ": unsupported model"),
+        ("invalid schema CV", ": schema"),
+        ("TLS connection failed token=secret", ": connection"),
+        ("private prompt CV password=secret\x1b[31m\ufffd", ""),
+        ("unsupported model " + "x" * 100000 + " connection failed", ": connection"),
+    ],
+)
+def test_codex_stderr(tmp_path, monkeypatch, stderr, detail):
+    monkeypatch.setenv("CODEX_STDERR", stderr)
+    monkeypatch.setenv("EXPECTED_DETAIL", detail)
+    test_codex(tmp_path, monkeypatch, "exit")
 
 
 def test_profile_prompt_and_fingerprint(tmp_path):
