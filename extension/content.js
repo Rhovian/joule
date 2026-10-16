@@ -29,8 +29,18 @@
     }
     // jsdom 26.1.0 implements DOM primitives, not form semantics or layout:
     // https://github.com/jsdom/jsdom/tree/26.1.0#pretending-to-be-a-visual-browser
+    function gemUpload(element) {
+      // Captured jobs.gem.com upload: hidden native input inside a visible presentation dropzone.
+      // https://jobs.gem.com/apartment-list/am9icG9zdDoWMj3GYH-CbSnQ86QyPJlD
+      if (window.location.hostname !== 'jobs.gem.com' || element.type !== 'file') return null;
+      const dropzone = element.parentElement;
+      const title = dropzone?.parentElement?.parentElement?.parentElement?.querySelector(':scope > span[class^="bodyImportant-"]');
+      return dropzone?.matches('[role="presentation"][tabindex="0"]') && title ? {dropzone, title} : null;
+    }
     function visible(element) {
       if (!element.isConnected || element.disabled || element.readOnly || element.matches(':disabled') || element.type === 'hidden') return false;
+      const upload = gemUpload(element);
+      if (upload) return !element.hidden && element.getAttribute('aria-hidden') !== 'true' && visible(upload.dropzone);
       for (let node = element; node?.nodeType === 1; node = node.parentElement) {
         const style = window.getComputedStyle(node);
         if (node.hidden || node.getAttribute('aria-hidden') === 'true' || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') return false;
@@ -43,7 +53,7 @@
       const labelled = (element.getAttribute('aria-labelledby') || '').split(/\s+/)
         .map(id => document.getElementById(id)?.textContent || '').join(' ').trim();
       return (explicit?.textContent || wrapping?.textContent || labelled || element.getAttribute('aria-label') ||
-        element.closest('fieldset')?.querySelector('legend')?.textContent || fieldRoot(element)?.querySelector('label')?.textContent || element.getAttribute('placeholder') || '').trim();
+        element.closest('fieldset')?.querySelector('legend')?.textContent || fieldRoot(element)?.querySelector('label')?.textContent || gemUpload(element)?.title.textContent || element.getAttribute('placeholder') || '').trim();
     }
     const comboOptions = new WeakMap();
     const committedLabels = new WeakMap();
@@ -55,7 +65,13 @@
     const selectedText = element => autocomplete(element) ?
       (element.getAttribute('aria-expanded') === 'false' ? element.value : '') : selection(element)?.textContent.trim();
     const emptyCombo = element => visible(element) && !element.value && !selection(element);
-    const key = (element, value) => element.dispatchEvent(new window.KeyboardEvent('keydown', {key: value, bubbles: true}));
+    // Greenhouse's K/fa wrapper controls menuIsOpen on keyup.code, independently of react-select.
+    // https://job-boards.cdn.greenhouse.io/assets/entry.client-ClhIqXFJ.js
+    const key = (element, value) => {
+      for (const type of ['keydown', 'keyup']) element.dispatchEvent(new window.KeyboardEvent(type, {
+        key: value, code: value, bubbles: true, cancelable: true,
+      }));
+    };
     const options = element => (element.getAttribute('aria-controls') || element.getAttribute('aria-owns') || '')
       .split(/\s+/).flatMap(id => [...(document.getElementById(id)?.querySelectorAll('[role=option]') || [])])
       .filter(option => visible(option) && option.getAttribute('aria-disabled') !== 'true');

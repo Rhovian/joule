@@ -4,7 +4,7 @@ const {JSDOM} = require('jsdom');
 const {createWorker} = require('../content.js');
 
 // Simulates the public react-select DOM contract; this is not a real React/ATS trial.
-function widget({required = true, selected = '', async = false, choices = ['Yes', 'No'], display = text => text} = {}) {
+function widget({required = true, selected = '', async = false, choices = ['Yes', 'No'], display = text => text, greenhouse = false} = {}) {
   const document = new JSDOM(`<label for="q">${async ? 'Location (City)' : 'Authorized?'}${required ? '*' : ''}</label>
     <div><div id="values"><div><input id="q" role="combobox" aria-expanded="false"></div></div></div>`).window.document;
   const window = document.defaultView, input = document.getElementById('q');
@@ -32,8 +32,12 @@ function widget({required = true, selected = '', async = false, choices = ['Yes'
     document.body.append(menu);
   }
   input.addEventListener('keydown', event => {
-    if (event.key === 'ArrowDown' && !async) open();
+    if (event.key === 'ArrowDown' && !async && !greenhouse) open();
     if (event.key === 'Escape') close();
+  });
+  if (greenhouse) input.addEventListener('keyup', event => {
+    if (event.code === 'Escape' || event.code === 'Tab') close();
+    else if (event.code !== 'Enter') open();
   });
   input.addEventListener('input', () => {
     if (async && input.value) window.setTimeout(open, 5);
@@ -118,4 +122,16 @@ test('Greenhouse phone country commits its custom +1 display after matching the 
   const field = worker.describe()[0];
   assert.equal((await worker.apply(set('United States +1'))).filled, 1);
   assert.equal(worker.answer(field).answer, 'United States +1');
+});
+
+test('Greenhouse controlled menu opens on keyup before Ask selects, then survives blur', async () => {
+  // Captured wrapper K/fa in entry.client-ClhIqXFJ.js controls menuIsOpen via onKeyUp.code.
+  const {worker, input} = widget({greenhouse: true});
+  await worker.prepare();
+  const field = worker.describe()[0];
+  assert.equal(field.options.length, 2);
+  assert.equal(input.getAttribute('aria-expanded'), 'false');
+  assert.equal((await worker.apply(set('Yes'), field)).filled, 1);
+  assert.equal(input.value, '');
+  assert.equal(worker.answer(field).answer, 'Yes');
 });
