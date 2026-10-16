@@ -103,7 +103,7 @@ LABELS = (
 )
 SENSITIVE = re.compile(
     r"\b(eeo|demograph\w*|disab\w*|veteran\w*|pronouns?|criminal|"
-    r"consent|attest\w*|privacy|race|ethnic\w*|gender|sex|sexual|"
+    r"consent|attest\w*|privacy|race|ethnic\w*|hispanic|latino|gender|sex|sexual|"
     r"agree|agreement|certify|certification)\b"
 )
 
@@ -167,11 +167,12 @@ def classify(field, values, cover_letter=None, bank=None):
 
     if field.type == "hidden":
         return leave("hidden")
-    if field.role == "combobox":
-        return leave("combobox")
     # Invariant 6 also guards identity-like labels on sensitive questions.
     if sensitive(field.label):
         return leave("sensitive")
+    # Issue #90 exercises ADR-0001 D12's post-trial combobox revisit.
+    if field.role == "combobox" and not field.required:
+        return leave("optional combobox")
     if field.tag == "textarea" and "cover" in normalize(
         f"{field.label} {field.id} {field.name}"
     ):
