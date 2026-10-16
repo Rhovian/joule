@@ -87,12 +87,13 @@ element('fill').addEventListener('click', () => run(async () => {
       button.textContent = 'Ask';
       button.addEventListener('click', () => run(async () => {
         const answer = await send({type: 'ask', tabId: tab.id, jobId: result.job.id, field});
+        if (answer.filled) button.remove();
         element('status').textContent = answer.value === null ? answer.reason :
           answer.filled ? 'Answer filled. Review and edit the form.' : 'Field changed or already filled; Fill again to refresh.';
       }));
       item.append(button);
     }
-    if (['ask', 'set'].includes(action.action)) {
+    if (action.action === 'ask') {
       const save = document.createElement('button');
       save.textContent = 'Save to bank';
       save.addEventListener('click', () => run(async () => {
