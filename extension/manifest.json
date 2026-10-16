@@ -3,7 +3,7 @@
   "name": "Joule Fill",
   "version": "0.2.0",
   "minimum_chrome_version": "116",
-  "permissions": ["storage", "activeTab", "scripting", "sidePanel", "contextMenus"],
+  "permissions": ["storage", "tabs", "activeTab", "scripting", "sidePanel", "contextMenus"],
   "optional_host_permissions": ["http://*/*", "https://*/*"],
   "background": {"service_worker": "background.js"},
   "action": {"default_title": "Joule Fill"},

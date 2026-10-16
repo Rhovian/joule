@@ -24,7 +24,8 @@ async function refreshDrafts() {
 function picker() {
   const query = element('filter').value.toLowerCase();
   element('jobs').replaceChildren(new Option('Pick a Job', ''));
-  for (const job of jobs.filter(job => `${job.title} ${job.company} ${job.source}`.toLowerCase().includes(query))) {
+  const choices = active && !jobs.some(job => job.id === active.id) ? [active, ...jobs] : jobs;
+  for (const job of choices.filter(job => `${job.title} ${job.company} ${job.source}`.toLowerCase().includes(query))) {
     element('jobs').add(new Option(`${job.has_drafts ? 'Draft · ' : ''}${job.title} — ${job.company || ''} (${job.source})`, job.id));
   }
   element('jobs').value = active?.id || '';
@@ -44,13 +45,21 @@ async function run(work) {
   }
 }
 async function refresh() {
-  const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
-  showActive(tab ? await send({type: 'detect', tabId: tab.id}) : null);
+  let detection;
+  try {
+    const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+    if (!tab) throw Error('Chrome did not provide an active tab');
+    showActive(await send({type: 'detect', tabId: tab.id}));
+    detection = active ? 'Detected Job from page URL.' : 'No stored Job matches this page; pick a Job manually.';
+  } catch (error) {
+    showActive(null);
+    detection = `Auto-detect failed: ${error.message}`;
+  }
   element('remaining').replaceChildren();
   jobs = await send({type: 'jobs'});
   await refreshDrafts();
   picker();
-  element('status').textContent = `${jobs.length} non-Upwork Jobs`;
+  element('status').textContent = `${detection} · ${jobs.length} non-Upwork Jobs`;
 }
 element('refresh').addEventListener('click', () => run(refresh));
 element('filter').addEventListener('input', picker);

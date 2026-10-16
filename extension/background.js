@@ -43,8 +43,12 @@ function createBackground(chrome, fetcher = fetch) {
     }
     if (!trusted(sender)) throw Error('Only extension UI can request joule data');
     if (message.type === 'detect') {
+      await chrome.storage.session.set({active: null});
       const tab = await chrome.tabs.get(integer(message.tabId));
-      const active = typeof tab.url === 'string' && /^https?:/.test(tab.url) && allowed(tab.url) ?
+      // Tab URL metadata needs tabs/host permission; static script matches do not grant it.
+      // https://developer.chrome.com/docs/extensions/reference/api/tabs#permissions
+      if (!tab.url) throw Error('Chrome did not expose the page URL. Reload the extension to enable tab access, then Refresh Jobs.');
+      const active = /^https?:/.test(tab.url) && allowed(tab.url) ?
         await api(`/api/jobs/resolve?url=${encodeURIComponent(tab.url)}`) : null;
       await chrome.storage.session.set({active});
       return active;
