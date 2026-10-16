@@ -2,7 +2,9 @@
 
 Load this directory unpacked from Chrome's `chrome://extensions` with Developer mode enabled. Open extension Options, enter the joule origin (for example `http://localhost:8000` or the Tailscale Serve HTTPS origin), and click **Save and Test**. For a server, set joule's `UPWORK_REDIRECT_URI` to allow the tailnet hostname.
 
-Open a Greenhouse, Lever or Ashby form, click the extension toolbar action to open the side panel, refresh Jobs, select the intended Job, and click **Fill**. Reload a form that was already open when the extension was installed. Review the values and complete the remaining fields yourself. Job state stays manual.
+Open a Greenhouse, Lever or Ashby form and click the extension toolbar action to open the side panel. It detects the Job from the current page URL; check the displayed title/company and click **Fill**. Detection refreshes on tab switches and navigation. Reload a form that was already open when the extension was installed. Review the values and complete the remaining fields yourself. Job state stays manual.
+
+Detection compares stored Job links, Duplicate links and saved destination URLs, ignoring fragments and common tracking parameters. Lever `/apply` and Ashby `/application` match their Job pages. Job identifiers in query parameters (including Greenhouse `gh_jid`) are preserved. Unknown redirects, embedded form URLs that differ from the parent page, and ambiguous matches need a manual pick: filter/select the intended Job from the picker. **Refresh Jobs** retries detection.
 
 On other sites, right-click the page or a field and choose **Fill with Joule**, or press **Ctrl+Shift+Y** (**Command+Shift+Y** on macOS). This injects the same worker using temporary `activeTab` access and opens the side panel; select the intended Job and click **Fill**. Change the shortcut at `chrome://extensions/shortcuts` if it conflicts. Upwork, LinkedIn, Indeed and Glassdoor, including subdomains, are refused.
 
