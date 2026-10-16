@@ -511,3 +511,24 @@ def test_optional_identity_override_preserves_optional_question_guard(
     assert post(client, [{"ref": [0, 0], "required": False, **field}]).json()[
         "actions"
     ] == [{"ref": [0, 0], **expected}]
+
+
+def test_captured_ashby_location_hint_uses_profile_label_and_leaves_optional(client):
+    path = client.app.state.data_dir / "profile" / "cv.yaml"
+    document = yaml.safe_load(path.read_text())
+    document["basics"]["location"] = {"label": "Denver, Colorado, United States"}
+    path.write_text(yaml.safe_dump(document))
+    field = {
+        "ref": [0, 0],
+        "name": "_systemfield_location",
+        "role": "combobox",
+        "label": "Which city and country do you intend to work from?",
+    }
+    assert (
+        post(client, [field]).json()["actions"][0]["value"]
+        == "Denver, Colorado, United States"
+    )
+    assert (
+        post(client, [dict(field, required=False)]).json()["actions"][0]["reason"]
+        == "optional"
+    )

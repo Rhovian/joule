@@ -86,9 +86,10 @@ HINTS = {
     "urls[linkedin]": "linkedin",
     "urls[github]": "github",
     "urls[portfolio]": "url",
-    # Ashby API-doc names, not verified against live DOM; see ADR-0001 §1.
+    # Ashby field paths verified in the live DOM capture: extension/test/fixtures/ashby.html.
     "_systemfield_name": "full_name",
     "_systemfield_email": "email",
+    "_systemfield_location": "location",
 }
 LABELS = (
     (r"^(first|given) name\b", "first_name"),
@@ -124,6 +125,7 @@ def identity(document):
     parts = name.split()
     values = {key: basics.get(key) for key in ("email", "phone", "url")}
     values |= {
+        "location": (basics.get("location") or {}).get("label"),
         "full_name": name,
         "first_name": parts[0] if parts else None,
         "last_name": " ".join(parts[1:]) or None,
