@@ -65,11 +65,20 @@ function createBackground(chrome, fetcher = fetch) {
       await chrome.storage.session.set({active});
       return active;
     }
-    if (!['fill', 'attach', 'resume', 'ask', 'save'].includes(message.type)) throw Error('Unknown request');
+    if (!['fill', 'attach', 'resume', 'ask', 'question', 'save'].includes(message.type)) throw Error('Unknown request');
     const {active} = await chrome.storage.session.get('active');
     if (!active || active.source === 'upwork') throw Error('Pick a non-Upwork Job first');
     async function match(fields) {
       try { return await api(`/api/fill/jobs/${integer(active.id)}/match`, {fields}); }
+      catch (error) { if (error.status === 404) await chrome.storage.session.remove('active'); throw error; }
+    }
+    if (message.type === 'question') {
+      if (message.jobId !== active.id) throw Error('Pick the intended Job before Ask');
+      try {
+        const result = await api(`/api/fill/jobs/${integer(active.id)}/ask`, {question: message.question});
+        if ((await chrome.storage.session.get('active')).active?.id !== active.id) throw Error('Job changed; Ask again');
+        return result;
+      }
       catch (error) { if (error.status === 404) await chrome.storage.session.remove('active'); throw error; }
     }
     if (message.type === 'resume') return match([]);

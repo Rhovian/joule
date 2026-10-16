@@ -4,14 +4,14 @@ const {JSDOM} = require('jsdom');
 const {createWorker} = require('../content.js');
 
 // Simulates the public react-select DOM contract; this is not a real React/ATS trial.
-function widget({required = true, selected = '', async = false, choices = ['Yes', 'No']} = {}) {
+function widget({required = true, selected = '', async = false, choices = ['Yes', 'No'], display = text => text} = {}) {
   const document = new JSDOM(`<label for="q">${async ? 'Location (City)' : 'Authorized?'}${required ? '*' : ''}</label>
     <div><div id="values"><div><input id="q" role="combobox" aria-expanded="false"></div></div></div>`).window.document;
   const window = document.defaultView, input = document.getElementById('q');
   window.HTMLElement.prototype.getClientRects = () => [{width: 100, height: 20}];
   const choose = text => {
     const value = document.createElement('span');
-    value.className = 'css-test-singleValue'; value.textContent = text;
+    value.className = 'css-test-singleValue'; value.textContent = display(text);
     document.getElementById('values').append(value);
     input.value = ''; close();
   };
@@ -112,4 +112,10 @@ test('required surveys are not opened during discovery; aria-required is recogni
   await worker.prepare();
   assert.equal(worker.describe()[0].required, true);
   assert.equal(events, 0);
+});
+test('Greenhouse phone country commits its custom +1 display after matching the full option', async () => {
+  const {worker} = widget({choices: ['United States +1'], display: () => '+1'});
+  const field = worker.describe()[0];
+  assert.equal((await worker.apply(set('United States +1'))).filled, 1);
+  assert.equal(worker.answer(field).answer, 'United States +1');
 });

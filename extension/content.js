@@ -29,6 +29,7 @@
         element.closest('fieldset')?.querySelector('legend')?.textContent || element.getAttribute('placeholder') || '').trim();
     }
     const comboOptions = new WeakMap();
+    const committedLabels = new WeakMap();
     const normalized = text => text.trim().toLowerCase().replace(/\s+/g, ' ');
     const required = element => element.required || element.getAttribute('aria-required') === 'true' ||
       (element.getAttribute('role') === 'combobox' && /[*✱]/.test(label(element)));
@@ -92,7 +93,11 @@
           const activation = new window.MouseEvent('click', {bubbles: true, cancelable: true});
           activation.preventDefault(); // No link navigation or form-submit default action, even on hostile markup.
           matches[0].dispatchEvent(activation);
-          if (await waitFor(() => selection(element) && normalized(selection(element).textContent) === normalized(action.value))) {
+          // Greenhouse renders a country option (United States +1) as only +1 after selection.
+          // https://job-boards.cdn.greenhouse.io/assets/entry.client-ClhIqXFJ.js (Oo/Do)
+          // Confirm a committed value exists; the exact unique option was checked above.
+          if (await waitFor(() => selection(element)?.textContent.trim())) {
+            committedLabels.set(element, {markup: selection(element).outerHTML, label: matches[0].textContent.trim()});
             element.style.outline = '2px solid #25854a';
             filled++;
           }
@@ -171,7 +176,9 @@
       const element = controls[expected.ref];
       if (!element || !visible(element)) throw Error('Field unavailable');
       const selected = element.type === 'radio' ? radios(element).find(option => option.checked && visible(option)) : null;
-      const value = element.getAttribute('role') === 'combobox' ? selection(element)?.textContent.trim() :
+      const committed = committedLabels.get(element);
+      const value = element.getAttribute('role') === 'combobox' ?
+        (committed?.markup === selection(element)?.outerHTML ? committed.label : selection(element)?.textContent.trim()) :
         element.type === 'radio' ? selected && label(selected) :
         element.tagName === 'SELECT' ? element.value && element.selectedOptions[0]?.textContent.trim() :
           ['text', 'email', 'tel', 'url', 'search', 'textarea'].includes(element.type) ? element.value : null;

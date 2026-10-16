@@ -170,27 +170,18 @@ def classify(field, values, cover_letter=None, bank=None):
     # Invariant 6 also guards identity-like labels on sensitive questions.
     if sensitive(field.label):
         return leave("sensitive")
-    # Issue #90 exercises ADR-0001 D12's post-trial combobox revisit.
-    if field.role == "combobox" and not field.required:
-        return leave("optional combobox")
-    if field.tag == "textarea" and "cover" in normalize(
-        f"{field.label} {field.id} {field.name}"
+    # Operator ruling after the live trial: required fields only; uploads are explicit.
+    if field.type != "file" and not field.required:
+        return leave("optional")
+    if re.search(
+        r"\bcover(?:[\s_-]*letter)?\b",
+        normalize(f"{field.label} {field.id} {field.name}"),
     ):
-        return (
-            {"action": "set", "value": cover_letter}
-            if cover_letter
-            else leave("no Cover Letter Draft")
-        )
+        return leave("Cover Letter skipped")
     if field.type == "file":
         text = normalize(f"{field.label} {field.id} {field.name}")
         if re.search(r"\b(resume|cv)\b", text):
             return {"action": "upload", "file": "resume"}
-        if "cover" in text:
-            return (
-                {"action": "upload", "file": "cover_letter"}
-                if cover_letter
-                else leave("no Cover Letter Draft")
-            )
         return leave("unrecognized file input")
     key = next(
         (AUTOCOMPLETE[t] for t in field.autocomplete.split() if t in AUTOCOMPLETE),

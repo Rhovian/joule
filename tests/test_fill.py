@@ -55,14 +55,14 @@ def client(tmp_path, monkeypatch):
 
 
 def post(client, fields):
-    return client.post(URL, json={"fields": fields})
+    return client.post(URL, json={"fields": [{"required": True, **f} for f in fields]})
 
 
 @pytest.mark.parametrize("name", ["greenhouse", "lever", "ashby-by-doc"])
 def test_ats_fixtures(client, name):
     fixture = json.loads((FIXTURES / f"{name}.json").read_text())
     fields = [
-        dict(ref=[7, index], **item["field"])
+        {"required": True, "ref": [7, index], **item["field"]}
         for index, item in enumerate(fixture["cases"])
     ]
     response = post(client, fields)
@@ -73,7 +73,7 @@ def test_ats_fixtures(client, name):
             dict(
                 ref=[7, index],
                 **(
-                    {"action": "leave", "reason": "no Cover Letter Draft"}
+                    {"action": "leave", "reason": "Cover Letter skipped"}
                     if item["expected"].get("file") == "cover_letter"
                     else item["expected"]
                 ),
@@ -404,7 +404,7 @@ def test_save_oversized_bank_is_untouched(client):
             "Travel?",
             False,
             {"travel?": "Yes"},
-            {"action": "leave", "reason": "optional combobox"},
+            {"action": "leave", "reason": "optional"},
         ),
         ("Gender", True, {"gender": "Yes"}, {"action": "leave", "reason": "sensitive"}),
         ("Hispanic/Latino?", True, {}, {"action": "leave", "reason": "sensitive"}),
@@ -421,3 +421,55 @@ def test_required_combobox_classification(label, required, bank, expected):
         options=[{"value": "Yes", "label": "Yes"}, {"value": "No", "label": "No"}],
     )
     assert classify(field, {}, bank=bank) == expected
+
+
+def test_live_trial_profile_answers_and_required_only(client):
+    directory = client.app.state.data_dir / "profile"
+    document = yaml.safe_load((directory / "cv.yaml").read_text())
+    document["basics"]["phone"] = "+1 555-555-0100"
+    (directory / "cv.yaml").write_text(yaml.safe_dump(document))
+    entries = [
+        ("Country", "United States +1"),
+        ("Location (City)", "Denver, Colorado, United States"),
+        ("Which location and timezone will you be working from?", "MST, Denver, CO"),
+        ("Are you authorized to work without employer sponsorship?", "Yes"),
+    ]
+    (directory / "answers.yaml").write_text(
+        yaml.safe_dump([dict(question=q, answer=a) for q, a in entries])
+    )
+    fields = [dict(ref=[0, 0], label="Phone*", type="tel")]
+    fields += [dict(ref=[0, i + 1], label=q + "*") for i, (q, _) in enumerate(entries)]
+    fields[1]["role"] = fields[2]["role"] = fields[4]["role"] = "combobox"
+    fields[4]["options"] = [{"value": "1", "label": "Yes"}]
+    actions = post(client, fields).json()["actions"]
+    assert [a["value"] for a in actions] == [
+        "+1 555-555-0100",
+        "United States +1",
+        "Denver, Colorado, United States",
+        "MST, Denver, CO",
+        "1",
+    ]
+    optional = [
+        dict(ref=[0, i], required=False, label=label)
+        for i, label in enumerate(["LinkedIn Profile", "Website/Blog URL", "Country"])
+    ]
+    assert all(
+        a["reason"] == "optional" for a in post(client, optional).json()["actions"]
+    )
+    covers = [
+        dict(ref=[0, i], type=type, label="Cover Letter")
+        for i, type in enumerate(["file", "textarea"])
+    ]
+    assert all(
+        a["reason"] == "Cover Letter skipped"
+        for a in post(client, covers).json()["actions"]
+    )
+
+
+@pytest.mark.parametrize(
+    "label", ["What have you discovered recently?", "Describe test coverage"]
+)
+def test_cover_letter_skip_preserves_unrelated_questions(client, label):
+    assert post(client, [{"ref": [0, 0], "label": label}]).json()["actions"] == [
+        {"ref": [0, 0], "action": "ask"}
+    ]

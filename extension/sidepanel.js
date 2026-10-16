@@ -1,22 +1,22 @@
 const element = id => document.getElementById(id);
 let jobs = [], busy = false, active = null, refreshPending = false;
-let resumeDraft = null, coverDraftId = null;
+let resumeDraft = null;
 async function send(message) {
   const result = await chrome.runtime.sendMessage(message);
   if (result.error) throw Error(result.error);
   return result.value;
 }
 function showActive(job) {
+  if (active?.id !== job?.id) { element('answer').value = ''; element('copy').disabled = true; }
   active = job;
   element('active').textContent = job ? `${job.title} — ${job.company || ''} (${job.source})` : 'Pick a Job before Fill';
   element('fill').disabled = busy || !job;
   element('attach').disabled = busy || !job;
-  element('cover').disabled = busy || !job || !coverDraftId;
+  element('ask').disabled = busy || !job || !element('question').value.trim();
 }
 async function refreshDrafts() {
   const result = active ? await send({type: 'resume'}) : {};
   resumeDraft = result.resume_draft;
-  coverDraftId = result.cover_letter_draft_id;
   element('resume').textContent = resumeDraft ? `Tailored CV v${resumeDraft.version} · ${new Date(resumeDraft.created_at).toLocaleString()}` : 'Generate a Tailored CV';
   element('attach').textContent = resumeDraft ? 'Attach resume' : 'Generate and attach resume';
   showActive(active);
@@ -33,7 +33,7 @@ function picker() {
 async function run(work) {
   if (busy) return;
   busy = true;
-  for (const id of ['fill', 'attach', 'cover', 'refresh', 'jobs']) element(id).disabled = true;
+  for (const id of ['fill', 'attach', 'ask', 'refresh', 'jobs']) element(id).disabled = true;
   element('status').textContent = 'Working…';
   try { await work(); }
   catch (error) { element('status').textContent = error.message; showActive(await send({type: 'active'})); }
@@ -105,7 +105,7 @@ element('fill').addEventListener('click', () => run(async () => {
   }
   element('status').textContent = `${result.filled} filled; ${remaining.length} remaining. Review the form.`;
 }));
-for (const [id, kind] of [['attach', 'resume'], ['cover', 'cover_letter']]) {
+for (const [id, kind] of [['attach', 'resume']]) {
   element(id).addEventListener('click', () => run(async () => {
     element('status').textContent = kind === 'resume' && !resumeDraft ? 'Generating Tailored CV… (may take up to 5 minutes)' : 'Attaching…';
     const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
@@ -114,6 +114,19 @@ for (const [id, kind] of [['attach', 'resume'], ['cover', 'cover_letter']]) {
     element('status').textContent = `${result.filled} attached. Review the form.`;
   }));
 }
+element('question').addEventListener('input', () => showActive(active));
+element('ask').addEventListener('click', () => run(async () => {
+  element('answer').value = '';
+  element('copy').disabled = true;
+  const answer = await send({type: 'question', jobId: active.id, question: element('question').value.trim()});
+  element('answer').value = answer.value ?? '';
+  element('copy').disabled = !answer.value;
+  element('status').textContent = answer.value === null ? answer.reason : 'Answer ready. Review before copying.';
+}));
+element('copy').addEventListener('click', () => run(async () => {
+  await navigator.clipboard.writeText(element('answer').value);
+  element('status').textContent = 'Answer copied.';
+}));
 function detectPage() {
   if (busy) refreshPending = true;
   else run(refresh);
