@@ -90,6 +90,7 @@ HINTS = {
     "_systemfield_name": "full_name",
     "_systemfield_email": "email",
     "_systemfield_location": "location",
+    "location-input": "lever_location",
 }
 LABELS = (
     (r"^(first|given) name\b", "first_name"),
@@ -121,11 +122,21 @@ def sensitive(text):
 
 def identity(document):
     basics = document.get("basics", {})
+    location = basics.get("location") or {}
     name = basics.get("name", "").strip()
     parts = name.split()
     values = {key: basics.get(key) for key in ("email", "phone", "url")}
     values |= {
-        "location": (basics.get("location") or {}).get("label"),
+        "location": location.get("label"),
+        # Lever /searchLocations returns US names as "Denver, CO, USA" (captured live).
+        # https://jobs.lever.co/js/retrieveLocations.js passes location.name through unchanged.
+        "lever_location": (
+            f"{location['city']}, {location['region']}, USA"
+            if location.get("countryCode") == "US"
+            and location.get("city")
+            and location.get("region")
+            else location.get("label")
+        ),
         "full_name": name,
         "first_name": parts[0] if parts else None,
         "last_name": " ".join(parts[1:]) or None,

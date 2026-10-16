@@ -532,3 +532,27 @@ def test_captured_ashby_location_hint_uses_profile_label_and_leaves_optional(cli
         post(client, [dict(field, required=False)]).json()["actions"][0]["reason"]
         == "optional"
     )
+
+
+def test_captured_lever_location_uses_service_label_and_protects_optional(client):
+    path = client.app.state.data_dir / "profile" / "cv.yaml"
+    document = yaml.safe_load(path.read_text())
+    document["basics"]["location"] = {
+        "city": "Denver",
+        "region": "CO",
+        "countryCode": "US",
+        "label": "Denver, Colorado, United States",
+    }
+    path.write_text(yaml.safe_dump(document))
+    field = {
+        "ref": [0, 0],
+        "id": "location-input",
+        "name": "location",
+        "role": "combobox",
+        "label": "Current location ✱",
+    }
+    assert post(client, [field]).json()["actions"][0]["value"] == "Denver, CO, USA"
+    assert (
+        post(client, [dict(field, required=False)]).json()["actions"][0]["reason"]
+        == "optional"
+    )

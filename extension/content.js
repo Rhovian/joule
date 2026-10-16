@@ -13,17 +13,24 @@
     // Captured Ashby widgets (vN, autocomplete w/T/E, text Pk/SP): no native select/radio API.
     // https://cdn.ashbyprd.com/frontend_non_user/c2a7197c175f484890751b5bbf8e105e2cd08e16/assets/index-BIeWnsEH.js
     const fieldRoot = element => element.closest('.ashby-application-form-field-entry');
+    const leverTitle = element => element.closest('.application-question')?.querySelector('.application-label');
+    const leverLocation = element => element.matches('#location-input.location-input') && !!leverTitle(element);
+    const combo = element => element.getAttribute('role') === 'combobox' || leverLocation(element);
+    const role = element => leverLocation(element) ? 'combobox' : element.getAttribute('role') || '';
+    const question = element => leverTitle(element)?.textContent.trim() ||
+      element.closest('fieldset')?.querySelector('legend')?.textContent.trim() || label(element);
     const group = element => element.matches('.ashby-application-form-input-yesno');
     const autocomplete = element => element.matches('.ashby-application-form-input-autocomplete');
     const controlName = element => element.name || fieldRoot(element)?.dataset.fieldPath || '';
     const controlType = element => group(element) ? 'button-group' : element.type || '';
     const allControls = () => [...document.querySelectorAll('input,textarea,select,.ashby-application-form-input-yesno')]
+      .filter(element => !element.closest('#candidatePronounsCheckboxes'))
       .filter(element => !element.closest('.ashby-application-form-input-yesno') || group(element));
     const choices = element => [...element.querySelectorAll('button[data-option]')];
     const pressed = element => choices(element).find(button => button.getAttribute('aria-pressed') === 'true');
-    function activate(element) {
-      // Operator-authorized Yes/No buttons and exact ARIA options only; cancel browser submit defaults.
-      const event = new window.MouseEvent('click', {bubbles: true, cancelable: true});
+    function activate(element, type = 'click') {
+      // Operator-authorized Yes/No buttons and exact widget options only; cancel browser submit defaults.
+      const event = new window.MouseEvent(type, {bubbles: true, cancelable: true});
       event.preventDefault();
       element.dispatchEvent(event);
     }
@@ -48,6 +55,7 @@
       return element.type === 'file' || [...element.getClientRects()].some(rect => rect.width > 0 && rect.height > 0);
     }
     function label(element) {
+      if (element.type !== 'radio' && leverTitle(element)) return leverTitle(element).textContent.trim();
       const explicit = [...document.querySelectorAll('label[for]')].find(node => node.htmlFor === element.id && element.id);
       const wrapping = element.closest('label');
       const labelled = (element.getAttribute('aria-labelledby') || '').split(/\s+/)
@@ -59,10 +67,12 @@
     const committedLabels = new WeakMap();
     const normalized = text => text.trim().toLowerCase().replace(/\s+/g, ' ');
     const required = element => element.required || element.getAttribute('aria-required') === 'true' ||
+      !!leverTitle(element)?.querySelector('.required') ||
       (element.getAttribute('role') === 'combobox' && /[*✱]/.test(label(element))) ||
       !!fieldRoot(element)?.querySelector('label[class*="_required_"]');
     const selection = element => element.parentElement?.parentElement?.querySelector('[class*="singleValue"], [class*="single-value"]');
-    const selectedText = element => autocomplete(element) ?
+    const selectedText = element => leverLocation(element) ?
+      (element.closest('.application-field').querySelector('#selected-location')?.value ? element.value : '') : autocomplete(element) ?
       (element.getAttribute('aria-expanded') === 'false' ? element.value : '') : selection(element)?.textContent.trim();
     const emptyCombo = element => visible(element) && !element.value && !selection(element);
     // Greenhouse's K/fa wrapper controls menuIsOpen on keyup.code, independently of react-select.
@@ -72,8 +82,10 @@
         key: value, code: value, bubbles: true, cancelable: true,
       }));
     };
-    const options = element => (element.getAttribute('aria-controls') || element.getAttribute('aria-owns') || '')
+    const options = element => (leverLocation(element) ? [...element.closest('.application-field').querySelectorAll('.dropdown-location')] :
+      (element.getAttribute('aria-controls') || element.getAttribute('aria-owns') || '')
       .split(/\s+/).flatMap(id => [...(document.getElementById(id)?.querySelectorAll('[role=option]') || [])])
+    )
       .filter(option => visible(option) && option.getAttribute('aria-disabled') !== 'true');
     // react-select 5.10.2 owns selection state; input.value alone cannot select an option.
     // Its onKeyDown, renderInput and renderMenu expose keyboard + ARIA hooks:
@@ -91,7 +103,7 @@
         check();
       });
     }
-    const sensitive = element => /\b(eeo|demograph\w*|disab\w*|veteran\w*|pronouns?|criminal|consent|attest\w*|privacy|race|ethnic\w*|hispanic|latino|gender|sex|sexual|agree|agreement|certify|certification)\b/i.test(label(element));
+    const sensitive = element => /\b(eeo|demograph\w*|disab\w*|veteran\w*|pronouns?|criminal|consent|attest\w*|privacy|race|ethnic\w*|hispanic|latino|gender|sex|sexual|agree|agreement|certify|certification)\b/i.test(question(element));
     async function prepare() {
       for (const element of document.querySelectorAll('[role=combobox]')) {
         if (autocomplete(element)) continue; // Ashby location results exist only after a search query.
@@ -113,7 +125,7 @@
       let filled = 0;
       for (const action of actions) {
         const element = controls[action.ref];
-        if (element?.getAttribute('role') !== 'combobox') { filled += (await apply([action])).filled; continue; }
+        if (!element || !combo(element)) { filled += (await apply([action])).filled; continue; }
         if (action.action !== 'set' || typeof action.value !== 'string' || !required(element) || !emptyCombo(element)) continue;
         element.focus();
         key(element, 'ArrowDown');
@@ -121,15 +133,18 @@
         if (!element.readOnly) {
           Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(element, action.value);
           element.dispatchEvent(new window.Event('input', {bubbles: true}));
+          // Lever's keydown starts its debounced search; mousedown commits the selected location.
+          // https://jobs.lever.co/js/retrieveLocations.js (captured 2026-10-16)
+          if (leverLocation(element)) key(element, 'End');
         }
         const matching = () => options(element).filter(option => normalized(option.textContent) === normalized(action.value));
         await waitFor(() => matching().length);
         const matches = matching();
         let committed = false;
         // Recheck after async loading, including operator edits and newly selected values.
-        if (visible(element) && !selection(element) && (!element.value || element.value === action.value) && matches.length === 1) {
-          // D12 revisit: activate only a matched ARIA option, never a page button (§2 no-submit).
-          activate(matches[0]);
+        if (visible(element) && !selection(element) && !selectedText(element) && (!element.value || element.value === action.value) && matches.length === 1) {
+          // D12 revisit: activate only an exact matched widget option (§2 no-submit).
+          activate(matches[0], leverLocation(element) ? 'mousedown' : 'click');
           // Greenhouse renders a country option (United States +1) as only +1 after selection.
           // https://job-boards.cdn.greenhouse.io/assets/entry.client-ClhIqXFJ.js (Oo/Do)
           // Confirm a committed value exists; the exact unique option was checked above.
@@ -141,7 +156,8 @@
           }
         }
         if (element.isConnected) {
-          if (!committed && element.value === action.value) {
+          if (!committed && element.value && element.value !== action.value) continue;
+          if (!committed && !selectedText(element) && element.value === action.value) {
             Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(element, '');
             element.dispatchEvent(new window.Event('input', {bubbles: true}));
           }
@@ -159,8 +175,8 @@
         (element.type !== 'radio' || radios(element).find(visible) === element));
       return controls.map((element, ref) => ({
         ref, tag: element.tagName.toLowerCase(), type: controlType(element),
-        role: element.getAttribute('role') || '', name: controlName(element), id: element.id || '',
-        autocomplete: element.autocomplete || '', label: element.type === 'radio' ? element.closest('fieldset')?.querySelector('legend')?.textContent.trim() || label(element) : label(element), required: required(element),
+        role: role(element), name: controlName(element), id: element.id || '',
+        autocomplete: element.autocomplete || '', label: element.type === 'radio' ? question(element) : label(element), required: required(element),
         options: group(element) ? choices(element).map(option => ({value: option.dataset.option, label: option.textContent.trim()})) : element.type === 'radio' ? radios(element).filter(visible).map(option => ({value: option.value, label: label(option)})) :
           element.tagName === 'SELECT' ? [...element.options].map(option => ({value: option.value, label: option.textContent.trim()})) : comboOptions.get(element) || [],
         accept: element.accept || '', maxlength: element.maxLength >= 0 ? element.maxLength : null,
@@ -193,13 +209,14 @@
       return {filled};
     }
     function apply(actions, expected, committing = false) {
-      if (actions.some(action => action.action === 'set' && controls[action.ref]?.getAttribute('role') === 'combobox' && required(controls[action.ref]))) return applyComboboxes(actions, expected);
+      if (actions.some(action => action.action === 'set' && controls[action.ref] && combo(controls[action.ref]) && required(controls[action.ref]))) return applyComboboxes(actions, expected);
       if (!committing && actions.some(action => { const element = controls[action.ref]; return element && (group(element) || element.matches('.ashby-application-form-input-text')); })) return applyWidgets(actions, expected);
       // Compare fresh page data after a slow Ask; navigation/edits must not retarget the answer.
       if (expected && JSON.stringify(describe()[expected.ref]) !== JSON.stringify(expected)) return {filled: 0};
       let filled = 0;
       for (const action of actions) {
         let element = controls[action.ref];
+        if (element && sensitive(element)) continue;
         if (action.action === 'set' && element?.type === 'radio') {
           if (radios(element).some(option => option.checked)) continue;
           element = radios(element).find(option => option.value === action.value && visible(option));
@@ -212,7 +229,7 @@
         }
         // Recheck immediately before writing; operator typing in this tiny window is an accepted design race (§6).
         if (action.action !== 'set' || typeof action.value !== 'string' || !element || !visible(element) ||
-          element.value !== '' || element.getAttribute('role') === 'combobox' ||
+          element.value !== '' || combo(element) ||
           !['text', 'email', 'tel', 'url', 'search', 'textarea', 'select-one'].includes(element.type)) continue;
         if (element.tagName === 'SELECT' && ![...element.options].some(option => option.value === action.value && !option.disabled && !option.closest('optgroup[disabled]'))) continue;
         const prototype = element.tagName === 'SELECT' ? window.HTMLSelectElement.prototype :
@@ -249,14 +266,14 @@
       const element = candidates[0];
       if (!visible(element)) throw Error('Save refused: field is hidden, disabled or read-only.');
       const identity = {tag: element.tagName.toLowerCase(), type: controlType(element),
-        role: element.getAttribute('role') || '', name: controlName(element), id: element.id || '',
-        label: element.type === 'radio' ? element.closest('fieldset')?.querySelector('legend')?.textContent.trim() || label(element) : label(element)};
+        role: role(element), name: controlName(element), id: element.id || '',
+        label: element.type === 'radio' ? question(element) : label(element)};
       for (const key of Object.keys(identity)) {
         if (identity[key] !== expected[key]) throw Error(`Save refused: field ${key} changed; run Fill again.`);
       }
       const selected = element.type === 'radio' ? radios(element).find(option => option.checked && visible(option)) : null;
       const committed = committedLabels.get(element);
-      const value = group(element) ? pressed(element)?.textContent.trim() : element.getAttribute('role') === 'combobox' ?
+      const value = group(element) ? pressed(element)?.textContent.trim() : combo(element) ?
         (committed && committed.markup === selection(element)?.outerHTML ? committed.label : selectedText(element)) :
         element.type === 'radio' ? selected && label(selected) :
         element.tagName === 'SELECT' ? element.value && element.selectedOptions[0]?.textContent.trim() :

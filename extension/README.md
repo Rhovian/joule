@@ -20,6 +20,8 @@ Use **Attach resume** for the latest Tailored CV, or **Generate and attach resum
 
 Ashby required Yes/No groups are driven through their exact choice buttons, with submit defaults cancelled and existing answers preserved. Location typeaheads use the surrounding question label and required marker; put the full option label in `cv.yaml` → `basics.location.label` (for example, `Denver, Colorado, United States`). Ashby name/email and other basic text inputs receive focus, input/change, and blur so their controlled state commits immediately. This behavior was checked on a public Ashby form in headless Chromium; the operator’s specific posting still needs a trial.
 
+Lever custom questions show their full question text and radio choices. Required current-location fields select an exact search result: for US locations, Fill uses `basics.location.city`, `region` (state abbreviation), and `countryCode: US` to match labels such as `Denver, CO, USA`; otherwise it uses `basics.location.label`. Pronoun controls stay untouched and are omitted from the field list.
+
 Actual Chrome permissions, cross-origin frames, React widgets and real ATS behavior still need the operator's manual trial (design §5).
 
 Run the focused checks with `npm ci && npm test` in this directory. JS intentionally has no build step (design D14). `test/fixtures` contains small reconstructions of the markup verified in the design record, rather than full fetched pages. jsdom's missing layout is stubbed in tests; the production visibility checks use real rectangles.
