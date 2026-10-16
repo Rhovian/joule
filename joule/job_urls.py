@@ -1,6 +1,7 @@
 """Compare stored Job destinations without following page-supplied URLs."""
 
 import json
+import re
 from urllib.parse import parse_qsl, urlsplit
 
 
@@ -23,6 +24,19 @@ def url_key(value):
                 if not k.startswith("utm_") and k not in ("gh_src", "lever-source")
             )
         )
+        # Stored Okta gh_jid links redirect to /rd/<slug>-<id> (Job 1524, issue #91).
+        # Keep this route alias host-scoped; a trailing number alone is not identity.
+        if url.hostname == "www.okta.com" and (
+            match := re.fullmatch(
+                r"/company/careers/(?:opportunity/([0-9]+)|rd/[^/]+-([0-9]+))", path
+            )
+        ):
+            job_id = match[1] or match[2]
+            greenhouse_ids = [v for k, v in query if k == "gh_jid"]
+            if greenhouse_ids and greenhouse_ids != [job_id]:
+                return None
+            path = f"/company/careers/opportunity/{job_id}"
+            query = tuple((k, v) for k, v in query if k != "gh_jid")
         return url.scheme, url.netloc.lower(), path, query
     except ValueError:
         return None
