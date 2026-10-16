@@ -1,6 +1,6 @@
 const element = id => document.getElementById(id);
 let jobs = [], busy = false, active = null, refreshPending = false;
-let resumeDraft = null;
+let resumeDraft = null, displayedPage = null;
 async function send(message) {
   const result = await chrome.runtime.sendMessage(message);
   if (result.error) throw Error(result.error);
@@ -49,6 +49,7 @@ async function refresh() {
   try {
     const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
     if (!tab) throw Error('Chrome did not provide an active tab');
+    displayedPage = {id: tab.id, url: tab.url};
     showActive(await send({type: 'detect', tabId: tab.id}));
     detection = active ? 'Detected Job from page URL.' : 'No stored Job matches this page; pick a Job manually.';
   } catch (error) {
@@ -135,5 +136,12 @@ function detectPage() {
 run(refresh);
 chrome.tabs.onActivated.addListener(detectPage);
 chrome.tabs.onUpdated.addListener((id, change, tab) => {
-  if (tab.active && change.url) detectPage();
+  if (tab.active && change.url) {
+    if (displayedPage?.id === id && displayedPage.url) {
+      const previous = new URL(displayedPage.url), current = new URL(change.url);
+      previous.hash = current.hash = '';
+      if (previous.href === current.href) { displayedPage.url = change.url; return; }
+    }
+    detectPage();
+  }
 });

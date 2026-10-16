@@ -172,13 +172,27 @@
       return {filled: 1};
     }
     function answer(expected) {
-      if (JSON.stringify(describe()[expected.ref]) !== JSON.stringify(expected)) throw Error('Fill again before Save');
-      const element = controls[expected.ref];
-      if (!element || !visible(element)) throw Error('Field unavailable');
+      if (!controls.length) throw Error('Save refused: this document has not been scanned; run Fill again.');
+      // React may replace an input and lose its WeakMap option cache. Match stable question identity,
+      // not DOM ordering/options/requiredness that legitimately change when the operator answers.
+      // react-select's renderInput/renderFormField: https://github.com/JedWatson/react-select/blob/react-select%405.10.2/packages/react-select/src/Select.tsx
+      const candidates = expected.id || expected.name ? [...document.querySelectorAll('input,textarea,select')]
+        .filter(node => expected.id ? node.id === expected.id : node.name === expected.name)
+        .filter(node => node.type !== 'radio' || radios(node).find(visible) === node) :
+        [controls[expected.ref]].filter(node => node?.isConnected);
+      if (candidates.length !== 1) throw Error(`Save refused: field is ${candidates.length ? 'ambiguous' : 'missing'}; run Fill again.`);
+      const element = candidates[0];
+      if (!visible(element)) throw Error('Save refused: field is hidden, disabled or read-only.');
+      const identity = {tag: element.tagName.toLowerCase(), type: element.type || '',
+        role: element.getAttribute('role') || '', name: element.name || '', id: element.id || '',
+        label: element.type === 'radio' ? element.closest('fieldset')?.querySelector('legend')?.textContent.trim() || label(element) : label(element)};
+      for (const key of Object.keys(identity)) {
+        if (identity[key] !== expected[key]) throw Error(`Save refused: field ${key} changed; run Fill again.`);
+      }
       const selected = element.type === 'radio' ? radios(element).find(option => option.checked && visible(option)) : null;
       const committed = committedLabels.get(element);
       const value = element.getAttribute('role') === 'combobox' ?
-        (committed?.markup === selection(element)?.outerHTML ? committed.label : selection(element)?.textContent.trim()) :
+        (committed && committed.markup === selection(element)?.outerHTML ? committed.label : selection(element)?.textContent.trim()) :
         element.type === 'radio' ? selected && label(selected) :
         element.tagName === 'SELECT' ? element.value && element.selectedOptions[0]?.textContent.trim() :
           ['text', 'email', 'tel', 'url', 'search', 'textarea'].includes(element.type) ? element.value : null;

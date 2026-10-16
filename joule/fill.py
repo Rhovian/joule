@@ -170,8 +170,8 @@ def classify(field, values, cover_letter=None, bank=None):
     # Invariant 6 also guards identity-like labels on sensitive questions.
     if sensitive(field.label):
         return leave("sensitive")
-    # Operator ruling after the live trial: required fields only; uploads are explicit.
-    if field.type != "file" and not field.required:
+    # Operator override: optional CV identity is allowed, but optional comboboxes stay manual.
+    if field.role == "combobox" and not field.required:
         return leave("optional")
     if re.search(
         r"\bcover(?:[\s_-]*letter)?\b",
@@ -195,6 +195,8 @@ def classify(field, values, cover_letter=None, bank=None):
         label = normalize(field.label)
         key = next((key for pattern, key in LABELS if re.search(pattern, label)), None)
     if key is None:
+        if not field.required:
+            return leave("optional")
         answer = (bank or {}).get(normalize(field.label))
         if answer:
             if field.options:

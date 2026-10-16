@@ -7,6 +7,11 @@ function createBackground(chrome, fetcher = fetch) {
   const trusted = sender => sender.id === chrome.runtime.id && !sender.tab &&
     ['options.html', 'sidepanel.html'].some(path => sender.url === chrome.runtime.getURL(path));
   const integer = value => { if (!Number.isSafeInteger(value) || value <= 0) throw Error('Invalid Job id'); return value; };
+  const validRef = field => Array.isArray(field?.ref) && field.ref.length === 2 &&
+    field.ref.every(part => Number.isSafeInteger(part) && part >= 0);
+  // Fragment changes do not navigate to another document (Chrome tabs URL events include them).
+  // https://developer.chrome.com/docs/extensions/reference/api/tabs#event-onUpdated
+  const pageURL = url => { const page = new URL(url); page.hash = ''; return page.href; };
   async function api(path, body, pdf = false) {
     const {origin} = await chrome.storage.local.get('origin');
     if (!origin) throw Error('Configure the joule URL in Options first');
@@ -66,6 +71,21 @@ function createBackground(chrome, fetcher = fetch) {
       return active;
     }
     if (!['fill', 'attach', 'resume', 'ask', 'question', 'save'].includes(message.type)) throw Error('Unknown request');
+    if (message.type === 'save') {
+      if (!validRef(message.field)) throw Error('Save refused: invalid frame/field reference; run Fill again.');
+      if (!Number.isSafeInteger(message.tabId) || message.tabId <= 0) throw Error('Save refused: invalid tab id.');
+      const tab = await chrome.tabs.get(message.tabId);
+      if (!allowed(tab.url)) throw Error('Save refused: this host is not supported.');
+      let answer;
+      try {
+        answer = await chrome.tabs.sendMessage(tab.id, {type: 'answer', expected: {...message.field, ref: message.field.ref[1]}}, {frameId: message.field.ref[0]});
+      } catch (error) { throw Error(`Save refused: form frame is unavailable; run Fill again. ${error.message}`); }
+      if (!answer) throw Error('Save refused: form frame returned no answer; run Fill again.');
+      if (answer.error) throw Error(answer.error);
+      if (pageURL((await chrome.tabs.get(tab.id)).url) !== pageURL(tab.url)) throw Error('Save refused: page URL changed while reading the answer; run Fill again.');
+      // The bank is shared across Jobs. Auto-detection's transient/changed active Job must not cancel a Save.
+      return api('/api/fill/answers', answer);
+    }
     const {active} = await chrome.storage.session.get('active');
     if (!active || active.source === 'upwork') throw Error('Pick a non-Upwork Job first');
     async function match(fields) {
@@ -85,23 +105,17 @@ function createBackground(chrome, fetcher = fetch) {
     if (message.type === 'attach' && !['resume', 'cover_letter'].includes(message.kind)) throw Error('Invalid attachment kind');
     const tab = await chrome.tabs.get(integer(message.tabId));
     if (!allowed(tab.url)) throw Error('This host is refused');
-    if (message.type === 'ask' || message.type === 'save') {
+    if (message.type === 'ask') {
       const field = message.field;
-      if (message.jobId !== active.id || !Array.isArray(field?.ref) || field.ref.length !== 2 ||
-        !field.ref.every(part => Number.isSafeInteger(part) && part >= 0)) throw Error('Fill again before Ask or Save');
-      if (message.type === 'save') {
-        const answer = await chrome.tabs.sendMessage(tab.id, {type: 'answer', expected: {...field, ref: field.ref[1]}}, {frameId: field.ref[0]});
-        if (answer.error) throw Error(answer.error);
-        if ((await chrome.tabs.get(tab.id)).url !== tab.url ||
-          (await chrome.storage.session.get('active')).active?.id !== active.id) throw Error('Fill again before Save');
-        return api('/api/fill/answers', answer);
-      }
+      if (message.jobId !== active.id) throw Error('Ask refused: active Job changed since Fill; run Fill again.');
+      if (!validRef(field)) throw Error('Ask refused: invalid frame/field reference; run Fill again.');
       let result;
       try { result = await api(`/api/fill/jobs/${integer(active.id)}/ask`, {question: field.label, options: field.options || []}); }
       catch (error) { if (error.status === 404) await chrome.storage.session.remove('active'); throw error; }
       if (result.value === null) return {...result, filled: 0};
       const current = await chrome.tabs.get(tab.id);
-      if (current.url !== tab.url || (await chrome.storage.session.get('active')).active?.id !== active.id) throw Error('Fill again before Ask');
+      if (pageURL(current.url) !== pageURL(tab.url)) throw Error('Ask refused: page URL changed while generating the answer; run Fill again.');
+      if ((await chrome.storage.session.get('active')).active?.id !== active.id) throw Error('Ask refused: active Job changed while generating the answer; run Fill again.');
       const applied = await chrome.tabs.sendMessage(tab.id, {type: 'apply', expected: {...field, ref: field.ref[1]},
         actions: [{ref: field.ref[1], action: 'set', value: result.value}]}, {frameId: field.ref[0]});
       return {...result, filled: applied.filled};

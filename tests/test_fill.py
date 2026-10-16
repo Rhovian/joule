@@ -423,7 +423,7 @@ def test_required_combobox_classification(label, required, bank, expected):
     assert classify(field, {}, bank=bank) == expected
 
 
-def test_live_trial_profile_answers_and_required_only(client):
+def test_live_trial_profile_answers_and_optional_identity(client):
     directory = client.app.state.data_dir / "profile"
     document = yaml.safe_load((directory / "cv.yaml").read_text())
     document["basics"]["phone"] = "+1 555-555-0100"
@@ -453,9 +453,11 @@ def test_live_trial_profile_answers_and_required_only(client):
         dict(ref=[0, i], required=False, label=label)
         for i, label in enumerate(["LinkedIn Profile", "Website/Blog URL", "Country"])
     ]
-    assert all(
-        a["reason"] == "optional" for a in post(client, optional).json()["actions"]
-    )
+    assert post(client, optional).json()["actions"] == [
+        {"ref": [0, 0], "action": "set", "value": "https://linkedin.com/in/ada"},
+        {"ref": [0, 1], "action": "set", "value": "https://ada.example.com"},
+        {"ref": [0, 2], "action": "leave", "reason": "optional"},
+    ]
     covers = [
         dict(ref=[0, i], type=type, label="Cover Letter")
         for i, type in enumerate(["file", "textarea"])
@@ -473,3 +475,39 @@ def test_cover_letter_skip_preserves_unrelated_questions(client, label):
     assert post(client, [{"ref": [0, 0], "label": label}]).json()["actions"] == [
         {"ref": [0, 0], "action": "ask"}
     ]
+
+
+@pytest.mark.parametrize(
+    "field,expected",
+    [
+        (
+            {"label": "LinkedIn Profile"},
+            {"action": "set", "value": "https://linkedin.com/in/ada"},
+        ),
+        ({"label": "GitHub"}, {"action": "set", "value": "https://github.com/ada"}),
+        ({"label": "Portfolio"}, {"action": "set", "value": "https://ada.example.com"}),
+        ({"type": "email"}, {"action": "set", "value": "ada@example.com"}),
+        (
+            {"label": "Consent", "autocomplete": "email"},
+            {"action": "leave", "reason": "sensitive"},
+        ),
+        (
+            {"label": "LinkedIn Profile", "role": "combobox"},
+            {"action": "leave", "reason": "optional"},
+        ),
+        (
+            {"label": "Why us?", "tag": "textarea"},
+            {"action": "leave", "reason": "optional"},
+        ),
+        ({"label": "Favorite language"}, {"action": "leave", "reason": "optional"}),
+    ],
+)
+def test_optional_identity_override_preserves_optional_question_guard(
+    client, field, expected
+):
+    (client.app.state.data_dir / "profile" / "answers.yaml").write_text(
+        yaml.safe_dump([{"question": "Favorite language", "answer": "Python"}])
+    )
+    assert post(client, [{"ref": [0, 0], "required": False, **field}]).json()[
+        "actions"
+    ] == [{"ref": [0, 0], **expected}]
