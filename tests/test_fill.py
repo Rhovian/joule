@@ -385,3 +385,39 @@ def test_save_oversized_bank_is_untouched(client):
     response = client.post("/api/fill/answers", json={"question": "Q", "answer": "A"})
     assert response.status_code == 413
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "label,required,bank,expected",
+    [
+        ("Country*", True, {}, {"action": "ask"}),
+        ("Location (City)*", True, {}, {"action": "ask"}),
+        ("Eligible?", True, {"eligible?": "Yes"}, {"action": "set", "value": "Yes"}),
+        (
+            "Sponsorship?",
+            True,
+            {"sponsorship?": "No"},
+            {"action": "set", "value": "No"},
+        ),
+        ("Travel?", True, {"travel?": "Maybe"}, {"action": "ask"}),
+        (
+            "Travel?",
+            False,
+            {"travel?": "Yes"},
+            {"action": "leave", "reason": "optional combobox"},
+        ),
+        ("Gender", True, {"gender": "Yes"}, {"action": "leave", "reason": "sensitive"}),
+        ("Hispanic/Latino?", True, {}, {"action": "leave", "reason": "sensitive"}),
+    ],
+)
+def test_required_combobox_classification(label, required, bank, expected):
+    from joule.fill import Descriptor, classify
+
+    field = Descriptor(
+        ref=(0, 0),
+        role="combobox",
+        label=label,
+        required=required,
+        options=[{"value": "Yes", "label": "Yes"}, {"value": "No", "label": "No"}],
+    )
+    assert classify(field, {}, bank=bank) == expected
