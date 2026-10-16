@@ -1,5 +1,5 @@
 const element = id => document.getElementById(id);
-let jobs = [], busy = false, active = null;
+let jobs = [], busy = false, active = null, refreshPending = false;
 let resumeDraft = null, coverDraftId = null;
 async function send(message) {
   const result = await chrome.runtime.sendMessage(message);
@@ -40,11 +40,14 @@ async function run(work) {
     busy = false;
     for (const id of ['refresh', 'jobs']) element(id).disabled = false;
     showActive(active);
+    if (refreshPending) { refreshPending = false; run(refresh); }
   }
 }
 async function refresh() {
+  const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+  showActive(tab ? await send({type: 'detect', tabId: tab.id}) : null);
+  element('remaining').replaceChildren();
   jobs = await send({type: 'jobs'});
-  showActive(await send({type: 'active'}));
   await refreshDrafts();
   picker();
   element('status').textContent = `${jobs.length} non-Upwork Jobs`;
@@ -102,4 +105,12 @@ for (const [id, kind] of [['attach', 'resume'], ['cover', 'cover_letter']]) {
     element('status').textContent = `${result.filled} attached. Review the form.`;
   }));
 }
+function detectPage() {
+  if (busy) refreshPending = true;
+  else run(refresh);
+}
 run(refresh);
+chrome.tabs.onActivated.addListener(detectPage);
+chrome.tabs.onUpdated.addListener((id, change, tab) => {
+  if (tab.active && change.url) detectPage();
+});

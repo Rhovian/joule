@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import Field
 
-from joule import ai, cv, drafts, score
+from joule import ai, cv, drafts, job_urls, score
 from joule.config import StrictModel, load_settings
 from joule.db import connect
 from joule.scan import ADAPTERS
@@ -71,6 +71,12 @@ async def list_jobs(
             }
             for row in rows
         ]
+
+
+@router.get("/jobs/resolve")
+def resolve_job(request: Request, url: Annotated[str, Query(max_length=8192)]):
+    with closing(connect(request.app.state.data_dir / "joule.db")) as db:
+        return job_urls.resolve(db, url)
 
 
 @router.get("/jobs/{job_id}")

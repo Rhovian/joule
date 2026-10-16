@@ -42,6 +42,13 @@ function createBackground(chrome, fetcher = fetch) {
       return {};
     }
     if (!trusted(sender)) throw Error('Only extension UI can request joule data');
+    if (message.type === 'detect') {
+      const tab = await chrome.tabs.get(integer(message.tabId));
+      const active = typeof tab.url === 'string' && /^https?:/.test(tab.url) && allowed(tab.url) ?
+        await api(`/api/jobs/resolve?url=${encodeURIComponent(tab.url)}`) : null;
+      await chrome.storage.session.set({active});
+      return active;
+    }
     if (message.type === 'jobs') {
       const jobs = (await api('/api/jobs')).filter(job => job.source !== 'upwork');
       return jobs.sort((a, b) => Number(b.has_drafts) - Number(a.has_drafts) || (b.rank ?? -Infinity) - (a.rank ?? -Infinity));
