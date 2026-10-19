@@ -92,7 +92,11 @@ function createBackground(chrome, fetcher = fetch) {
     if (!active || active.source === 'upwork') throw Error('Pick a non-Upwork Job first');
     async function match(fields) {
       try { return await api(message.type === 'replay' ? '/api/fill/replay-match' : `/api/fill/jobs/${integer(active.id)}/match`, {fields}); }
-      catch (error) { if (error.status === 404) await chrome.storage.session.remove('active'); throw error; }
+      catch (error) {
+        if (error.status === 404) await chrome.storage.session.remove('active');
+        error.message = `Fill matching failed: ${error.message}`;
+        throw error;
+      }
     }
     if (message.type === 'question') {
       if (message.jobId !== active.id) throw Error('Pick the intended Job before Ask');
@@ -129,6 +133,8 @@ function createBackground(chrome, fetcher = fetch) {
     const request = {tabId: tab.id, frames: new Map()};
     pending.set(requestId, request);
     const trace = {version: 1, url: tab.url, job_id: active.id, fields: [], errors: []};
+    const traceFailure = error => `Diagnostic trace could not be saved (${error.message}).` +
+      ([404, 405].includes(error.status) ? ' Update and restart the joule server; its trace endpoint is unavailable.' : '');
     try {
       await Promise.all(Object.keys(registered).map(async frame => {
         try { await chrome.tabs.sendMessage(tab.id, {type: 'describe', request: requestId}, {frameId: Number(frame)}); }
@@ -184,7 +190,7 @@ function createBackground(chrome, fetcher = fetch) {
       if (message.type === 'replay') return {...result, filled, fields, trace};
       let traceFile, traceError;
       try { traceFile = (await api('/api/fill/traces', trace)).file; }
-      catch { traceError = 'Trace could not be saved; check the joule server connection/version.'; }
+      catch (error) { traceError = traceFailure(error); }
       return {...result, filled, fields, traceFile, traceError};
     } catch (error) {
       if (message.type !== 'attach') {
@@ -192,7 +198,7 @@ function createBackground(chrome, fetcher = fetch) {
         try {
           const saved = await api('/api/fill/traces', trace);
           error.message += ` Diagnostic trace: ${saved.file}`;
-        } catch { error.message += ' Diagnostic trace could not be saved.'; }
+        } catch (traceError) { error.message += ` ${traceFailure(traceError)}`; }
       }
       throw error;
     } finally { pending.delete(requestId); }

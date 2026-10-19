@@ -61,7 +61,7 @@ test('background saves frame traces, includes frame errors and exposes transport
   const chrome = {runtime: {id: 'ext', getURL: p => `chrome-extension://ext/${p}`},
     storage: {local: store({origin: 'http://localhost:8000'}), session: store({active: {id: 1}, 'frames:2': {0: 'url', 4: 'url'}})},
     tabs: {get: async () => ({id: 2, url: 'https://public.example/apply?token=secret'})}};
-  let background, saved, fail = false;
+  let background, saved, fail = false, traceStatus = 200;
   chrome.tabs.sendMessage = async (tabId, message, {frameId}) => {
     if (message.type === 'describe') return background.handle({type: 'frame', request: message.request, fields: [{ref: 0, label: 'Email'}]},
       {id: 'ext', tab: {id: 2}, frameId, url: 'https://public.example/apply'});
@@ -72,7 +72,7 @@ test('background saves frame traces, includes frame errors and exposes transport
     if (url.endsWith('/match')) return {ok: true, json: async () => ({actions: [{ref: [0, 0], action: 'set', value: 'SECRET'}]})};
     saved = JSON.parse(options.body);
     if (fail) throw Error('offline');
-    return {ok: true, json: async () => ({file: '/local/trace.json'})};
+    return {ok: traceStatus === 200, status: traceStatus, json: async () => ({file: '/local/trace.json'})};
   });
   const ui = {id: 'ext', url: 'chrome-extension://ext/sidepanel.html'};
   const result = await background.handle({type: 'fill', tabId: 2}, {...ui, tab: {id: 7, url: ui.url}});
@@ -82,6 +82,11 @@ test('background saves frame traces, includes frame errors and exposes transport
   assert.equal(saved.fields[1].error, 'frame-unavailable');
   assert.equal(saved.fields[1].after, null);
   assert.doesNotMatch(JSON.stringify(saved), /SECRET/);
+  traceStatus = 422;
+  const rejectedTrace = await background.handle({type: 'fill', tabId: 2}, ui);
+  assert.equal(rejectedTrace.filled, 1);
+  assert.match(rejectedTrace.traceError, /Diagnostic trace could not be saved \(joule HTTP 422\)/);
+  assert.doesNotMatch(rejectedTrace.traceError, /Fill matching failed|Update and restart/);
   fail = true;
   assert.match((await background.handle({type: 'fill', tabId: 2}, ui)).traceError, /could not be saved/);
 });
@@ -104,4 +109,16 @@ test('checkbox presence reads checked state rather than the default on value', a
   assert.ok(trace[0].signals.includes('required-empty'));
   assert.equal(trace[1].before, true);
   assert.equal(trace[1].after, true);
+});
+test('matching 422 and missing trace endpoint 405 are reported as separate failures', async () => {
+  const store = data => ({get: async key => ({[key]: data[key]}), set: async values => Object.assign(data, values)});
+  const chrome = {runtime: {id: 'ext', getURL: p => `chrome-extension://ext/${p}`},
+    storage: {local: store({origin: 'http://localhost:8000'}), session: store({active: {id: 1}, 'frames:2': {0: 'url'}})},
+    tabs: {get: async () => ({id: 2, url: 'https://public.example/apply'})}};
+  let background;
+  chrome.tabs.sendMessage = async (tabId, message) => background.handle({type: 'frame', request: message.request,
+    fields: [{ref: 0, label: 'Email'}]}, {id: 'ext', tab: {id: 2}, frameId: 0, url: 'https://public.example/apply'});
+  background = createBackground(chrome, async url => ({ok: false, status: url.endsWith('/match') ? 422 : 405}));
+  await assert.rejects(background.handle({type: 'fill', tabId: 2}, {id: 'ext', url: 'chrome-extension://ext/sidepanel.html'}),
+    /Fill matching failed: joule HTTP 422.*Diagnostic trace could not be saved \(joule HTTP 405\).*Update and restart/);
 });

@@ -81,3 +81,14 @@ test('Lever leaves operator typing focused when a search response is pending', a
   assert.equal(input.value, 'Operator query');
   assert.equal(document.activeElement, input);
 });
+test('sensitive survey descriptions do not send oversized choices to Match', async () => {
+  const {document, worker} = setup();
+  // Shield AI live form, 2026-10-19: race explanations make option labels exceed 200 chars.
+  document.querySelector('form').insertAdjacentHTML('beforeend', `<li class="application-question">
+    <div class="application-label">Race</div><fieldset><label><input type="radio" name="eeo[race]" value="Asian">
+    Asian<span>${'A public demographic description. '.repeat(10)}</span></label></fieldset></li>`);
+  const field = worker.describe().find(field => field.name === 'eeo[race]');
+  assert.equal(field.label, 'Race');
+  assert.deepEqual(field.options, []);
+  assert.equal((await worker.apply(action(field, 'Asian'))).filled, 0);
+});
