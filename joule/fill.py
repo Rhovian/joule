@@ -102,6 +102,13 @@ LABELS = (
     (r"\bgithub\b", "github"),
     (r"\b(portfolio|website|personal site)\b", "url"),
     (r"\bcurrent (company|employer)\b", "current_company"),
+    (
+        (
+            r"^(?:please provide the )?city and state/province"
+            r"(?: you anticipate working in for the role in which you are applying)?$"
+        ),
+        "city_region",
+    ),
 )
 SENSITIVE = re.compile(
     r"\b(eeo|demograph\w*|disab\w*|veteran\w*|pronouns?|criminal|"
@@ -128,6 +135,11 @@ def identity(document):
     values = {key: basics.get(key) for key in ("email", "phone", "url")}
     values |= {
         "location": location.get("label"),
+        "city_region": (
+            f"{location['city']}, {location['region']}"
+            if location.get("city") and location.get("region")
+            else None
+        ),
         # Lever /searchLocations returns US names as "Denver, CO, USA" (captured live).
         # https://jobs.lever.co/js/retrieveLocations.js passes location.name through unchanged.
         "lever_location": (

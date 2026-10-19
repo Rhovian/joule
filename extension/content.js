@@ -18,7 +18,7 @@
     const combo = element => element.getAttribute('role') === 'combobox' || leverLocation(element);
     const role = element => leverLocation(element) ? 'combobox' : element.getAttribute('role') || '';
     const question = element => leverTitle(element)?.textContent.trim() ||
-      element.closest('fieldset')?.querySelector('legend')?.textContent.trim() || label(element);
+      element.closest('fieldset')?.querySelector('legend, :scope > .ashby-application-form-question-title')?.textContent.trim() || label(element);
     const group = element => element.matches('.ashby-application-form-input-yesno');
     const autocomplete = element => element.matches('.ashby-application-form-input-autocomplete');
     const controlName = element => element.name || fieldRoot(element)?.dataset.fieldPath || '';
@@ -259,7 +259,8 @@
       let filled = 0;
       const present = element => element && (group(element) ? !!pressed(element) :
         element.type === 'radio' ? radios(element).some(option => option.checked) :
-        combo(element) ? !!selectedText(element) : element.type === 'file' ? !!element.files.length : !!element.value);
+        combo(element) ? !!selectedText(element) : element.type === 'checkbox' ? element.checked :
+        element.type === 'file' ? !!element.files.length : !!element.value);
       for (const field of fields) {
         const action = actions.find(action => action.ref === field.ref) || {action: 'leave'};
         const element = nodes[field.ref], before = !!present(element);
