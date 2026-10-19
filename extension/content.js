@@ -177,7 +177,9 @@
         ref, tag: element.tagName.toLowerCase(), type: controlType(element),
         role: role(element), name: controlName(element), id: element.id || '',
         autocomplete: element.autocomplete || '', label: element.type === 'radio' ? question(element) : label(element), required: required(element),
-        options: group(element) ? choices(element).map(option => ({value: option.dataset.option, label: option.textContent.trim()})) : element.type === 'radio' ? radios(element).filter(visible).map(option => ({value: option.value, label: label(option)})) :
+        // Sensitive choices are never matched or asked; descriptive survey options can exceed API bounds.
+        // jsdom 26.1.0 only exposes DOM text, not ATS question semantics (source linked above).
+        options: sensitive(element) ? [] : group(element) ? choices(element).map(option => ({value: option.dataset.option, label: option.textContent.trim()})) : element.type === 'radio' ? radios(element).filter(visible).map(option => ({value: option.value, label: label(option)})) :
           element.tagName === 'SELECT' ? [...element.options].map(option => ({value: option.value, label: option.textContent.trim()})) : comboOptions.get(element) || [],
         accept: element.accept || '', maxlength: element.maxLength >= 0 ? element.maxLength : null,
       }));

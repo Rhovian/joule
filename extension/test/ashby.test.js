@@ -83,7 +83,7 @@ test('basic controlled inputs commit updated state on blur without an operator c
   assert.deepEqual(committed, {_systemfield_name: 'Ada Lovelace', _systemfield_email: 'ada@example.com'});
   assert.equal((await worker.apply(actions)).filled, 0);
 });
-test('Wrapbook survey radios expose the question separately from option labels and stay sensitive', async () => {
+test('Wrapbook survey radios expose the question and omit sensitive choices', async () => {
   const {document, worker} = setup();
   // Wrapbook live DOM, 2026-10-19: title label is a direct child of the survey fieldset.
   document.querySelector('form').insertAdjacentHTML('beforeend', `<fieldset>
@@ -93,7 +93,7 @@ test('Wrapbook survey radios expose the question separately from option labels a
   </fieldset>`);
   const field = worker.describe().find(field => field.name === 'gender');
   assert.equal(field.label, 'What is your gender?');
-  assert.deepEqual(field.options.map(option => option.label), ['Man', 'Other']);
+  assert.deepEqual(field.options, []);
   assert.equal((await worker.apply([{ref: field.ref, action: 'set', value: 'on'}])).filled, 0);
   assert.equal(document.querySelector('#gender-man').checked, false);
 });
