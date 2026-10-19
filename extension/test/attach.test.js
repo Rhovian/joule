@@ -24,11 +24,13 @@ for (const existing of [true, false]) test(`panel and resume attachment; existin
   const active = {id: 1, title: 'Engineer', company: 'Acme', source: 'hotfix'};
   const chrome = {runtime: {id: 'extension', getURL: path => `chrome-extension://extension/${path}`},
     storage: {local: storage({origin: 'http://localhost:8000'}), session: storage({active})},
-    tabs: {get: async () => tab, query: async () => [tab]}};
+    tabs: {get: async () => tab, query: async () => [tab],
+      onActivated: {addListener() {}}, onUpdated: {addListener() {}}}};
   let generated = existing;
   const draft = {id: 9, version: 2, created_at: '2026-10-14T10:00:00Z'};
   const background = createBackground(chrome, async (url, options) => {
     calls.push({url, options});
+    if (url.includes('/api/jobs/resolve?')) return {ok: true, json: async () => active};
     if (url.endsWith('/api/jobs')) return {ok: true, json: async () => []};
     if (url.endsWith('/drafts')) {
       assert.equal(url, 'http://localhost:8000/api/jobs/1/drafts');

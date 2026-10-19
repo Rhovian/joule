@@ -55,14 +55,14 @@ def client(tmp_path, monkeypatch):
 
 
 def post(client, fields):
-    return client.post(URL, json={"fields": fields})
+    return client.post(URL, json={"fields": [{"required": True, **f} for f in fields]})
 
 
 @pytest.mark.parametrize("name", ["greenhouse", "lever", "ashby-by-doc"])
 def test_ats_fixtures(client, name):
     fixture = json.loads((FIXTURES / f"{name}.json").read_text())
     fields = [
-        dict(ref=[7, index], **item["field"])
+        {"required": True, "ref": [7, index], **item["field"]}
         for index, item in enumerate(fixture["cases"])
     ]
     response = post(client, fields)
@@ -73,7 +73,7 @@ def test_ats_fixtures(client, name):
             dict(
                 ref=[7, index],
                 **(
-                    {"action": "leave", "reason": "no Cover Letter Draft"}
+                    {"action": "leave", "reason": "Cover Letter skipped"}
                     if item["expected"].get("file") == "cover_letter"
                     else item["expected"]
                 ),
@@ -385,3 +385,174 @@ def test_save_oversized_bank_is_untouched(client):
     response = client.post("/api/fill/answers", json={"question": "Q", "answer": "A"})
     assert response.status_code == 413
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "label,required,bank,expected",
+    [
+        ("Country*", True, {}, {"action": "ask"}),
+        ("Location (City)*", True, {}, {"action": "ask"}),
+        ("Eligible?", True, {"eligible?": "Yes"}, {"action": "set", "value": "Yes"}),
+        (
+            "Sponsorship?",
+            True,
+            {"sponsorship?": "No"},
+            {"action": "set", "value": "No"},
+        ),
+        ("Travel?", True, {"travel?": "Maybe"}, {"action": "ask"}),
+        (
+            "Travel?",
+            False,
+            {"travel?": "Yes"},
+            {"action": "leave", "reason": "optional"},
+        ),
+        ("Gender", True, {"gender": "Yes"}, {"action": "leave", "reason": "sensitive"}),
+        ("Hispanic/Latino?", True, {}, {"action": "leave", "reason": "sensitive"}),
+    ],
+)
+def test_required_combobox_classification(label, required, bank, expected):
+    from joule.fill import Descriptor, classify
+
+    field = Descriptor(
+        ref=(0, 0),
+        role="combobox",
+        label=label,
+        required=required,
+        options=[{"value": "Yes", "label": "Yes"}, {"value": "No", "label": "No"}],
+    )
+    assert classify(field, {}, bank=bank) == expected
+
+
+def test_live_trial_profile_answers_and_optional_identity(client):
+    directory = client.app.state.data_dir / "profile"
+    document = yaml.safe_load((directory / "cv.yaml").read_text())
+    document["basics"]["phone"] = "+1 555-555-0100"
+    (directory / "cv.yaml").write_text(yaml.safe_dump(document))
+    entries = [
+        ("Country", "United States +1"),
+        ("Location (City)", "Denver, Colorado, United States"),
+        ("Which location and timezone will you be working from?", "MST, Denver, CO"),
+        ("Are you authorized to work without employer sponsorship?", "Yes"),
+    ]
+    (directory / "answers.yaml").write_text(
+        yaml.safe_dump([dict(question=q, answer=a) for q, a in entries])
+    )
+    fields = [dict(ref=[0, 0], label="Phone*", type="tel")]
+    fields += [dict(ref=[0, i + 1], label=q + "*") for i, (q, _) in enumerate(entries)]
+    fields[1]["role"] = fields[2]["role"] = fields[4]["role"] = "combobox"
+    fields[4]["options"] = [{"value": "1", "label": "Yes"}]
+    actions = post(client, fields).json()["actions"]
+    assert [a["value"] for a in actions] == [
+        "+1 555-555-0100",
+        "United States +1",
+        "Denver, Colorado, United States",
+        "MST, Denver, CO",
+        "1",
+    ]
+    optional = [
+        dict(ref=[0, i], required=False, label=label)
+        for i, label in enumerate(["LinkedIn Profile", "Website/Blog URL", "Country"])
+    ]
+    assert post(client, optional).json()["actions"] == [
+        {"ref": [0, 0], "action": "set", "value": "https://linkedin.com/in/ada"},
+        {"ref": [0, 1], "action": "set", "value": "https://ada.example.com"},
+        {"ref": [0, 2], "action": "leave", "reason": "optional"},
+    ]
+    covers = [
+        dict(ref=[0, i], type=type, label="Cover Letter")
+        for i, type in enumerate(["file", "textarea"])
+    ]
+    assert all(
+        a["reason"] == "Cover Letter skipped"
+        for a in post(client, covers).json()["actions"]
+    )
+
+
+@pytest.mark.parametrize(
+    "label", ["What have you discovered recently?", "Describe test coverage"]
+)
+def test_cover_letter_skip_preserves_unrelated_questions(client, label):
+    assert post(client, [{"ref": [0, 0], "label": label}]).json()["actions"] == [
+        {"ref": [0, 0], "action": "ask"}
+    ]
+
+
+@pytest.mark.parametrize(
+    "field,expected",
+    [
+        (
+            {"label": "LinkedIn Profile"},
+            {"action": "set", "value": "https://linkedin.com/in/ada"},
+        ),
+        ({"label": "GitHub"}, {"action": "set", "value": "https://github.com/ada"}),
+        ({"label": "Portfolio"}, {"action": "set", "value": "https://ada.example.com"}),
+        ({"type": "email"}, {"action": "set", "value": "ada@example.com"}),
+        (
+            {"label": "Consent", "autocomplete": "email"},
+            {"action": "leave", "reason": "sensitive"},
+        ),
+        (
+            {"label": "LinkedIn Profile", "role": "combobox"},
+            {"action": "leave", "reason": "optional"},
+        ),
+        (
+            {"label": "Why us?", "tag": "textarea"},
+            {"action": "leave", "reason": "optional"},
+        ),
+        ({"label": "Favorite language"}, {"action": "leave", "reason": "optional"}),
+    ],
+)
+def test_optional_identity_override_preserves_optional_question_guard(
+    client, field, expected
+):
+    (client.app.state.data_dir / "profile" / "answers.yaml").write_text(
+        yaml.safe_dump([{"question": "Favorite language", "answer": "Python"}])
+    )
+    assert post(client, [{"ref": [0, 0], "required": False, **field}]).json()[
+        "actions"
+    ] == [{"ref": [0, 0], **expected}]
+
+
+def test_captured_ashby_location_hint_uses_profile_label_and_leaves_optional(client):
+    path = client.app.state.data_dir / "profile" / "cv.yaml"
+    document = yaml.safe_load(path.read_text())
+    document["basics"]["location"] = {"label": "Denver, Colorado, United States"}
+    path.write_text(yaml.safe_dump(document))
+    field = {
+        "ref": [0, 0],
+        "name": "_systemfield_location",
+        "role": "combobox",
+        "label": "Which city and country do you intend to work from?",
+    }
+    assert (
+        post(client, [field]).json()["actions"][0]["value"]
+        == "Denver, Colorado, United States"
+    )
+    assert (
+        post(client, [dict(field, required=False)]).json()["actions"][0]["reason"]
+        == "optional"
+    )
+
+
+def test_captured_lever_location_uses_service_label_and_protects_optional(client):
+    path = client.app.state.data_dir / "profile" / "cv.yaml"
+    document = yaml.safe_load(path.read_text())
+    document["basics"]["location"] = {
+        "city": "Denver",
+        "region": "CO",
+        "countryCode": "US",
+        "label": "Denver, Colorado, United States",
+    }
+    path.write_text(yaml.safe_dump(document))
+    field = {
+        "ref": [0, 0],
+        "id": "location-input",
+        "name": "location",
+        "role": "combobox",
+        "label": "Current location ✱",
+    }
+    assert post(client, [field]).json()["actions"][0]["value"] == "Denver, CO, USA"
+    assert (
+        post(client, [dict(field, required=False)]).json()["actions"][0]["reason"]
+        == "optional"
+    )

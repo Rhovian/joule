@@ -86,9 +86,11 @@ HINTS = {
     "urls[linkedin]": "linkedin",
     "urls[github]": "github",
     "urls[portfolio]": "url",
-    # Ashby API-doc names, not verified against live DOM; see ADR-0001 §1.
+    # Ashby field paths verified in the live DOM capture: extension/test/fixtures/ashby.html.
     "_systemfield_name": "full_name",
     "_systemfield_email": "email",
+    "_systemfield_location": "location",
+    "location-input": "lever_location",
 }
 LABELS = (
     (r"^(first|given) name\b", "first_name"),
@@ -103,7 +105,7 @@ LABELS = (
 )
 SENSITIVE = re.compile(
     r"\b(eeo|demograph\w*|disab\w*|veteran\w*|pronouns?|criminal|"
-    r"consent|attest\w*|privacy|race|ethnic\w*|gender|sex|sexual|"
+    r"consent|attest\w*|privacy|race|ethnic\w*|hispanic|latino|gender|sex|sexual|"
     r"agree|agreement|certify|certification)\b"
 )
 
@@ -120,10 +122,21 @@ def sensitive(text):
 
 def identity(document):
     basics = document.get("basics", {})
+    location = basics.get("location") or {}
     name = basics.get("name", "").strip()
     parts = name.split()
     values = {key: basics.get(key) for key in ("email", "phone", "url")}
     values |= {
+        "location": location.get("label"),
+        # Lever /searchLocations returns US names as "Denver, CO, USA" (captured live).
+        # https://jobs.lever.co/js/retrieveLocations.js passes location.name through unchanged.
+        "lever_location": (
+            f"{location['city']}, {location['region']}, USA"
+            if location.get("countryCode") == "US"
+            and location.get("city")
+            and location.get("region")
+            else location.get("label")
+        ),
         "full_name": name,
         "first_name": parts[0] if parts else None,
         "last_name": " ".join(parts[1:]) or None,
@@ -167,29 +180,21 @@ def classify(field, values, cover_letter=None, bank=None):
 
     if field.type == "hidden":
         return leave("hidden")
-    if field.role == "combobox":
-        return leave("combobox")
     # Invariant 6 also guards identity-like labels on sensitive questions.
     if sensitive(field.label):
         return leave("sensitive")
-    if field.tag == "textarea" and "cover" in normalize(
-        f"{field.label} {field.id} {field.name}"
+    # Operator override: optional CV identity is allowed, but optional comboboxes stay manual.
+    if field.role == "combobox" and not field.required:
+        return leave("optional")
+    if re.search(
+        r"\bcover(?:[\s_-]*letter)?\b",
+        normalize(f"{field.label} {field.id} {field.name}"),
     ):
-        return (
-            {"action": "set", "value": cover_letter}
-            if cover_letter
-            else leave("no Cover Letter Draft")
-        )
+        return leave("Cover Letter skipped")
     if field.type == "file":
         text = normalize(f"{field.label} {field.id} {field.name}")
         if re.search(r"\b(resume|cv)\b", text):
             return {"action": "upload", "file": "resume"}
-        if "cover" in text:
-            return (
-                {"action": "upload", "file": "cover_letter"}
-                if cover_letter
-                else leave("no Cover Letter Draft")
-            )
         return leave("unrecognized file input")
     key = next(
         (AUTOCOMPLETE[t] for t in field.autocomplete.split() if t in AUTOCOMPLETE),
@@ -203,6 +208,8 @@ def classify(field, values, cover_letter=None, bank=None):
         label = normalize(field.label)
         key = next((key for pattern, key in LABELS if re.search(pattern, label)), None)
     if key is None:
+        if not field.required:
+            return leave("optional")
         answer = (bank or {}).get(normalize(field.label))
         if answer:
             if field.options:
@@ -221,6 +228,20 @@ def classify(field, values, cover_letter=None, bank=None):
     if not value:
         return leave("missing in cv.yaml")
     return {"action": "set", "value": value}
+
+
+@router.post("/replay-match")
+def replay_match(request: Request, body: MatchRequest):
+    """URL-only diagnostics use identity/bank matching without creating a Job."""
+    directory = request.app.state.data_dir
+    values = identity(cv.load(directory) or {})
+    bank = answer_bank(directory)
+    return {
+        "actions": [
+            {"ref": field.ref} | classify(field, values, None, bank)
+            for field in body.fields
+        ]
+    }
 
 
 @router.post("/jobs/{job_id}/match")
