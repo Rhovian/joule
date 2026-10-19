@@ -95,3 +95,13 @@ test('trace checks native required surrogates even when a widget displays a sele
   assert.ok(result.trace[0].signals.includes('native-value-missing'));
   assert.equal(document.querySelector('input[required]').value, '');
 });
+test('checkbox presence reads checked state rather than the default on value', async () => {
+  const {worker} = setup('<input id="unchecked" type="checkbox" required><input id="checked" type="checkbox" checked>');
+  worker.describe();
+  const {trace} = await worker.traceApply([]);
+  assert.equal(trace[0].before, false);
+  assert.equal(trace[0].after, false);
+  assert.ok(trace[0].signals.includes('required-empty'));
+  assert.equal(trace[1].before, true);
+  assert.equal(trace[1].after, true);
+});

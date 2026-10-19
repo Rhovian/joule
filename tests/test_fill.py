@@ -556,3 +556,32 @@ def test_captured_lever_location_uses_service_label_and_protects_optional(client
         post(client, [dict(field, required=False)]).json()["actions"][0]["reason"]
         == "optional"
     )
+
+
+def test_wrapbook_city_region_uses_profile_and_requires_both_components(client):
+    path = client.app.state.data_dir / "profile" / "cv.yaml"
+    document = yaml.safe_load(path.read_text())
+    field = {
+        "ref": [0, 0],
+        "label": "Please provide the city and state/province you anticipate working in "
+        "for the role in which you are applying",
+    }
+    for location, expected in [
+        ({"city": "Denver", "region": "CO"}, {"action": "set", "value": "Denver, CO"}),
+        ({"city": "Denver"}, {"action": "leave", "reason": "missing in cv.yaml"}),
+        ({"region": "CO"}, {"action": "leave", "reason": "missing in cv.yaml"}),
+    ]:
+        document["basics"]["location"] = location
+        path.write_text(yaml.safe_dump(document))
+        assert post(client, [field]).json()["actions"] == [{"ref": [0, 0], **expected}]
+    # Postal codes, pay, relocation willingness and authorization remain exact-bank/Ask.
+    for label in [
+        "Please provide your current ZIP or Postal Code to determine appropriate pay band",
+        "What are your salary expectations?",
+        "Are you willing to relocate to another city and state/province?",
+        "Are you legally authorized to work in Canada or the United States?",
+        "Do you require Wrapbook to sponsor you for a work permit now or in the future?",
+    ]:
+        assert post(client, [dict(field, label=label)]).json()["actions"] == [
+            {"ref": [0, 0], "action": "ask"}
+        ]
