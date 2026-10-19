@@ -18,6 +18,7 @@ from joule.manual import router as manual_router
 from joule.scan import Scanner
 from joule.scan import router as scan_router
 from joule.telegram import Telegram
+from joule.traces import router as traces_router
 from joule.upwork_auth import UpworkAuth, UpworkNotConnected, router
 
 
@@ -82,6 +83,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     app.include_router(jobs_router)
     app.include_router(manual_router)
     app.include_router(fill_router)
+    app.include_router(traces_router)
     app.mount(
         "/",
         StaticFiles(

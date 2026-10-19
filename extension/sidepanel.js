@@ -105,7 +105,7 @@ element('fill').addEventListener('click', () => run(async () => {
     }
     element('remaining').append(item);
   }
-  element('status').textContent = `${result.filled} filled; ${remaining.length} remaining. Review the form.`;
+  element('status').textContent = `${result.filled} filled; ${remaining.length} remaining. Review the form.${result.traceError ? ` ${result.traceError}` : ' Trace saved.'}`;
 }));
 for (const [id, kind] of [['attach', 'resume']]) {
   element(id).addEventListener('click', () => run(async () => {

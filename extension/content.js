@@ -9,7 +9,7 @@
   }
   function createWorker(document) {
     const window = document.defaultView;
-    let controls = [];
+    let controls = [], descriptors;
     // Captured Ashby widgets (vN, autocomplete w/T/E, text Pk/SP): no native select/radio API.
     // https://cdn.ashbyprd.com/frontend_non_user/c2a7197c175f484890751b5bbf8e105e2cd08e16/assets/index-BIeWnsEH.js
     const fieldRoot = element => element.closest('.ashby-application-form-field-entry');
@@ -173,7 +173,7 @@
       controls = allControls().filter(element =>
         visible(element) && !['submit', 'button', 'reset', 'image'].includes(element.type) &&
         (element.type !== 'radio' || radios(element).find(visible) === element));
-      return controls.map((element, ref) => ({
+      return descriptors = controls.map((element, ref) => ({
         ref, tag: element.tagName.toLowerCase(), type: controlType(element),
         role: role(element), name: controlName(element), id: element.id || '',
         autocomplete: element.autocomplete || '', label: element.type === 'radio' ? question(element) : label(element), required: required(element),
@@ -242,6 +242,67 @@
       }
       return {filled};
     }
+    function selector(element) {
+      if (element.id) return `[id=${JSON.stringify(element.id)}]`;
+      const path = [];
+      for (let node = element; node?.nodeType === 1; node = node.parentElement) {
+        const peers = [...(node.parentElement?.children || [node])].filter(peer => peer.tagName === node.tagName);
+        path.unshift(`${node.tagName.toLowerCase()}:nth-of-type(${peers.indexOf(node) + 1})`);
+      }
+      return path.join(' > ');
+    }
+    // Read validity only: checkValidity/reportValidity would fire validation events.
+    // https://developer.mozilla.org/en-US/docs/Web/API/ValidityState/valueMissing
+    async function traceApply(actions) {
+      // Keep the descriptor/ref snapshot used for Match; async rendering must not retarget writes.
+      const fields = descriptors || describe(), nodes = [...controls], rows = [];
+      let filled = 0;
+      const present = element => element && (group(element) ? !!pressed(element) :
+        element.type === 'radio' ? radios(element).some(option => option.checked) :
+        combo(element) ? !!selectedText(element) : element.type === 'file' ? !!element.files.length : !!element.value);
+      for (const field of fields) {
+        const action = actions.find(action => action.ref === field.ref) || {action: 'leave'};
+        const element = nodes[field.ref], before = !!present(element);
+        const row = {ref: field.ref, selector: selector(element),
+          label: field.label.slice(0, 300), type: field.role || field.type || field.tag,
+          action: action.action, outcome: 'skipped', error: null, before, after: false, signals: []};
+        try {
+          const result = await apply([action]);
+          filled += result.filled;
+          row.outcome = result.filled ? 'written' : action.action === 'set' ? (before ? 'preserved' : 'not-written') : 'skipped';
+          // Only focus fields this Fill wrote, to commit ordinary controlled inputs too.
+          if (result.filled && !group(element) && !combo(element)) {
+            element.focus(); await Promise.resolve(); element.blur();
+          }
+        } catch { row.outcome = 'error'; row.error = 'apply-failed'; }
+        rows.push(row);
+      }
+      // DOM has no framework-settled primitive; Ashby's pinned bundle above debounces 500ms.
+      await new Promise(resolve => window.setTimeout(resolve, 750));
+      for (const row of rows) {
+        const original = nodes[row.ref], field = fields[row.ref];
+        const matches = field.id ? [...document.querySelectorAll('[id]')].filter(node => node.id === field.id) :
+          field.name ? allControls().filter(node => controlName(node) === field.name) : [original].filter(node => node.isConnected);
+        const element = original.isConnected ? original : matches.length === 1 ? matches[0] : null;
+        if (!element) { row.signals.push('field-detached'); continue; }
+        row.after = !!present(element);
+        const ids = `${element.getAttribute('aria-errormessage') || ''} ${element.getAttribute('aria-describedby') || ''}`;
+        const root = fieldRoot(element) || element.closest('.application-question, fieldset') ||
+          (combo(element) && element.closest('[class*=container]')) || element.parentElement;
+        // react-select's required surrogate lives beside its visible combobox input.
+        // Pinned renderRequiredInput: react-select 5.10.2 Select.tsx (source linked above).
+        const native = [element, ...(combo(element) ? root.querySelectorAll('input[required]') : [])];
+        if (native.some(node => node.validity?.valueMissing)) row.signals.push('native-value-missing');
+        if (element.getAttribute('aria-invalid') === 'true' || root.getAttribute('aria-invalid') === 'true') row.signals.push('aria-invalid');
+        const errors = [...ids.split(/\s+/).map(id => document.getElementById(id)),
+          ...root.querySelectorAll('[role=alert], [class*="error" i]')].filter(node => node && visible(node));
+        // Categories only: error text may echo an answer.
+        if (errors.some(node => /required|missing|must (?:enter|select|provide)|cannot be (?:blank|empty)/i.test(node.textContent))) row.signals.push('required-error');
+        if (field.required && !row.after) row.signals.push('required-empty');
+        if (row.outcome === 'written' && !row.after) row.signals.push('value-lost');
+      }
+      return {filled, trace: rows};
+    }
     function upload(ref, file) {
       const element = controls[ref];
       if (!element || element.type !== 'file' || !visible(element) || element.files.length || element.value) return {filled: 0};
@@ -281,7 +342,7 @@
       if (!value) throw Error('Answer the field before saving');
       return {question: expected.label, answer: value};
     }
-    return {describe, prepare, apply, upload, answer};
+    return {describe, prepare, apply, traceApply, upload, answer};
   }
   if (typeof module !== 'undefined') module.exports = {createWorker, allowed};
   if (typeof chrome !== 'undefined' && typeof document !== 'undefined' && allowed(location.href)) {
@@ -295,6 +356,10 @@
       if (message.type === 'describe') {
         worker.prepare().then(() => chrome.runtime.sendMessage({type: 'frame', request: message.request, fields: worker.describe()}))
           .then(() => respond({ok: true}), () => respond({ok: false}));
+        return true;
+      }
+      if (message.type === 'trace-apply') {
+        worker.traceApply(message.actions).then(respond, () => respond({filled: 0, error: 'trace-apply-failed'}));
         return true;
       }
       if (message.type === 'apply') {

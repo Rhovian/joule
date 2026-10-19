@@ -230,6 +230,20 @@ def classify(field, values, cover_letter=None, bank=None):
     return {"action": "set", "value": value}
 
 
+@router.post("/replay-match")
+def replay_match(request: Request, body: MatchRequest):
+    """URL-only diagnostics use identity/bank matching without creating a Job."""
+    directory = request.app.state.data_dir
+    values = identity(cv.load(directory) or {})
+    bank = answer_bank(directory)
+    return {
+        "actions": [
+            {"ref": field.ref} | classify(field, values, None, bank)
+            for field in body.fields
+        ]
+    }
+
+
 @router.post("/jobs/{job_id}/match")
 def match(request: Request, job_id: int, body: MatchRequest):
     directory = request.app.state.data_dir

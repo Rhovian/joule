@@ -4,7 +4,9 @@ function createBackground(chrome, fetcher = fetch) {
   let registration = Promise.resolve();
   const allowed = typeof module !== 'undefined' ? require('./content.js').allowed :
     url => !/(^|\.)(upwork|linkedin|indeed|glassdoor)\.com\.?$/.test(new URL(url).hostname);
-  const trusted = sender => sender.id === chrome.runtime.id && !sender.tab &&
+  // A debugger-opened Options tab has sender.tab; its tab URL must also be extension UI.
+  // https://developer.chrome.com/docs/extensions/reference/api/runtime#type-MessageSender
+  const trusted = sender => sender.id === chrome.runtime.id && (!sender.tab || sender.tab.url === sender.url) &&
     ['options.html', 'sidepanel.html'].some(path => sender.url === chrome.runtime.getURL(path));
   const integer = value => { if (!Number.isSafeInteger(value) || value <= 0) throw Error('Invalid Job id'); return value; };
   const validRef = field => Array.isArray(field?.ref) && field.ref.length === 2 &&
@@ -70,7 +72,7 @@ function createBackground(chrome, fetcher = fetch) {
       await chrome.storage.session.set({active});
       return active;
     }
-    if (!['fill', 'attach', 'resume', 'ask', 'question', 'save'].includes(message.type)) throw Error('Unknown request');
+    if (!['fill', 'replay', 'attach', 'resume', 'ask', 'question', 'save'].includes(message.type)) throw Error('Unknown request');
     if (message.type === 'save') {
       if (!validRef(message.field)) throw Error('Save refused: invalid frame/field reference; run Fill again.');
       if (!Number.isSafeInteger(message.tabId) || message.tabId <= 0) throw Error('Save refused: invalid tab id.');
@@ -86,10 +88,10 @@ function createBackground(chrome, fetcher = fetch) {
       // The bank is shared across Jobs. Auto-detection's transient/changed active Job must not cancel a Save.
       return api('/api/fill/answers', answer);
     }
-    const {active} = await chrome.storage.session.get('active');
+    const {active} = message.type === 'replay' ? {active: {id: null, source: 'replay'}} : await chrome.storage.session.get('active');
     if (!active || active.source === 'upwork') throw Error('Pick a non-Upwork Job first');
     async function match(fields) {
-      try { return await api(`/api/fill/jobs/${integer(active.id)}/match`, {fields}); }
+      try { return await api(message.type === 'replay' ? '/api/fill/replay-match' : `/api/fill/jobs/${integer(active.id)}/match`, {fields}); }
       catch (error) { if (error.status === 404) await chrome.storage.session.remove('active'); throw error; }
     }
     if (message.type === 'question') {
@@ -126,10 +128,11 @@ function createBackground(chrome, fetcher = fetch) {
     const requestId = crypto.randomUUID();
     const request = {tabId: tab.id, frames: new Map()};
     pending.set(requestId, request);
+    const trace = {version: 1, url: tab.url, job_id: active.id, fields: [], errors: []};
     try {
       await Promise.all(Object.keys(registered).map(async frame => {
         try { await chrome.tabs.sendMessage(tab.id, {type: 'describe', request: requestId}, {frameId: Number(frame)}); }
-        catch { /* A navigated/removed frame has no content script; omit it. */ }
+        catch { trace.errors.push(`frame-${frame}-unavailable`); }
       }));
       const fields = [];
       for (const [frameId, descriptors] of request.frames) {
@@ -163,10 +166,35 @@ function createBackground(chrome, fetcher = fetch) {
       for (const frameId of request.frames.keys()) {
         const actions = result.actions.filter(action => action.ref[0] === frameId)
           .map(action => ({...action, ref: action.ref[1]}));
-        const applied = await chrome.tabs.sendMessage(tab.id, {type: 'apply', actions}, {frameId});
-        filled += applied.filled;
+        try {
+          const applied = await chrome.tabs.sendMessage(tab.id, {type: 'trace-apply', actions}, {frameId});
+          filled += applied.filled || 0;
+          if (!applied.trace) trace.errors.push(`frame-${frameId}-trace-unavailable`);
+          for (const row of applied.trace || []) trace.fields.push({...row, ref: [frameId, row.ref]});
+        } catch { trace.errors.push(`frame-${frameId}-unavailable`); }
+        if (!trace.fields.some(row => row.ref[0] === frameId)) {
+          for (const field of request.frames.get(frameId)) trace.fields.push({
+            ref: [frameId, field.ref], selector: field.id ? `[id=${JSON.stringify(field.id)}]` : '',
+            label: (field.label || '').slice(0, 300), type: field.role || field.type || field.tag || '',
+            action: actions.find(action => action.ref === field.ref)?.action || 'leave',
+            outcome: 'error', error: 'frame-unavailable', before: null, after: null, signals: [],
+          });
+        }
       }
-      return {...result, filled, fields};
+      if (message.type === 'replay') return {...result, filled, fields, trace};
+      let traceFile, traceError;
+      try { traceFile = (await api('/api/fill/traces', trace)).file; }
+      catch { traceError = 'Trace could not be saved; check the joule server connection/version.'; }
+      return {...result, filled, fields, traceFile, traceError};
+    } catch (error) {
+      if (message.type !== 'attach') {
+        trace.errors.push('fill-failed');
+        try {
+          const saved = await api('/api/fill/traces', trace);
+          error.message += ` Diagnostic trace: ${saved.file}`;
+        } catch { error.message += ' Diagnostic trace could not be saved.'; }
+      }
+      throw error;
     } finally { pending.delete(requestId); }
   }
   async function inject(tab) {
