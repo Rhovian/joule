@@ -83,7 +83,9 @@ def test_wrong_answer_count(client, monkeypatch):
         "/api/manual/proposal", json={"description": "Job", "questions": ["Why?"]}
     )
     assert response.status_code == 502
-    assert response.json() == {"detail": "invalid answer count"}
+    assert response.json() == {
+        "detail": "Attempt 1/2: invalid answer count; Attempt 2/2: invalid answer count"
+    }
     assert len(calls) == 2
     assert_empty(client)
 
@@ -162,6 +164,8 @@ def test_cv_missing_master_and_ai_failure(client, monkeypatch):
     (profile / "cv.yaml").write_text("work: [{id: a, name: Employer}]\n")
     response = client.post("/api/manual/cv", json=payload)
     assert response.status_code == 502
-    assert response.json() == {"detail": "Codex failed"}
+    assert response.json() == {
+        "detail": "Attempt 1/2: Codex failed; Attempt 2/2: Codex failed"
+    }
     assert structured.await_count == 2
     assert_empty(client)

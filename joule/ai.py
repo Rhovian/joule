@@ -1,6 +1,8 @@
 import asyncio
 import json
+import logging
 import os
+import re
 import signal
 from contextlib import suppress
 from pathlib import Path
@@ -11,6 +13,7 @@ from pydantic import BaseModel, ValidationError
 from joule.config import Model
 
 TIMEOUT = 300
+logger = logging.getLogger(__name__)
 
 
 class AIError(Exception):
@@ -26,9 +29,28 @@ async def codex_stderr(process, prompt):
     while chunk := await process.stderr.read(4096):
         tail = (tail + chunk)[-8192:]
     await process.wait()
-    # Only fixed phrases escape; stderr may contain Profile content or credentials.
-    causes = ("unauthorized", "rate limit", "unsupported model", "schema", "connection")
-    return ", ".join(cause for cause in causes if cause.encode() in tail.lower())
+    # Codex 0.160.1 prints prompts and ERROR: lines to stderr, with no safe filter:
+    # github.com/openai/codex/blob/rust-v0.160.1/codex-rs/exec/src/event_processor_with_human_output.rs
+    prompt_lines = [
+        " ".join(line.split()) for line in prompt.splitlines() if line.strip()
+    ]
+    errors = []
+    for line in tail.decode(errors="replace").splitlines():
+        line = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", line)
+        line = " ".join(line.split())
+        if not re.match(r"(?i)^error:\s*", line) or line in " ".join(prompt.split()):
+            continue
+        for private in sorted(prompt_lines, key=len, reverse=True):
+            line = line.replace(private, "[prompt redacted]")
+        # Discard credential-bearing suffixes, including quoted/multiword values.
+        line = re.sub(
+            r"(?i)\b(authorization|bearer|[\w-]*(?:token|secret|password|api[_-]?key))\b.*"
+            r"|\bsk-[\w-]+|\beyJ[\w.-]+|https?://\S+",
+            "[redacted]",
+            line,
+        )
+        errors.append(line)
+    return " | ".join(dict.fromkeys(errors))
 
 
 def strict_schema(value):
@@ -98,7 +120,16 @@ async def structured[T: BaseModel](model: Model, prompt: str, schema: type[T]) -
                 raise
             raise AIError("Codex timed out") from None
         if process.returncode:
-            detail = f": {diagnostic}" if diagnostic else ""
+            logger.warning(
+                "Codex exited with status %s: %s",
+                process.returncode,
+                diagnostic or "no error line retained",
+            )
+            detail = (
+                f": {diagnostic[:237]}{'...' if len(diagnostic) > 237 else ''}"
+                if diagnostic
+                else ""
+            )
             raise AIError(f"Codex exited with status {process.returncode}{detail}")
         try:
             return schema.model_validate_json((path / "out.txt").read_text())
@@ -107,9 +138,11 @@ async def structured[T: BaseModel](model: Model, prompt: str, schema: type[T]) -
 
 
 async def retry_structured(model, prompt, schema):
+    failures = []
     for attempt in range(2):
         try:
             return await structured(model, prompt, schema)
-        except AIError:
-            if attempt:
-                raise
+        except AIError as error:
+            logger.warning("Codex attempt %s/2 failed: %s", attempt + 1, error)
+            failures.append(f"Attempt {attempt + 1}/2: {error}")
+    raise AIError("; ".join(failures))

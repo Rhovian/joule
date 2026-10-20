@@ -18,7 +18,7 @@ import json, os, sys, time
 from pathlib import Path
 args = sys.argv
 assert args[-1] == '-'
-assert sys.stdin.read() == 'private prompt'
+assert sys.stdin.read() == os.environ.get('CODEX_PROMPT', 'private prompt')
 assert '--ignore-user-config' in args
 assert '-m' in args and args[args.index('-m') + 1] == 'chosen'
 schema = json.loads(Path(args[args.index('--output-schema')+1]).read_text())
@@ -41,7 +41,9 @@ if mode != 'missing':
     monkeypatch.setenv("CHILD_PID", str(tmp_path / "child.pid"))
     monkeypatch.setattr(ai, "TIMEOUT", 1 if mode == "timeout" else 5)
     call = ai.structured(
-        Model(provider="codex", model="chosen"), "private prompt", score.Score
+        Model(provider="codex", model="chosen"),
+        os.environ.get("CODEX_PROMPT", "private prompt"),
+        score.Score,
     )
     if mode == "success":
         assert asyncio.run(call).score == 70
@@ -65,19 +67,62 @@ if mode != 'missing':
 @pytest.mark.parametrize(
     ("stderr", "detail"),
     [
-        ("401 Unauthorized Bearer secret private prompt CV", ": unauthorized"),
-        ("429 rate limit secret", ": rate limit"),
-        ("unsupported model private prompt", ": unsupported model"),
-        ("invalid schema CV", ": schema"),
-        ("TLS connection failed token=secret", ": connection"),
+        ("ERROR: HTTP 401 Unauthorized", ": ERROR: HTTP 401 Unauthorized"),
+        ("ERROR: HTTP 429 quota exceeded", ": ERROR: HTTP 429 quota exceeded"),
+        ("Error: unsupported model chosen", ": Error: unsupported model chosen"),
+        (
+            "ERROR: invalid schema: missing required",
+            ": ERROR: invalid schema: missing required",
+        ),
+        (
+            "ERROR: TLS connection failed token=secret",
+            ": ERROR: TLS connection failed [redacted]",
+        ),
         ("private prompt CV password=secret\x1b[31m\ufffd", ""),
-        ("unsupported model " + "x" * 100000 + " connection failed", ": connection"),
+        (
+            "user\nprivate prompt\nERROR: request failed: private prompt",
+            ": ERROR: request failed: [prompt redacted]",
+        ),
+        ("\x1b[31mERROR: stream disconnected\x1b[0m", ": ERROR: stream disconnected"),
+        (
+            "ERROR: failed\ncontinuation private prompt\nERROR: HTTP 503",
+            ": ERROR: failed | ERROR: HTTP 503",
+        ),
+        ("ERROR: failed\nERROR: failed", ": ERROR: failed"),
+        ("x" * 100000 + "\nERROR: DNS lookup failed", ": ERROR: DNS lookup failed"),
+        ("ERROR: " + "x" * 400, ": " + ("ERROR: " + "x" * 400)[:237] + "..."),
     ],
 )
 def test_codex_stderr(tmp_path, monkeypatch, stderr, detail):
     monkeypatch.setenv("CODEX_STDERR", stderr)
     monkeypatch.setenv("EXPECTED_DETAIL", detail)
     test_codex(tmp_path, monkeypatch, "exit")
+
+
+@pytest.mark.parametrize(
+    "credential",
+    [
+        "Authorization: Bearer secret",
+        'api_key="secret value"',
+        "password=secret",
+        "access_token=secret",
+        "sk-secret",
+        "eyJsecret.payload.sig",
+        "https://user:secret@example.com/?key=secret",
+    ],
+)
+def test_codex_log_redaction(tmp_path, monkeypatch, caplog, credential):
+    diagnostic = "ERROR: service unavailable " + "x" * 300
+    monkeypatch.setenv("CODEX_PROMPT", "private prompt\nERROR: hidden CV")
+    monkeypatch.setenv(
+        "CODEX_STDERR", f"private prompt\nERROR: hidden CV\n{diagnostic} {credential}"
+    )
+    monkeypatch.setenv("EXPECTED_DETAIL", ": " + diagnostic[:237] + "...")
+    test_codex(tmp_path, monkeypatch, "exit")
+    assert diagnostic in caplog.text
+    assert "secret" not in caplog.text and "private prompt" not in caplog.text
+    assert "hidden CV" not in caplog.text
+    assert "[redacted]" in caplog.text
 
 
 def test_profile_prompt_and_fingerprint(tmp_path):
@@ -127,14 +172,14 @@ def test_profile_prompt_and_fingerprint(tmp_path):
 
 
 @pytest.mark.parametrize("failure", [False, True])
-def test_retry_and_write(tmp_path, monkeypatch, failure):
+def test_retry_and_write(tmp_path, monkeypatch, caplog, failure):
     init_db(tmp_path / "joule.db")
     calls = []
 
     async def structured(*args):
         calls.append(args)
         if failure or len(calls) == 1:
-            raise ai.AIError("failed")
+            raise ai.AIError(f"failure {len(calls)}")
         return score.Score(
             score=60,
             reason="pay not stated",
@@ -148,12 +193,15 @@ def test_retry_and_write(tmp_path, monkeypatch, failure):
         )
         call = score.score_job(db, 1, Settings(), tmp_path, "stamp")
         if failure:
-            with pytest.raises(ai.AIError):
+            with pytest.raises(ai.AIError) as error:
                 asyncio.run(call)
+            assert str(error.value) == "Attempt 1/2: failure 1; Attempt 2/2: failure 2"
+            assert "Codex attempt 2/2 failed: failure 2" in caplog.text
         else:
             asyncio.run(call)
         row = db.execute("SELECT * FROM jobs").fetchone()
         assert len(calls) == 2
+        assert "Codex attempt 1/2 failed: failure 1" in caplog.text
         assert row["score"] == (None if failure else 60)
         if not failure:
             assert row["score_fingerprint"] == "stamp" and row["scored_at"]

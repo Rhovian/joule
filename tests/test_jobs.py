@@ -225,7 +225,9 @@ def test_score_route_and_stale(client, monkeypatch):
 
     monkeypatch.setattr(ai, "structured", fail)
     response = client.post("/api/jobs/3/score", json={})
-    assert response.status_code == 502 and response.json() == {"detail": "Codex failed"}
+    assert response.status_code == 502 and response.json() == {
+        "detail": "Attempt 1/2: Codex failed; Attempt 2/2: Codex failed"
+    }
 
 
 def test_cover_letter_versions_and_prompt(client, monkeypatch):
