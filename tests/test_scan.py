@@ -359,7 +359,9 @@ def test_scoring_selection_cap_and_failure(setup, monkeypatch):
     ] == [True] * 4
     assert [r["source_id"] for r in rows() if r["score"] is not None] == ["2", "3"]
     counts = json.loads(rows("scans")[0]["per_source"])["remoteok"]
-    assert counts["scored"] == 2 and counts["errors"] == ["Score 2: offline"]
+    assert counts["scored"] == 2 and counts["errors"] == [
+        "Score 2: Attempt 1/2: offline; Attempt 2/2: offline"
+    ]
     calls.clear()
     run(["remoteok"])
     assert not calls
@@ -456,7 +458,11 @@ def test_unscored_upwork_jobs_retry_on_later_scan(setup, monkeypatch, cause):
     assert len(pending) == (3 if cause == "failure" else 2)
     counts = json.loads(rows("scans")[-1]["per_source"])["upwork"]
     assert counts["scored"] == (0 if cause == "failure" else 1)
-    assert counts["errors"] == (["Score 1: offline"] if cause == "failure" else [])
+    assert counts["errors"] == (
+        ["Score 1: Attempt 1/2: offline; Attempt 2/2: offline"]
+        if cause == "failure"
+        else []
+    )
 
     # Even with a Draft, an unscored Job stays out of the Telegram queue.
     with closing(connect(scanner.path)) as db, db:
