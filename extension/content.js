@@ -203,14 +203,62 @@
           if (commitOnBlur && (!visible(element) || element.value !== '')) continue;
           if (commitOnBlur) element.focus();
           filled += apply([action], undefined, true).filled;
-          // Ashby debounces writes 500ms; onBlur commits immediately. Let React render updated onBlur state first.
-          // Same pinned bundle, text field f/v handlers and SP debounce; verified by intercepted ApiSetFormValue.
-          if (commitOnBlur) { await Promise.resolve(); element.blur(); }
+          // With Resource Timing, the wrapper waits for the debounced save before blurring.
+          // Keep the local blur path for DOM-only fixtures that do not implement network observation.
+          if (commitOnBlur && !remoteSave(element)) { await Promise.resolve(); element.blur(); }
         }
       }
       return {filled};
     }
+    const remoteSave = element => !!window.PerformanceObserver && !!element && !!fieldRoot(element);
+    let saveBlocked = false;
+    function watchSave() {
+      // Ashby qRe/NN saves local state after 500ms; overlapping mutations can lose other fields.
+      // Captured source: https://cdn.ashbyprd.com/frontend_non_user/cffa242202eae98df17fda905c8a6012577a34bd/assets/index-CJB0DO-6.js
+      // Resource Timing is shared with the page even in Chrome's isolated content-script world.
+      // No runtime dependency supplies a remote-form-save barrier; jsdom 26.1.0 has no networking/layout:
+      // https://github.com/jsdom/jsdom/tree/26.1.0#unimplemented-parts-of-the-web-platform
+      const since = window.performance.now();
+      let resolve, timer;
+      const done = new Promise(complete => { resolve = complete; });
+      const finish = result => { observer.disconnect(); window.clearTimeout(timer); resolve(result); };
+      const observer = new window.PerformanceObserver(list => {
+        for (const entry of list.getEntries()) {
+          const url = new URL(entry.name);
+          if (entry.startTime < since || url.origin !== window.location.origin ||
+            url.pathname !== '/api/non-user-graphql' || url.searchParams.get('op') !== 'ApiSetFormValue') continue;
+          finish(entry.responseStatus === undefined || (entry.responseStatus >= 200 && entry.responseStatus < 300));
+        }
+      });
+      observer.observe({type: 'resource'});
+      timer = window.setTimeout(() => finish(false), 5000);
+      return {done, cancel: () => finish(null)};
+    }
+    async function applyAshby(actions, expected) {
+      let filled = 0;
+      for (const action of actions) {
+        const element = controls[action.ref], saving = action.action === 'set' && remoteSave(element);
+        if (saving && saveBlocked) throw Error('Previous form save is unconfirmed');
+        const watch = saving ? watchSave() : null;
+        try {
+          const result = await applyNow([action], expected);
+          if (result.filled && watch) {
+            const writtenValue = element.value;
+            if (!await watch.done) { saveBlocked = true; throw Error('Form save is unconfirmed'); }
+            // Let the completed mutation update savedValue before blur; otherwise blur saves twice.
+            await new Promise(resolve => window.setTimeout(resolve, 0));
+            if (document.activeElement === element && element.value === writtenValue) element.blur();
+          }
+          filled += result.filled;
+        } finally { watch?.cancel(); }
+      }
+      return {filled};
+    }
     function apply(actions, expected, committing = false) {
+      if (!committing && actions.some(action => action.action === 'set' && remoteSave(controls[action.ref]))) return applyAshby(actions, expected);
+      return applyNow(actions, expected, committing);
+    }
+    function applyNow(actions, expected, committing = false) {
       if (actions.some(action => action.action === 'set' && controls[action.ref] && combo(controls[action.ref]) && required(controls[action.ref]))) return applyComboboxes(actions, expected);
       if (!committing && actions.some(action => { const element = controls[action.ref]; return element && (group(element) || element.matches('.ashby-application-form-input-text')); })) return applyWidgets(actions, expected);
       // Compare fresh page data after a slow Ask; navigation/edits must not retarget the answer.
@@ -274,7 +322,7 @@
           filled += result.filled;
           row.outcome = result.filled ? 'written' : action.action === 'set' ? (before ? 'preserved' : 'not-written') : 'skipped';
           // Only focus fields this Fill wrote, to commit ordinary controlled inputs too.
-          if (result.filled && !group(element) && !combo(element)) {
+          if (result.filled && !remoteSave(element) && !group(element) && !combo(element)) {
             element.focus(); await Promise.resolve(); element.blur();
           }
         } catch { row.outcome = 'error'; row.error = 'apply-failed'; }

@@ -20,11 +20,15 @@ test('URL-only runner writes the same private trace through a real joule server'
     if (request.method === 'POST') submissions++;
     if (/leak|sw\.js/.test(request.url)) leaked++;
     response.setHeader('Content-Type', 'text/html');
+    if (request.url === '/ambiguous') {
+      response.end('<form><label for="a">Email</label><input id="a"><button>Submit</button></form><form><label for="b">Email</label><input id="b"><button>Submit application</button></form>');
+      return;
+    }
     if (request.url === '/native') {
       response.end('<form method="post" action="/leak-native"><label for="email">Email</label><input id="email" type="email" required><button>Submit application</button></form>');
       return;
     }
-    response.end(`<form method="post" novalidate action="/leak-native">
+    response.end(`<button type="button">Apply</button><form method="post" novalidate action="/leak-native">
       <div><label for="email">Email</label><input id="email" type="email" required aria-errormessage="err"><span id="err" hidden></span></div>
       <div><label for="missing">A required custom answer</label><input id="missing" required></div>
       <script>document.querySelector('form').addEventListener('submit', event => {
@@ -79,6 +83,8 @@ test('URL-only runner writes the same private trace through a real joule server'
     const nativeTrace = JSON.parse(await fs.readFile(native.file, 'utf8'));
     assert.equal(nativeTrace.validation.status, 'clicked');
     assert.ok(nativeTrace.validation.blocked_requests >= 1);
+    const ambiguous = await replay(`http://127.0.0.1:${form.address().port}/ambiguous`, `http://127.0.0.1:${port}`);
+    assert.equal(ambiguous.validation, 'ambiguous-submit-control');
     assert.equal(submissions, 0); assert.equal(leaked, 0); assert.equal(upgrades, 0);
     console.log('smoke: submit-only validation captured; fetch/GET/XHR/beacon/WebSocket/Service Worker + native POST blocked; 0 employer requests; private traces written');
   } finally {
