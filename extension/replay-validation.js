@@ -7,12 +7,18 @@ async function submitValidation(context, page) {
   await context.route('**/*', route => { blocked++; return route.abort('blockedbyclient'); });
   const outcome = status => ({status, network_blocked: true, blocked_requests: blocked});
   await context.setOffline(true);
-  const buttons = [];
+  let buttons = [];
   for (const frame of page.frames()) {
     const candidates = frame.getByRole('button', {name: /^(submit(?: (?:my )?application)?|send application|apply(?: now)?)$/i});
     for (const button of await candidates.all()) {
       if (await button.isVisible() && await button.isEnabled()) buttons.push(button);
     }
+  }
+  if (buttons.length > 1) {
+    // A sticky Apply button may only scroll to the form. Prefer its actual native submit control.
+    const submits = [];
+    for (const button of buttons) if (await button.evaluate(node => node.type === 'submit' && !!node.form)) submits.push(button);
+    if (submits.length) buttons = submits;
   }
   if (buttons.length !== 1) return outcome(buttons.length ? 'ambiguous-submit-control' : 'no-submit-control');
   try {
