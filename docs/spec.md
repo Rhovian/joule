@@ -14,7 +14,7 @@ Manual input is in scope by owner decision (2026-10-12), superseding [#15](https
 
 - **Backend:** Python, FastAPI, SQLite. One process, started with **one worker**. That process owns every Scan, the schedule and the Upwork content purge ([#11](https://github.com/Rhovian/joule/issues/11)).
 - **Frontend:** Astro, built to static files and served by FastAPI. Plain CSS, vanilla client-side JS ([#10](https://github.com/Rhovian/joule/issues/10)).
-- **AI:** Codex CLI on the owner’s subscription via `codex exec --output-schema`; every call returns Pydantic-validated output. Providers can be plugged in later.
+- **AI:** Codex CLI on the owner’s subscription: scoring uses a persistent `codex app-server` thread; Drafts and Fill use `codex exec --output-schema` per call. Every result is constrained by JSON Schema and validated by Pydantic. Providers can be plugged in later.
 - **Deployment:** one Docker container with the data dir mounted from outside. Runs on a Mac or Linux. The dashboard is reachable only over Tailscale (Tailscale Serve for HTTPS on a server) and has no login.
 
 ## 3. Data dir
@@ -153,7 +153,7 @@ A Scan starts when the owner clicks Scan in the dashboard (any Source) or on the
 2. **Insert** new `(source, source_id)` rows; already-seen IDs are ignored.
 3. **Link Duplicates:** match on tidied company + title (lowercase, punctuation stripped, Inc./Ltd dropped) **and** a compatible location (both remote, or the same city) against existing Primaries. Upwork Jobs are never matched. A match sets `primary_id`; the Duplicate takes the Primary's state and score.
 4. **Cheap filters**, in order: deal-breakers (companies and industries by tidied name; keywords as whole words, case-insensitive, in title + description, no regex) → work type → pay floor (only when pay is given) → location rules → Upwork client floors. A failure sets `filtered_reason`. Matching is city + country plus aliases, no geocoding; a missing or unclear location sets `location_unclear` and passes.
-5. **Score** surviving Primaries, newest first, up to `max_scored_per_scan` (Upwork only when `upwork.scoring` is on).
+5. **Score** surviving Primaries, newest first, up to `max_scored_per_scan` (Upwork only when `upwork.scoring` is on). Repeated scoring failures with the same cause appear once per Source, with the number of affected Jobs; retry details are collapsed to their distinct causes.
 6. After all Sources, when Telegram is configured: write Cover Letters (board Jobs) or Proposals (Upwork) for newly inserted eligible Primaries, three at a time. Draft failures are recorded in the Source errors. If any Drafts succeed, send **one Telegram message**: "N new Jobs queued (M in queue)" with a Start button. A send failure is logged and never fails the Scan.
 
 **One Scan at a time** — check-then-act on "is a Scan running?" and on Duplicate linking (read existing Jobs, then write). **Guarantee:** a single process with one worker owns all Scans, and an in-process lock is held for the whole Scan. A manual request during a Scan gets "Scan in progress"; a scheduled tick during a Scan is skipped; nothing is queued. On startup, any `running` Scan becomes `interrupted`. Running more than one server worker breaks this and is unsupported.
@@ -164,8 +164,11 @@ The same timer loop runs the **Upwork purge**: content (description, pay, client
 
 - **Output:** 0–100, a one-line reason, and up to three for/against points.
 - **Prompt rubric:** how well the Master CV and work history match the skills, experience and seniority the Job needs. Listed skills count as experience, a tool's platform or close equivalent counts as that tool, and one missing tool is not marked down when the rest of the stack matches. Pay, location, arrangement and work type are ignored; the cheap filters handle them, and Preferences are not sent to the scorer.
+- **Session:** one ephemeral `codex app-server` process/thread per server process, shared by Scans and manual rescoring. Turns are serialized, including concurrent requests from a Scan and “score again”. The Master CV, work history and rubric are supplied once at thread creation; each turn supplies one Job. Earlier Jobs and scores remain in context. Rotate before the next turn after one hour, 100 attempts, 64,000 context tokens (or 75% of the model context window, whichever is lower), or any change to the Profile context or scoring model. Shutdown closes the process.
+- **Caching:** stable context prefixes can be cached by Codex; log thread ID, input tokens and cached input tokens without Profile or Job text. Cache hits are observable, not guaranteed; context is still part of later requests and cached tokens are not necessarily free. See [Codex app-server](https://developers.openai.com/codex/app-server/) and [prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching).
+- **Safety:** read-only sandbox, disabled shell/browser/computer/image/agent tools and web search, isolated configuration with only the host’s file-backed Codex login shared, and no persistent thread history. Unexpected tool requests fail closed. Job text remains untrusted data.
 - **Missing fields:** the scorer is told which fields are missing.
-- **Failure:** one automatic retry, then the Job is left unscored (never scored low), with a "score again" action.
+- **Failure:** one automatic retry, then the Job is left unscored (never scored low), with a "score again" action. Failed turns (including 429s) and invalid output retain the session; a dead connection, protocol error, timeout or cancellation closes it so the next attempt starts fresh.
 - **Fingerprint:** `score_fingerprint` hashes the Master CV, work-history notes and scoring model. A mismatch marks the score out of date.
 
 ## 9. Drafts ([#12](https://github.com/Rhovian/joule/issues/12))

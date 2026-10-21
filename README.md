@@ -49,7 +49,7 @@ Everything joule reads and writes lives in `~/.joule`, mounted into the containe
   upwork-token.json       # written by Connect Upwork
 ```
 
-Scoring uses the host’s Codex login; work history must live under `~/.joule` to be visible in Docker.
+Scoring uses the host’s file-backed Codex login and one persistent, serialized Codex session shared by Scans and manual rescoring. The Profile and rubric are loaded once per session; logs show input and cached token counts. Sessions rotate after an hour, 100 attempts, a context limit, or a Profile/model change (spec §8). Cache hits reduce repeated context processing but are not guaranteed or necessarily free. Drafts and Fill keep separate per-call runs. Work history must live under `~/.joule` to be visible in Docker.
 
 `settings.yaml` and `preferences.yaml` are re-read on every Scan; no restart needed. Job age cutoffs default to 3 days, with 7-day overrides for `golangjobs` and `getarustjob`; edit `source_max_age_days` in `settings.yaml` (spec §3) to change them.
 

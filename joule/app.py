@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from joule import scoring_session
 from joule.config import data_dir as default_data_dir
 from joule.config import load_env
 from joule.db import init_db
@@ -58,6 +59,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                     app.state.scanner.task.cancel()
                     with suppress(asyncio.CancelledError):
                         await app.state.scanner.task
+                await scoring_session.session.close()
 
     app = FastAPI(lifespan=lifespan)
     allowed_hosts = ["localhost", "127.0.0.1"]

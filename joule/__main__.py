@@ -1,8 +1,11 @@
+import logging
 import os
 
 import uvicorn
 
 if __name__ == "__main__":
+    logging.basicConfig()
+    logging.getLogger("joule.scoring_session").setLevel(logging.INFO)
     # One worker is required for the in-process Scan lock (spec §7).
     uvicorn.run(
         "joule.app:app",

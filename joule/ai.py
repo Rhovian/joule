@@ -17,7 +17,9 @@ logger = logging.getLogger(__name__)
 
 
 class AIError(Exception):
-    pass
+    def __init__(self, message, *, causes=None):
+        super().__init__(message)
+        self.causes = tuple(sorted(set(causes or [message])))
 
 
 async def codex_stderr(process, prompt):
@@ -137,12 +139,13 @@ async def structured[T: BaseModel](model: Model, prompt: str, schema: type[T]) -
             raise AIError("Codex returned missing or invalid output") from error
 
 
-async def retry_structured(model, prompt, schema):
-    failures = []
+async def retry_structured(model, prompt, schema, *, generate=None):
+    failures, causes = [], []
     for attempt in range(2):
         try:
-            return await structured(model, prompt, schema)
+            return await (generate or structured)(model, prompt, schema)
         except AIError as error:
             logger.warning("Codex attempt %s/2 failed: %s", attempt + 1, error)
             failures.append(f"Attempt {attempt + 1}/2: {error}")
-    raise AIError("; ".join(failures))
+            causes.extend(error.causes)
+    raise AIError("; ".join(failures), causes=causes)
