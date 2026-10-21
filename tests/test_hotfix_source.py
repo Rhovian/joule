@@ -34,7 +34,8 @@ def test_search(work_type, low, high, yearly):
     requests = []
 
     def respond(request):
-        assert request.method == "GET" and request.url.path == "/v1/jobs"
+        assert request.method == "GET" and request.url.host == "api.hotfix.jobs"
+        assert request.url.path == "/v1/jobs"
         assert request.headers["User-Agent"] == "joule/0.1"
         assert dict(request.url.params) == {
             "query": ["one", "two"][len(requests)],

@@ -2,7 +2,7 @@ import httpx
 
 from joule.sources import Candidate
 
-JOBS_URL = "https://rest.hotfix.jobs/v1/jobs"
+JOBS_URL = "https://api.hotfix.jobs/v1/jobs"
 
 
 class HotfixError(Exception):
