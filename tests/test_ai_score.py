@@ -5,7 +5,7 @@ from contextlib import closing
 
 import pytest
 
-from joule import ai, score
+from joule import ai, score, scoring_session
 from joule.config import Model, Settings
 from joule.db import connect, init_db
 
@@ -186,7 +186,7 @@ def test_retry_and_write(tmp_path, monkeypatch, caplog, failure):
             points=[score.Point(stance="for", text="Rust")],
         )
 
-    monkeypatch.setattr(ai, "structured", structured)
+    monkeypatch.setattr(scoring_session.session, "structured", structured)
     with closing(connect(tmp_path / "joule.db")) as db, db:
         db.execute(
             "INSERT INTO jobs (source,source_id,link,title,first_seen_at) VALUES ('remoteok','1','x','Rust','now')"

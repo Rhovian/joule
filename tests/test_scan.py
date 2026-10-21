@@ -9,7 +9,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from joule import ai, filters, scan
+from joule import ai, filters, scan, scoring_session
 from joule.app import create_app
 from joule.config import Preferences, Settings
 from joule.db import connect
@@ -105,7 +105,7 @@ def setup(tmp_path, monkeypatch):
     async def structured(*args):
         return Score(score=70, reason="pay not stated", points=[])
 
-    monkeypatch.setattr(ai, "structured", structured)
+    monkeypatch.setattr(scoring_session.session, "structured", structured)
     calls = []
 
     def respond(request):
@@ -337,14 +337,14 @@ def test_scoring_selection_cap_and_failure(setup, monkeypatch):
             for i in range(7)
         ]
 
-    async def structured(model, prompt, schema):
+    async def structured(context, model, prompt, schema):
         calls.append(prompt)
         if '"source_id": "1"' in prompt:
             raise ai.AIError("offline")
         return Score(score=50, reason="pay not stated", points=[])
 
     monkeypatch.setitem(scan.ADAPTERS, "remoteok", (fetch, None))
-    monkeypatch.setattr(ai, "structured", structured)
+    monkeypatch.setattr(scoring_session.session, "structured", structured)
     monkeypatch.setattr(
         filters,
         "filter_reason",
@@ -360,7 +360,7 @@ def test_scoring_selection_cap_and_failure(setup, monkeypatch):
     assert [r["source_id"] for r in rows() if r["score"] is not None] == ["2", "3"]
     counts = json.loads(rows("scans")[0]["per_source"])["remoteok"]
     assert counts["scored"] == 2 and counts["errors"] == [
-        "Score 2: Attempt 1/2: offline; Attempt 2/2: offline"
+        "Scoring failed for 1 Job: offline"
     ]
     calls.clear()
     run(["remoteok"])
@@ -416,7 +416,7 @@ def test_scoring_duplicates_and_concurrency(setup, monkeypatch):
 
     monkeypatch.setitem(scan.ADAPTERS, "remoteok", (remote, None))
     monkeypatch.setitem(scan.ADAPTERS, "hotfix", (hotfix, None))
-    monkeypatch.setattr(ai, "structured", structured)
+    monkeypatch.setattr(scoring_session.session, "structured", structured)
     run(["remoteok", "hotfix"])
     assert maximum == 3
     assert len([r for r in rows() if r["score"] is not None]) == 4
@@ -451,7 +451,7 @@ def test_unscored_upwork_jobs_retry_on_later_scan(setup, monkeypatch, cause):
     structured = AsyncMock(return_value=Score(score=70, reason="fit", points=[]))
     if cause == "failure":
         structured.side_effect = ai.AIError("offline")
-    monkeypatch.setattr(ai, "structured", structured)
+    monkeypatch.setattr(scoring_session.session, "structured", structured)
     settings = Settings(max_scored_per_scan=1, alert_threshold=60)
     run(["upwork"], settings)
     pending = [row["id"] for row in rows() if row["score"] is None]
@@ -459,9 +459,7 @@ def test_unscored_upwork_jobs_retry_on_later_scan(setup, monkeypatch, cause):
     counts = json.loads(rows("scans")[-1]["per_source"])["upwork"]
     assert counts["scored"] == (0 if cause == "failure" else 1)
     assert counts["errors"] == (
-        ["Score 1: Attempt 1/2: offline; Attempt 2/2: offline"]
-        if cause == "failure"
-        else []
+        ["Scoring failed for 1 Job: offline"] if cause == "failure" else []
     )
 
     # Even with a Draft, an unscored Job stays out of the Telegram queue.
@@ -577,3 +575,33 @@ def test_per_source_age_cutoff(setup, monkeypatch, source, overrides, days):
     run([source], Settings(max_scored_per_scan=0, **values))
     assert {row["source_id"] for row in rows()} == {"boundary", "newer", "undated"}
     assert enrich.await_count == 3
+
+
+def test_repeated_scoring_errors_group_by_cause_and_source(setup, monkeypatch):
+    _, _, _, rows, run = setup
+
+    async def structured(context, model, prompt, schema):
+        cause = (
+            "Codex scoring turn failed (HTTP 429)"
+            if '"source_id": "11"' not in prompt
+            else "Codex returned missing or invalid output"
+        )
+        raise ai.AIError(cause)
+
+    generate = AsyncMock(side_effect=structured)
+    monkeypatch.setattr(scoring_session.session, "structured", generate)
+    for source in ("remoteok", "hotfix"):
+        jobs = [
+            Candidate(source=source, source_id=str(i), title=str(i), link="x")
+            for i in range(12)
+        ]
+        monkeypatch.setitem(scan.ADAPTERS, source, (AsyncMock(return_value=jobs), None))
+    run(["remoteok", "hotfix"])
+    for counts in json.loads(rows("scans")[-1]["per_source"]).values():
+        assert counts["scored"] == 0
+        assert counts["errors"] == [
+            "Scoring failed for 11 Jobs: Codex scoring turn failed (HTTP 429)",
+            "Scoring failed for 1 Job: Codex returned missing or invalid output",
+        ]
+    assert generate.await_count == 48
+    assert all(row["score"] is None for row in rows())

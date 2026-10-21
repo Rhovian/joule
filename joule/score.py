@@ -2,12 +2,13 @@ import hashlib
 import json
 import os
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import Literal
 
 from pydantic import Field
 
-from joule import ai
+from joule import ai, scoring_session
 from joule.config import StrictModel, load_preferences
 from joule.filters import plain_text
 from joule.sources import Candidate
@@ -72,7 +73,7 @@ def job_block(job):
     )
 
 
-def prompt(job, data_dir):
+def context(data_dir):
     profile = "\n".join(
         f"## {name}\n{contents.decode()}" for name, contents in profile_files(data_dir)
     )
@@ -80,14 +81,21 @@ def prompt(job, data_dir):
         f"Give this Job a Fit Score from 0 to 100: {RUBRIC}\n"
         "Return a one-line reason and up to three for/against points.\n"
         f"Profile:\n{profile}\n"
-        f"{job_block(job)}"
     )
+
+
+def prompt(job, data_dir):
+    return context(data_dir) + job_block(job)
 
 
 async def score_job(db, job_id, settings, data_dir, fingerprint):
     job = db.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
-    text = prompt(job, data_dir)
-    result = await ai.retry_structured(settings.models.scoring, text, Score)
+    result = await ai.retry_structured(
+        settings.models.scoring,
+        job_block(job),
+        Score,
+        generate=partial(scoring_session.session.structured, context(data_dir)),
+    )
     with db:
         db.execute(
             "UPDATE jobs SET score=?, score_reason=?, score_points=?, scored_at=?, "

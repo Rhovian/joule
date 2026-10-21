@@ -197,6 +197,7 @@ class Scanner:
                 jobs = sorted(jobs, key=lambda j: j[2] or "", reverse=True)
                 limit = asyncio.Semaphore(3)
                 graded = 0
+                scoring_errors = {}
 
                 async def grade(job):
                     nonlocal graded
@@ -208,7 +209,20 @@ class Scanner:
                             )
                             progress[source]["scored"] += 1
                         except ai.AIError as error:
-                            progress[source]["errors"].append(f"Score {id}: {error}")
+                            # gather collects results, not per-Source failure counts:
+                            # docs.python.org/3.12/library/asyncio-task.html#asyncio.gather
+                            errors = progress[source]["errors"]
+                            key = (source, error.causes)
+                            index, count = scoring_errors.get(key, (len(errors), 0))
+                            if not count:
+                                errors.append("")
+                            count += 1
+                            scoring_errors[key] = (index, count)
+                            noun = "Job" if count == 1 else "Jobs"
+                            errors[index] = (
+                                f"Scoring failed for {count} {noun}: "
+                                + "; ".join(error.causes)
+                            )
                         graded += 1
                         # Persist progress in batches so the dashboard sees scoring move.
                         if graded % 10 == 0:
