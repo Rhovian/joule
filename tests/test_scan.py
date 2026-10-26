@@ -9,7 +9,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from joule import ai, filters, scan, scoring_session
+from joule import ai, filters, scan, score, scoring_session
 from joule.app import create_app
 from joule.config import Preferences, Settings
 from joule.db import connect
@@ -99,6 +99,7 @@ def test_tick_schedule_conditions_and_busy_retry(setup, monkeypatch, skip):
 
 @pytest.fixture
 def setup(tmp_path, monkeypatch):
+    monkeypatch.setattr(score, "backoff_sleep", AsyncMock())
     (tmp_path / "profile").mkdir()
     (tmp_path / "profile" / "preferences.yaml").write_text("roles: [Engineer]\n")
 
@@ -352,19 +353,25 @@ def test_scoring_selection_cap_and_failure(setup, monkeypatch):
     )
     run(["remoteok"], Settings(max_scored_per_scan=3))
     assert [
-        '"source_id": "1"' in calls[0],
-        '"source_id": "1"' in calls[1],
-        '"source_id": "2"' in calls[2],
-        '"source_id": "3"' in calls[3],
-    ] == [True] * 4
+        json.loads(p.split("<UNTRUSTED_JOB>\n")[1].split("\n</UNTRUSTED_JOB>")[0])[
+            "source_id"
+        ]
+        for p in calls
+    ] == ["1", "1", "1", "2", "3"]
     assert [r["source_id"] for r in rows() if r["score"] is not None] == ["2", "3"]
     counts = json.loads(rows("scans")[0]["per_source"])["remoteok"]
     assert counts["scored"] == 2 and counts["errors"] == [
         "Scoring failed for 1 Job: offline"
     ]
+    assert [call.args[0] for call in score.backoff_sleep.await_args_list] == [
+        30,
+        60,
+        120,
+    ]
     calls.clear()
     run(["remoteok"])
-    assert not calls
+    assert len(calls) == 6  # Three retries plus three Jobs left behind by the cap.
+    calls.clear()
 
     async def upwork_jobs(ctx):
         return [Candidate(source="upwork", source_id="u", title="U", link="x")]
@@ -418,9 +425,93 @@ def test_scoring_duplicates_and_concurrency(setup, monkeypatch):
     monkeypatch.setitem(scan.ADAPTERS, "hotfix", (hotfix, None))
     monkeypatch.setattr(scoring_session.session, "structured", structured)
     run(["remoteok", "hotfix"])
-    assert maximum == 3
+    assert maximum == 1
     assert len([r for r in rows() if r["score"] is not None]) == 4
     assert rows()[-1]["primary_id"] is not None and rows()[-1]["score"] is None
+
+
+@pytest.mark.parametrize("source", ["hotfix", "remoteok", "upwork"])
+def test_scoring_queue_backoff_then_success(setup, monkeypatch, source):
+    _, _, _, rows, run = setup
+    jobs = [Candidate(source=source, source_id="1", title="x", link="x")]
+    monkeypatch.setitem(scan.ADAPTERS, source, (AsyncMock(return_value=jobs), None))
+    events = []
+
+    async def generate(*args):
+        events.append("turn")
+        if events.count("turn") < 3:
+            raise ai.AIError("Codex scoring turn failed (HTTP 429)")
+        return Score(score=70, reason="fit", points=[])
+
+    async def pause(seconds):
+        events.append(seconds)
+        assert rows()[0]["score"] is None
+
+    monkeypatch.setattr(scoring_session.session, "structured", generate)
+    monkeypatch.setattr(score, "backoff_sleep", pause)
+    run([source], Settings(max_scored_per_scan=1))
+    assert events == ["turn", 30, "turn", 60, "turn"]
+    assert rows()[0]["score"] == 70
+    counts = json.loads(rows("scans")[-1]["per_source"])[source]
+    assert counts["scored"] == 1 and counts["errors"] == []
+
+
+@pytest.mark.parametrize("source", ["hotfix", "remoteok"])
+def test_scoring_backlog_survives_failure_cap_and_restart(setup, monkeypatch, source):
+    _, scanner, _, rows, run = setup
+    jobs = [
+        Candidate(source=source, source_id=str(i), title=str(i), link="x")
+        for i in range(2)
+    ]
+    monkeypatch.setitem(scan.ADAPTERS, source, (AsyncMock(return_value=jobs), None))
+    generate = AsyncMock(side_effect=ai.AIError("offline"))
+    monkeypatch.setattr(scoring_session.session, "structured", generate)
+    run([source], Settings(max_scored_per_scan=1))
+    assert generate.await_count == 3
+    assert all(row["score"] is None for row in rows())
+    # Recovery uses persisted rows, even when no fetched Jobs are new and the
+    # owner has already seen/dismissed the eligible non-Upwork Primaries.
+    with closing(connect(scanner.path)) as db, db:
+        db.execute("UPDATE jobs SET state='dismissed'")
+    scanner.task = None
+    generate.side_effect = None
+    generate.return_value = Score(score=70, reason="fit", points=[])
+    run([source])
+    assert all(row["score"] == 70 for row in rows())
+    counts = json.loads(rows("scans")[-1]["per_source"])[source]
+    assert counts["new"] == 0 and counts["scored"] == 2
+
+
+def test_scoring_backoff_cancellation_leaves_durable_backlog(setup, monkeypatch):
+    client, scanner, _, rows, run = setup
+    entered = asyncio.Event()
+
+    async def pause(seconds):
+        entered.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(score, "backoff_sleep", pause)
+    monkeypatch.setattr(
+        scoring_session.session, "structured", AsyncMock(side_effect=ai.AIError("429"))
+    )
+
+    async def cancel():
+        scanner.start(["hotfix"], "manual", Settings(), Preferences(roles=["Engineer"]))
+        await entered.wait()
+        scanner.task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await scanner.task
+
+    client.portal.call(cancel)
+    assert rows("scans")[-1]["status"] == "interrupted" and not scanner.busy
+    assert rows()[0]["score"] is None
+    monkeypatch.setattr(
+        scoring_session.session,
+        "structured",
+        AsyncMock(return_value=Score(score=70, reason="fit", points=[])),
+    )
+    run(["hotfix"])
+    assert rows()[0]["score"] == 70
 
 
 @pytest.mark.parametrize(
@@ -487,9 +578,10 @@ def test_unscored_upwork_jobs_retry_on_later_scan(setup, monkeypatch, cause):
         assert {row["id"] for row in queue(db, settings)} == set(pending)
 
 
-def test_upwork_rescoring_only_selects_eligible_jobs(setup, monkeypatch):
+@pytest.mark.parametrize("source", ["upwork", "remoteok"])
+def test_backlog_only_selects_eligible_jobs(setup, monkeypatch, source):
     _, scanner, _, rows, run = setup
-    monkeypatch.setitem(scan.ADAPTERS, "upwork", (AsyncMock(return_value=[]), None))
+    monkeypatch.setitem(scan.ADAPTERS, source, (AsyncMock(return_value=[]), None))
     variants = [
         {},
         {"filtered_reason": "no"},
@@ -499,13 +591,13 @@ def test_upwork_rescoring_only_selects_eligible_jobs(setup, monkeypatch):
         {"content_purged_at": "now"},
         {"primary_id": 1},
         {"score": 0},
-        {"source": "remoteok"},
+        {"source": "getarustjob"},
     ]
     with closing(connect(scanner.path)) as db, db:
         for id, variant in enumerate(variants, 1):
             values = {
                 "id": id,
-                "source": "upwork",
+                "source": source,
                 "source_id": str(id),
                 "title": str(id),
                 "link": "x",
@@ -520,13 +612,13 @@ def test_upwork_rescoring_only_selects_eligible_jobs(setup, monkeypatch):
     assert rows()[0]["score"] is None
     run(["upwork"], Settings(upwork={"scoring": False}))
     assert rows()[0]["score"] is None
-    run(["upwork"])
+    run([source])
     assert [row["score"] for row in rows()[: len(variants)]] == [
         70,
         None,
-        None,
-        None,
-        None,
+        None if source == "upwork" else 70,
+        None if source == "upwork" else 70,
+        None if source == "upwork" else 70,
         None,
         None,
         0,
@@ -603,5 +695,5 @@ def test_repeated_scoring_errors_group_by_cause_and_source(setup, monkeypatch):
             "Scoring failed for 11 Jobs: Codex scoring turn failed (HTTP 429)",
             "Scoring failed for 1 Job: Codex returned missing or invalid output",
         ]
-    assert generate.await_count == 48
+    assert generate.await_count == 72
     assert all(row["score"] is None for row in rows())

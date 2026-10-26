@@ -41,7 +41,7 @@ async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> 
 }
 let jobs: Job[] = [], sources: Source[] = [], selected = 0, detail: Job | null = null;
 let scheduled = false, detailId = 0, jobsVersion = 0, connected = true, runningId: number | null = null, scan: Scan | null = null, starting = false;
-let byScore = false;
+let byScore = false, scoringAll = false;
 let noticeTimer: ReturnType<typeof setTimeout>, pollTimer: ReturnType<typeof setTimeout>;
 function notice(error: unknown) {
   element('notice').textContent = error instanceof Error ? error.message : String(error);
@@ -72,7 +72,14 @@ function pay(j: Job) {
   const values = [j.pay_min, j.pay_max].filter((n): n is number => n !== null);
   return values.length ? `${[...new Set(values)].join('–')} ${j.pay_currency ?? ''}${j.pay_period ? ` /${j.pay_period}` : ''}` : '';
 }
+const unscoredVisible = () => jobs.filter(j => j.score === null && !j.content_purged_at);
+function renderScoreAll() {
+  const button = element('score-all') as HTMLButtonElement;
+  button.disabled = !!runningId || starting || !unscoredVisible().length;
+  button.textContent = scoringAll && runningId ? 'Scoring…' : 'Score all';
+}
 function renderJobs() {
+  renderScoreAll();
   element('job-count').textContent = `${jobs.length} visible`;
   replace('jobs', `<table class="triage-table"><thead><tr><th>Primary Job / Sources</th><th><button class="sort" data-action="sort" aria-pressed="${byScore}" title="Sort by rank or Fit Score">${byScore ? 'Fit Score ▼' : 'Fit Score'} / reasoning</button></th><th>Location / pay</th><th>State / actions</th></tr></thead><tbody>${jobs.map(j =>
     `<tr class="${j.id === selected ? 'selected' : ''} ${j.state === 'dismissed' ? 'is-dismissed' : ''}" data-job="${escape(j.id)}"><td><button class="job-title" data-action="open" data-id="${escape(j.id)}">${escape(j.title)}</button><p class="company">${escape(j.company)}</p>${links(j)}</td><td><div class="table-score">${score(j)}<span>${j.score === null ? 'unscored' : 'Fit Score'}${j.rank == null ? '' : ` · rank ${Math.round(j.rank)}`}</span></div>${reason(j)}</td><td><p>${escape(j.location_raw)}</p><small>${escape(pay(j))}</small></td><td><div class="flags">${flags(j)}</div><div class="row-actions">${dismiss(j)}${applied(j)}${scoreAgain(j)}</div></td></tr>`).join('')}</tbody></table>${jobs.length ? '' : '<p class="empty">No visible Jobs. Run a Scan or adjust the toggles.</p>'}`);
@@ -94,7 +101,8 @@ function counts(c?: Counts | null) {
   return c ? `<p class="scan-counts">${escape(c.new)} new · ${escape(c.duplicate)} Duplicate · ${escape(c.filtered)} Filtered · ${escape(c.scored ?? 0)} scored</p>${(c.errors ?? []).map(e => `<p class="scan-error">${escape(e)}</p>`).join('')}` : '';
 }
 function renderSources() {
-  replace('a-scans', `<section class="scan-panel"><div class="section-heading"><h2>Scans</h2><button data-action="scan" ${runningId || starting ? 'disabled' : ''}>Scan all</button></div><p class="muted">Discover Jobs from each Source.</p>${runningId ? `<div class="scan-progress" role="status"><strong>Scan in progress</strong>${scan ? scan.sources.map(name => `<div>${escape(name)}${counts(scan?.per_source[name])}</div>`).join('') : '<span>Waiting for Source counts…</span>'}</div>` : '<p class="scan-idle">Ready for a new Scan</p>'}<div class="scan-sources">${sources.map(s => `<article class="scan-source"><div><strong>${escape(s.name)}</strong><button data-action="scan" data-source="${escape(s.name)}" ${runningId || starting ? 'disabled' : ''}>Scan</button></div>${s.last ? `<small>Last Scan · ${escape(s.last.finished_at ?? s.last.started_at)} · ${escape(s.last.status)}</small>${counts(s.last.counts)}` : '<small>No Scan yet</small>'}${s.name === 'upwork' ? `<p class="connect">${connected ? '<span class="connected">● Upwork connected</span>' : '<button data-action="connect">Connect Upwork</button>'}</p><button data-action="schedule" aria-pressed="${scheduled}">Scheduled Scans: ${scheduled ? 'On' : 'Off'}</button><button data-action="telegram">Start Telegram queue</button>` : ''}</article>`).join('')}</div></section>`);
+  renderScoreAll();
+  replace('a-scans', `<section class="scan-panel"><div class="section-heading"><h2>Scans</h2><button data-action="scan" ${runningId || starting ? 'disabled' : ''}>Scan all</button></div><p class="muted">Discover Jobs from each Source.</p>${runningId ? `<div class="scan-progress" role="status"><strong>${scoringAll ? 'Scoring in progress' : 'Scan in progress'}</strong>${scan ? scan.sources.map(name => `<div>${escape(name)}${counts(scan?.per_source[name])}</div>`).join('') : '<span>Waiting for Source counts…</span>'}</div>` : '<p class="scan-idle">Ready for a new Scan</p>'}<div class="scan-sources">${sources.map(s => `<article class="scan-source"><div><strong>${escape(s.name)}</strong><button data-action="scan" data-source="${escape(s.name)}" ${runningId || starting ? 'disabled' : ''}>Scan</button></div>${s.last ? `<small>Last Scan · ${escape(s.last.finished_at ?? s.last.started_at)} · ${escape(s.last.status)}</small>${counts(s.last.counts)}` : '<small>No Scan yet</small>'}${s.name === 'upwork' ? `<p class="connect">${connected ? '<span class="connected">● Upwork connected</span>' : '<button data-action="connect">Connect Upwork</button>'}</p><button data-action="schedule" aria-pressed="${scheduled}">Scheduled Scans: ${scheduled ? 'On' : 'Off'}</button><button data-action="telegram">Start Telegram queue</button>` : ''}</article>`).join('')}</div></section>`);
 }
 async function toggleSchedule() {
   scheduled = (await api<{ upwork: boolean }>('schedule', 'PUT', { upwork: !scheduled })).upwork;
@@ -119,7 +127,7 @@ async function pollScan() {
     scan = await api<Scan>(`scans/${runningId}`);
     if (scan.status !== 'running') {
       runningId = null; renderSources();
-      notice(`Scan ${scan.status}`);
+      notice(`${scoringAll ? 'Scoring' : 'Scan'} ${scan.status}`); scoringAll = false; renderScoreAll();
       const results = await Promise.allSettled([loadJobs(), loadSources()]);
       results.forEach(r => { if (r.status === 'rejected') notice(r.reason); });
       return;
@@ -127,6 +135,14 @@ async function pollScan() {
     renderSources();
   } catch (error) { notice(error); }
   pollTimer = setTimeout(() => void pollScan(), 2000);
+}
+async function scoreAll() {
+  const ids = unscoredVisible().map(j => j.id);
+  if (runningId || starting || !ids.length) return;
+  starting = true; scoringAll = true; renderSources();
+  try { watchScan((await api<{ id: number }>('jobs/score', 'POST', { ids })).id); }
+  catch (error) { scoringAll = false; notice(error); await loadSources(); }
+  finally { starting = false; renderSources(); }
 }
 async function startScan(source?: string) {
   if (runningId || starting) { notice('Scan in progress'); return; }
@@ -246,6 +262,7 @@ root.addEventListener('click', event => {
   if (target.dataset.action === 'ask') void ask(id).catch(notice);
   if (target.dataset.action === 'copy-answer') void navigator.clipboard.writeText(asks.get(detailId)?.[Number(target.dataset.index)]?.answer ?? '').catch(notice);
   if (target.dataset.action === 'copy-draft') void copyDraft(Number(target.dataset.index)).catch(notice);
+  if (target.dataset.action === 'score-all') void scoreAll().catch(notice);
   if (target.dataset.action === 'score') void scoreJob(id).catch(notice);
   if (target.dataset.action === 'state') void changeState(id, target.dataset.state!).catch(notice);
   if (target.dataset.action === 'close') closeDetail();

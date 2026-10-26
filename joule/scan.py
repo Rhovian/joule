@@ -137,7 +137,7 @@ class Scanner:
             except Exception:
                 logger.exception("Scheduled Scan/purge tick failed")
 
-    def start(self, sources, trigger, settings, preferences):
+    def start(self, sources, trigger, settings, preferences, *, job_ids=None):
         if self.busy:
             raise ScanInProgress
         with closing(connect(self.path)) as db, db:
@@ -152,7 +152,7 @@ class Scanner:
             auth=self.auth,
             preferences=preferences,
             settings=settings,
-            inserted=[],
+            job_ids=job_ids,
             env=load_env(self.data_dir),
         )
         self.task = asyncio.create_task(self._run(scan_id, sources, settings, ctx))
@@ -177,6 +177,8 @@ class Scanner:
                         ("new", "duplicate", "filtered", "scored"), 0
                     )
                     counts["errors"] = []
+                    if ctx.job_ids is not None:
+                        continue
                     try:
                         async with asyncio.timeout(settings.source_timeout_seconds):
                             await self._scan_source(db, source, settings, ctx, counts)
@@ -185,51 +187,33 @@ class Scanner:
                         counts["errors"].append(f"{type(error).__name__}: {error}")
                     save()
                 stamp = score.fingerprint(self.data_dir, settings)
-                jobs = [j for j in ctx.inserted if j[1] != "upwork"]
-                if "upwork" in sources and settings.upwork.scoring:
-                    # ai.retry_structured (joule/ai.py) retries only within one
-                    # call; later Scans must reselect Jobs left without a score.
-                    jobs += db.execute(
-                        "SELECT id, source, posted_at FROM jobs WHERE source='upwork' "
-                        "AND primary_id IS NULL AND filtered_reason IS NULL "
-                        "AND state='new' AND content_purged_at IS NULL AND score IS NULL"
-                    ).fetchall()
-                jobs = sorted(jobs, key=lambda j: j[2] or "", reverse=True)
                 limit = asyncio.Semaphore(3)
                 graded = 0
                 scoring_errors = {}
+                async for source, error in score.scan_queue(
+                    db, sources, settings, self.data_dir, stamp, job_ids=ctx.job_ids
+                ):
+                    if error is None:
+                        progress[source]["scored"] += 1
+                    else:
+                        errors = progress[source]["errors"]
+                        key = (source, error.causes)
+                        index, count = scoring_errors.get(key, (len(errors), 0))
+                        if not count:
+                            errors.append("")
+                        count += 1
+                        scoring_errors[key] = (index, count)
+                        noun = "Job" if count == 1 else "Jobs"
+                        errors[index] = (
+                            f"Scoring failed for {count} {noun}: "
+                            + "; ".join(error.causes)
+                        )
+                    graded += 1
+                    # Persist progress in batches so the dashboard sees scoring move.
+                    if graded % 10 == 0:
+                        save()
 
-                async def grade(job):
-                    nonlocal graded
-                    id, source, _ = job
-                    async with limit:
-                        try:
-                            await score.score_job(
-                                db, id, settings, self.data_dir, stamp
-                            )
-                            progress[source]["scored"] += 1
-                        except ai.AIError as error:
-                            # gather collects results, not per-Source failure counts:
-                            # docs.python.org/3.12/library/asyncio-task.html#asyncio.gather
-                            errors = progress[source]["errors"]
-                            key = (source, error.causes)
-                            index, count = scoring_errors.get(key, (len(errors), 0))
-                            if not count:
-                                errors.append("")
-                            count += 1
-                            scoring_errors[key] = (index, count)
-                            noun = "Job" if count == 1 else "Jobs"
-                            errors[index] = (
-                                f"Scoring failed for {count} {noun}: "
-                                + "; ".join(error.causes)
-                            )
-                        graded += 1
-                        # Persist progress in batches so the dashboard sees scoring move.
-                        if graded % 10 == 0:
-                            save()
-
-                await asyncio.gather(*map(grade, jobs[: settings.max_scored_per_scan]))
-                if self.telegram and "upwork" in sources:
+                if self.telegram and "upwork" in sources and ctx.job_ids is None:
                     drafted = 0
 
                     async def draft(job):
@@ -313,11 +297,11 @@ class Scanner:
                             "Enrichment failed for %s", candidate.source_id
                         )
                         counts["errors"].append(f"{type(error).__name__}: {error}")
-            self._insert(db, candidate, ctx.preferences, counts, ctx.inserted)
+            self._insert(db, candidate, ctx.preferences, counts)
 
         await asyncio.gather(*map(add, new))
 
-    def _insert(self, db, candidate, preferences, counts, ids):
+    def _insert(self, db, candidate, preferences, counts):
         primary = None
         if candidate.source != "upwork" and candidate.company:
             names = tuple(map(filters.tidy, (candidate.company, candidate.title)))
@@ -344,8 +328,6 @@ class Scanner:
             )
         if cursor.rowcount:
             counts["duplicate" if primary else "filtered" if reason else "new"] += 1
-            if not primary and not reason:
-                ids.append((cursor.lastrowid, candidate.source, values["posted_at"]))
 
 
 class ScanRequest(StrictModel):

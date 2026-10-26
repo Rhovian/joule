@@ -8,7 +8,7 @@ from pydantic import Field
 from joule import ai, cv, drafts, job_urls, score
 from joule.config import StrictModel, load_settings
 from joule.db import connect
-from joule.scan import ADAPTERS
+from joule.scan import ADAPTERS, ScanInProgress
 
 router = APIRouter(prefix="/api")
 
@@ -77,6 +77,32 @@ async def list_jobs(
 def resolve_job(request: Request, url: Annotated[str, Query(max_length=8192)]):
     with closing(connect(request.app.state.data_dir / "joule.db")) as db:
         return job_urls.resolve(db, url)
+
+
+class ScoreAllRequest(StrictModel):
+    ids: list[Annotated[int, Field(gt=0)]] = Field(min_length=1, max_length=500)
+
+
+@router.post("/jobs/score", status_code=202)
+async def score_all(request: Request, body: ScoreAllRequest):
+    directory = request.app.state.data_dir
+    with closing(connect(directory / "joule.db")) as db:
+        sources = [
+            row[0]
+            for row in db.execute(
+                "SELECT DISTINCT source FROM jobs WHERE id IN "
+                "(SELECT value FROM json_each(?))",
+                (json.dumps(body.ids),),
+            )
+        ]
+    try:
+        return {
+            "id": request.app.state.scanner.start(
+                sources, "manual", load_settings(directory), None, job_ids=body.ids
+            )
+        }
+    except ScanInProgress:
+        raise HTTPException(409, "Scan or scoring in progress") from None
 
 
 @router.get("/jobs/{job_id}")
