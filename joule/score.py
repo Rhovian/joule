@@ -1,6 +1,8 @@
 import hashlib
 import json
 import os
+from asyncio import sleep as backoff_sleep
+from collections import deque
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
@@ -88,13 +90,12 @@ def prompt(job, data_dir):
     return context(data_dir) + job_block(job)
 
 
-async def score_job(db, job_id, settings, data_dir, fingerprint):
+async def score_job(db, job_id, settings, data_dir, fingerprint, *, retry=True):
     job = db.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
-    result = await ai.retry_structured(
-        settings.models.scoring,
-        job_block(job),
-        Score,
-        generate=partial(scoring_session.session.structured, context(data_dir)),
+    generate = partial(scoring_session.session.structured, context(data_dir))
+    args = (settings.models.scoring, job_block(job), Score)
+    result = await (
+        ai.retry_structured(*args, generate=generate) if retry else generate(*args)
     )
     with db:
         db.execute(
@@ -109,3 +110,44 @@ async def score_job(db, job_id, settings, data_dir, fingerprint):
                 job_id,
             ),
         )
+
+
+async def scan_queue(db, sources, settings, data_dir, fingerprint, *, job_ids=None):
+    # Codex 0.160.1 reports failed turns even after its own transport retries;
+    # it does not retain application Jobs or schedule another turn with backoff:
+    # github.com/openai/codex/blob/rust-v0.160.1/codex-rs/app-server-protocol/schema/json/v2/TurnCompletedNotification.json
+    # Unscored rows are the durable backlog; rebuilding it also recovers a restart.
+    sources = [s for s in sources if s != "upwork" or settings.upwork.scoring]
+    if job_ids is not None:
+        # Explicit Score all includes the visible Filtered and triaged Jobs;
+        # automatic Scan exclusions and the Scan cap do not apply to this action.
+        selection = "id IN (SELECT value FROM json_each(?))"
+        parameters = (json.dumps(job_ids), len(job_ids))
+    else:
+        selection = (
+            f"source IN ({','.join('?' for _ in sources)}) "
+            "AND filtered_reason IS NULL AND (source != 'upwork' OR state='new')"
+        )
+        parameters = (*sources, settings.max_scored_per_scan)
+    jobs = db.execute(
+        f"SELECT id, source FROM jobs WHERE {selection} "
+        "AND primary_id IS NULL AND score IS NULL AND content_purged_at IS NULL "
+        "ORDER BY coalesce(posted_at, '') DESC, id LIMIT ?",
+        parameters,
+    ).fetchall()
+    pending = deque((job, 0) for job in jobs)
+    while pending:
+        job, attempt = pending.popleft()
+        try:
+            await score_job(db, job["id"], settings, data_dir, fingerprint, retry=False)
+        except ai.AIError as error:
+            if attempt < 2:
+                pending.appendleft((job, attempt + 1))
+            else:
+                yield job["source"], error
+            # Pause the whole queue, including after exhaustion, so the next Job
+            # cannot immediately hit the same rate limit. Cancellation propagates.
+            if pending:
+                await backoff_sleep(30 * 2**attempt)
+        else:
+            yield job["source"], None

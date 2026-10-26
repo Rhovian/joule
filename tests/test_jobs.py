@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+from joule import ai, score, scoring_session
 from joule.app import create_app
 from joule.db import SCHEMA, connect, init_db
 
@@ -71,6 +72,83 @@ def test_list(client, query, ids):
     assert primary["duplicates"] == [
         {"id": 6, "source": "hn", "link": "https://example.com"}
     ]
+
+
+@pytest.mark.parametrize(
+    "query, expected",
+    [
+        ("?source=hn", [1]),
+        ("?source=remoteok", [2]),
+        ("?filtered=true&dismissed=true&applied=true", [1, 2, 3, 4, 5, 7]),
+        ("?unscored=false", []),
+    ],
+)
+def test_score_all_visible_snapshot(client, monkeypatch, query, expected):
+    with closing(connect(client.app.state.data_dir / "joule.db")) as db, db:
+        db.execute("UPDATE jobs SET score=NULL")
+    # Explicit selection must not inherit the automatic Scan cap.
+    (client.app.state.data_dir / "settings.yaml").write_text("max_scored_per_scan: 1\n")
+    visible = client.get("/api/jobs" + query).json()
+    ids = [job["id"] for job in visible if job["score"] is None]
+    assert sorted(ids) == expected
+    if not ids:
+        return
+    generate = AsyncMock(return_value=score.Score(score=70, reason="fit", points=[]))
+    monkeypatch.setattr(scoring_session.session, "structured", generate)
+    scanner = client.app.state.scanner
+    scanner._scan_source = AsyncMock(side_effect=AssertionError("must not fetch"))
+    scanner.telegram = SimpleNamespace(alert=AsyncMock())
+    response = client.post("/api/jobs/score", json={"ids": ids})
+    assert response.status_code == 202
+
+    async def finish():
+        await scanner.task
+
+    client.portal.call(finish)
+    scanner._scan_source.assert_not_called()
+    scanner.telegram.alert.assert_not_called()
+    with closing(connect(scanner.path)) as db:
+        assert [
+            r[0] for r in db.execute("SELECT id FROM jobs WHERE score=70 ORDER BY id")
+        ] == expected
+    assert generate.await_count == len(expected)
+
+
+def test_score_all_backoff_validation_and_busy(client, monkeypatch):
+    scanner = client.app.state.scanner
+    assert client.post("/api/jobs/score").status_code == 422
+    for ids in ([], [0], list(range(1, 502))):
+        assert client.post("/api/jobs/score", json={"ids": ids}).status_code == 422
+    scanner.busy = True
+    assert client.post("/api/jobs/score", json={"ids": [3]}).status_code == 409
+    scanner.busy = False
+    with closing(connect(scanner.path)) as db, db:
+        db.execute("UPDATE jobs SET source='upwork', state='seen' WHERE id=3")
+        db.execute("UPDATE jobs SET score=NULL, content_purged_at='now' WHERE id=2")
+    (client.app.state.data_dir / "settings.yaml").write_text(
+        "upwork: {scoring: false}\n"
+    )
+    generate = AsyncMock(
+        side_effect=[
+            ai.AIError("HTTP 429"),
+            score.Score(score=70, reason="fit", points=[]),
+        ]
+    )
+    pause = AsyncMock()
+    monkeypatch.setattr(scoring_session.session, "structured", generate)
+    monkeypatch.setattr(score, "backoff_sleep", pause)
+    # Scored rows, Duplicates and unknown IDs are ignored; repeat IDs run once.
+    response = client.post("/api/jobs/score", json={"ids": [1, 2, 3, 3, 6, 999]})
+    assert response.status_code == 202
+
+    async def finish():
+        await scanner.task
+
+    client.portal.call(finish)
+    assert generate.await_count == 2
+    pause.assert_awaited_once_with(30)
+    assert client.get("/api/jobs/3").json()["score"] == 70
+    assert client.get("/api/jobs/1").json()["score"] == 85
 
 
 def test_list_has_drafts(client):
