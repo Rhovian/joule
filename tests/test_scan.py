@@ -159,6 +159,44 @@ def setup(tmp_path, monkeypatch):
         scanner.client = original
 
 
+def test_workingnomads_application_url_capture_and_refresh(setup, monkeypatch):
+    client, scanner, _, rows, run = setup
+    apply_url = "https://jobs.lever.co/acme/7"
+    job = Candidate(
+        source="workingnomads",
+        source_id="7",
+        title="Engineer",
+        link="https://www.workingnomads.com/jobs/engineer",
+        extra={"apply_url": apply_url},
+    )
+    monkeypatch.setitem(
+        scan.ADAPTERS, "workingnomads", (AsyncMock(return_value=[job]), None)
+    )
+
+    def resolve(url):
+        return client.get("/api/jobs/resolve", params={"url": url}).json()
+
+    run(["workingnomads"])
+    assert (
+        resolve(apply_url + "/apply?utm_source=workingnomads")["id"] == rows()[0]["id"]
+    )
+    with closing(connect(scanner.path)) as db, db:
+        db.execute("UPDATE jobs SET extra=?, state='applied'", ('{"kept": true}',))
+    before = rows()[0]
+    assert resolve(apply_url) is None
+    job.posted_at = datetime.now(UTC) - timedelta(days=30)
+    run(["workingnomads"])
+    after = rows()[0]
+    assert json.loads(after["extra"]) == {"kept": True, "apply_url": apply_url}
+    assert after == before | {"extra": after["extra"]}
+    assert resolve(apply_url + "/apply")["id"] == before["id"]
+    assert resolve(job.link)["id"] == before["id"]
+    assert resolve(apply_url.replace("/7", "/8")) is None
+    job.extra = {}  # Missing URLs in later responses must not erase a destination.
+    run(["workingnomads"])
+    assert resolve(apply_url)["id"] == before["id"]
+
+
 def test_age_cutoff_enrichment_then_seen_ids(setup):
     client, _scanner, calls, rows, run = setup
     assert run(["hotfix"])[0] is False
