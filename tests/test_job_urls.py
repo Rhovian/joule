@@ -64,10 +64,10 @@ def test_lookup_all_jobs_destinations_duplicates_and_ambiguity(tmp_path):
                 "UPDATE jobs SET extra=? WHERE id=501",
                 (
                     json.dumps(
-                        dict(
-                            apply_url="https://jobs.lever.co/acme/501",
-                            application_url="https://jobs.ashbyhq.com/acme/502",
-                        )
+                        {
+                            "apply_url": "https://jobs.lever.co/acme/501",
+                            "application_url": "https://jobs.ashbyhq.com/acme/502",
+                        }
                     ),
                 ),
             )
@@ -88,9 +88,12 @@ def test_lookup_all_jobs_destinations_duplicates_and_ambiguity(tmp_path):
             "https://jobs.lever.co/acme/501/apply/?utm_source=feed#form",
             "https://jobs.ashbyhq.com/acme/502/application/",
         ):
-            assert lookup(url) == dict(
-                id=502, title="Engineer", company=None, source="hotfix"
-            )
+            assert lookup(url) == {
+                "id": 502,
+                "title": "Engineer",
+                "company": None,
+                "source": "hotfix",
+            }
         for url in (
             "https://example.com/500",
             "https://example.com/unknown",
