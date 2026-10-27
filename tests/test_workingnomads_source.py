@@ -1,16 +1,20 @@
 import json
 
 import httpx
+import pytest
 from test_hotfix_source import run
 
 from joule.sources.workingnomads import JOBS_URL, search
 
 
-def test_search():
+@pytest.mark.parametrize("apply_url", [None, "", "https://jobs.lever.co/acme/7"])
+def test_search(apply_url):
     roles = iter(["one", "two"])
     node = json.loads(
         '{"id":7,"slug":"engineer","title":"Engineer","company":"Example", "description":"<p>Full text</p>","locations":["USA"],"pub_date":"2026-10-08T12:00:00Z"}'
     )
+    if apply_url is not None:
+        node["apply_url"] = apply_url
 
     def respond(request):
         assert request.method == "POST" and str(request.url) == JOBS_URL
@@ -36,6 +40,7 @@ def test_search():
     (job,) = run(respond, lambda c: search(c, ["one", "two"]))
     assert (job.source, job.source_id) == ("workingnomads", "7")
     assert job.link == "https://www.workingnomads.com/jobs/engineer"
+    assert job.extra == ({"apply_url": apply_url} if apply_url else {})
     assert (job.location_raw, job.remote) == ("USA", True)
     assert job.posted_at.isoformat() == "2026-10-08T12:00:00+00:00"
     assert all(

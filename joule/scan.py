@@ -276,9 +276,23 @@ class Scanner:
         days = settings.source_max_age_days.get(source, settings.max_age_days)
         cutoff = datetime.now(UTC) - timedelta(days=days)
         fetch, enrich = ADAPTERS[source]
+        candidates = await fetch(ctx)
+        # Existing Working Nomads Jobs predate apply_url capture. Refresh only
+        # destination metadata, including Jobs now older than the Scan cutoff.
+        if source == "workingnomads":
+            with db:
+                db.executemany(
+                    "UPDATE jobs SET extra=json_set(coalesce(extra, '{}'), "
+                    "'$.apply_url', ?) WHERE source='workingnomads' AND source_id=?",
+                    [
+                        (candidate.extra["apply_url"], candidate.source_id)
+                        for candidate in candidates
+                        if candidate.extra.get("apply_url")
+                    ],
+                )
         new = [
             candidate
-            for candidate in await fetch(ctx)
+            for candidate in candidates
             if not (candidate.posted_at and candidate.posted_at < cutoff)
             and not db.execute(
                 "SELECT 1 FROM jobs WHERE source=? AND source_id=?",

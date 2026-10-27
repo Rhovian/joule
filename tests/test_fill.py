@@ -435,10 +435,12 @@ def test_live_trial_profile_answers_and_optional_identity(client):
         ("Are you authorized to work without employer sponsorship?", "Yes"),
     ]
     (directory / "answers.yaml").write_text(
-        yaml.safe_dump([dict(question=q, answer=a) for q, a in entries])
+        yaml.safe_dump([{"question": q, "answer": a} for q, a in entries])
     )
-    fields = [dict(ref=[0, 0], label="Phone*", type="tel")]
-    fields += [dict(ref=[0, i + 1], label=q + "*") for i, (q, _) in enumerate(entries)]
+    fields = [{"ref": [0, 0], "label": "Phone*", "type": "tel"}]
+    fields += [
+        {"ref": [0, i + 1], "label": q + "*"} for i, (q, _) in enumerate(entries)
+    ]
     fields[1]["role"] = fields[2]["role"] = fields[4]["role"] = "combobox"
     fields[4]["options"] = [{"value": "1", "label": "Yes"}]
     actions = post(client, fields).json()["actions"]
@@ -450,7 +452,7 @@ def test_live_trial_profile_answers_and_optional_identity(client):
         "1",
     ]
     optional = [
-        dict(ref=[0, i], required=False, label=label)
+        {"ref": [0, i], "required": False, "label": label}
         for i, label in enumerate(["LinkedIn Profile", "Website/Blog URL", "Country"])
     ]
     assert post(client, optional).json()["actions"] == [
@@ -459,7 +461,7 @@ def test_live_trial_profile_answers_and_optional_identity(client):
         {"ref": [0, 2], "action": "leave", "reason": "optional"},
     ]
     covers = [
-        dict(ref=[0, i], type=type, label="Cover Letter")
+        {"ref": [0, i], "type": type, "label": "Cover Letter"}
         for i, type in enumerate(["file", "textarea"])
     ]
     assert all(

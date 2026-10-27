@@ -43,5 +43,8 @@ async def search(client: httpx.AsyncClient, roles: list[str]) -> list[Candidate]
                     location_raw="; ".join(node.get("locations") or []) or None,
                     remote=True,
                     posted_at=node.get("pub_date"),
+                    extra={"apply_url": node["apply_url"]}
+                    if node.get("apply_url")
+                    else {},
                 )
     return list(candidates.values())
