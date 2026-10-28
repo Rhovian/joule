@@ -8,18 +8,21 @@ const {createBackground} = require('../background.js');
 function storage(values) {
   return {get: async key => ({[key]: values[key]}), set: async data => Object.assign(values, data)};
 }
-for (const existing of [true, false]) test(`panel and resume attachment; existing=${existing}`, async () => {
-  const document = new JSDOM('<input id="resume" type="file">').window.document;
+for (const site of ['lever', 'rippling']) for (const existing of [true, false]) test(`panel and resume attachment; site=${site}; existing=${existing}`, async () => {
+  const url = site === 'rippling' ? 'https://ats.rippling.com/acme/jobs/example/apply' : 'https://jobs.lever.co/acme/apply';
+  const markup = site === 'rippling' ? fs.readFileSync(`${__dirname}/fixtures/rippling-upload.html`, 'utf8') : '<input id="resume" type="file">';
+  const document = new JSDOM(markup, {url}).window.document;
+  document.defaultView.HTMLElement.prototype.getClientRects = () => [{width: 100, height: 20}];
   const window = document.defaultView, worker = createWorker(document);
   // jsdom 26.1.0 has no DataTransfer: https://github.com/jsdom/jsdom/tree/26.1.0/lib/jsdom/living
   window.DataTransfer = class {
     files = [];
     items = {add: file => this.files.push(file)};
   };
-  const input = document.getElementById('resume'), events = [], calls = [];
+  const input = document.querySelector('input'), events = [], calls = [];
   Object.defineProperty(input, 'files', {value: [], writable: true});
   for (const type of ['input', 'change']) input.addEventListener(type, event => events.push(event.type));
-  const tab = {id: 4, url: 'https://jobs.lever.co/acme/apply'};
+  const tab = {id: 4, url};
   const ui = {id: 'extension', url: 'chrome-extension://extension/sidepanel.html'};
   const active = {id: 1, title: 'Engineer', company: 'Acme', source: 'hotfix'};
   const chrome = {runtime: {id: 'extension', getURL: path => `chrome-extension://extension/${path}`},
@@ -44,7 +47,8 @@ for (const existing of [true, false]) test(`panel and resume attachment; existin
     const {fields} = JSON.parse(options.body);
     return {ok: true, json: async () => ({resume_draft_id: generated ? 9 : null,
       resume_draft: generated ? draft : null, cover_letter_draft_id: null,
-      actions: fields.map(field => ({ref: field.ref, action: 'upload', file: 'resume'}))})};
+      actions: fields.map(field => field.name === 'cover_letter' ? {ref: field.ref, action: 'leave'} :
+        {ref: field.ref, action: 'upload', file: 'resume'})})};
   });
   const sender = {id: 'extension', tab, frameId: 7, url: tab.url};
   await background.handle({type: 'register'}, sender);
