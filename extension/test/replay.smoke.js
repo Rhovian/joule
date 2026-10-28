@@ -28,7 +28,11 @@ test('URL-only runner writes the same private trace through a real joule server'
       response.end('<form method="post" action="/leak-native"><label for="email">Email</label><input id="email" type="email" required><button>Submit application</button></form>');
       return;
     }
-    response.end(`<button type="button">Apply</button><form method="post" novalidate action="/leak-native">
+    // Rippling places a CSS-hidden native upload before its visible identity inputs.
+    response.end(`<input type="file" style="display:none" aria-label="Hidden upload">
+      <textarea style="display:none" aria-label="Hidden textarea"></textarea>
+      <select style="display:none" aria-label="Hidden select"><option></option></select>
+      <button type="button">Apply</button><form method="post" novalidate action="/leak-native">
       <div><label for="email">Email</label><input id="email" type="email" required aria-errormessage="err"><span id="err" hidden></span></div>
       <div><label for="missing">A required custom answer</label><input id="missing" required></div>
       <script>document.querySelector('form').addEventListener('submit', event => {
@@ -67,6 +71,7 @@ test('URL-only runner writes the same private trace through a real joule server'
     assert.equal(trace.version, 1);
     assert.equal(trace.job_id, null);
     assert.equal(trace.fields.find(row => row.label === 'Email').outcome, 'written');
+    assert.ok(!trace.fields.some(row => row.label.startsWith('Hidden')));
     const email = trace.fields.find(row => row.label === 'Email');
     assert.ok(!email.signals.includes('aria-invalid'));
     assert.ok(email.signals.includes('submit-aria-invalid'));

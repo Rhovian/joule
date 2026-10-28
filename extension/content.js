@@ -21,7 +21,7 @@
       element.closest('fieldset')?.querySelector('legend, :scope > .ashby-application-form-question-title')?.textContent.trim() || label(element);
     const group = element => element.matches('.ashby-application-form-input-yesno');
     const autocomplete = element => element.matches('.ashby-application-form-input-autocomplete');
-    const controlName = element => element.name || fieldRoot(element)?.dataset.fieldPath || '';
+    const controlName = element => element.name || ripplingUpload(element)?.name || fieldRoot(element)?.dataset.fieldPath || '';
     const controlType = element => group(element) ? 'button-group' : element.type || '';
     const allControls = () => [...document.querySelectorAll('input,textarea,select,.ashby-application-form-input-yesno')]
       .filter(element => !element.closest('#candidatePronounsCheckboxes'))
@@ -44,9 +44,22 @@
       const title = dropzone?.parentElement?.parentElement?.parentElement?.querySelector(':scope > span[class^="bodyImportant-"]');
       return dropzone?.matches('[role="presentation"][tabindex="0"]') && title ? {dropzone, title} : null;
     }
+    function ripplingUpload(element) {
+      // Captured 2026-10-28: native input is display:none; its visible label owns the ARIA title.
+      // https://ats.rippling.com/d-wave-quantum/jobs/e8e5f61e-4338-4908-986b-354348a0e954/apply
+      // jsdom 26.1.0 exposes attributes/layout primitives, not ATS upload descriptors:
+      // https://github.com/jsdom/jsdom/tree/26.1.0/lib/jsdom/living
+      if (window.location.hostname !== 'ats.rippling.com' || element.type !== 'file') return null;
+      const dropzone = element.parentElement, name = dropzone?.dataset.testid;
+      if (!dropzone?.matches('label') || !['resume', 'cover_letter'].includes(name) ||
+          element.dataset.testid !== `input-${name}`) return null;
+      const title = (dropzone.getAttribute('aria-labelledby') || '').split(/\s+/)
+        .filter(id => id.endsWith('-label')).map(id => document.getElementById(id)).find(Boolean);
+      return title ? {dropzone, title, name} : null;
+    }
     function visible(element) {
       if (!element.isConnected || element.disabled || element.readOnly || element.matches(':disabled') || element.type === 'hidden') return false;
-      const upload = gemUpload(element);
+      const upload = gemUpload(element) || ripplingUpload(element);
       if (upload) return !element.hidden && element.getAttribute('aria-hidden') !== 'true' && visible(upload.dropzone);
       for (let node = element; node?.nodeType === 1; node = node.parentElement) {
         const style = window.getComputedStyle(node);
@@ -55,6 +68,8 @@
       return element.type === 'file' || [...element.getClientRects()].some(rect => rect.width > 0 && rect.height > 0);
     }
     function label(element) {
+      const upload = ripplingUpload(element);
+      if (upload) return upload.title.textContent.trim();
       if (element.type !== 'radio' && leverTitle(element)) return leverTitle(element).textContent.trim();
       const explicit = [...document.querySelectorAll('label[for]')].find(node => node.htmlFor === element.id && element.id);
       const wrapping = element.closest('label');

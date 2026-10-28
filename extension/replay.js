@@ -35,7 +35,10 @@ async function replay(url, origin = 'http://localhost:8000', headed = false) {
     const page = await context.newPage();
     await page.goto(url, {waitUntil: 'domcontentloaded', timeout: 60000});
     await page.locator('input:not([type=hidden]),textarea,select,iframe').first().waitFor({state: 'attached', timeout: 30000});
-    await Promise.any(page.frames().map(frame => frame.locator('input:not([type=hidden]),textarea,select').first()
+    // Filter before first(): a CSS-hidden upload may precede the visible form controls.
+    // Playwright 1.56.1 retries :visible selectors as the page renders:
+    // https://github.com/microsoft/playwright/blob/v1.56.1/docs/src/other-locators.md#css-matching-only-visible-elements
+    await Promise.any(page.frames().map(frame => frame.locator('input:not([type=hidden]):visible,textarea:visible,select:visible').first()
       .waitFor({state: 'visible', timeout: 30000})));
     const ui = await context.newPage();
     await ui.goto(`chrome-extension://${id}/options.html`);
