@@ -88,10 +88,11 @@ function createBackground(chrome, fetcher = fetch) {
       // The bank is shared across Jobs. Auto-detection's transient/changed active Job must not cancel a Save.
       return api('/api/fill/answers', answer);
     }
-    const {active} = message.type === 'replay' ? {active: {id: null, source: 'replay'}} : await chrome.storage.session.get('active');
-    if (!active || active.source === 'upwork') throw Error('Pick a non-Upwork Job first');
+    const {active} = await chrome.storage.session.get('active');
+    const diagnosticOnly = message.type === 'replay' && !active;
+    if (!diagnosticOnly && (!active || active.source === 'upwork')) throw Error('No Job selected. Pick a non-Upwork Job before Fill can attach a Tailored CV');
     async function match(fields) {
-      try { return await api(message.type === 'replay' ? '/api/fill/replay-match' : `/api/fill/jobs/${integer(active.id)}/match`, {fields}); }
+      try { return await api(diagnosticOnly ? '/api/fill/replay-match' : `/api/fill/jobs/${integer(active.id)}/match`, {fields}); }
       catch (error) {
         if (error.status === 404) await chrome.storage.session.remove('active');
         error.message = `Fill matching failed: ${error.message}`;
@@ -132,7 +133,7 @@ function createBackground(chrome, fetcher = fetch) {
     const requestId = crypto.randomUUID();
     const request = {tabId: tab.id, frames: new Map()};
     pending.set(requestId, request);
-    const trace = {version: 1, url: tab.url, job_id: active.id, fields: [], errors: []};
+    const trace = {version: 1, url: tab.url, job_id: active?.id ?? null, fields: [], errors: []};
     const traceFailure = error => `Diagnostic trace could not be saved (${error.message}).` +
       ([404, 405].includes(error.status) ? ' Update and restart the joule server; its trace endpoint is unavailable.' : '');
     try {
@@ -149,23 +150,33 @@ function createBackground(chrome, fetcher = fetch) {
       if (!fields.length) throw Error('No supported form found. Reload the ATS page if the extension was just installed.');
       if (fields.length > 200) throw Error('Form exceeds the 200-field limit');
       let result = await match(fields);
-      if (message.type === 'attach') {
-        if (message.kind === 'cover_letter' && !result.cover_letter_draft_id) throw Error('no Cover Letter Draft');
-        const actions = result.actions.filter(action => action.action === 'upload' && action.file === message.kind);
+      async function attach(kind) {
+        if (kind === 'cover_letter' && !result.cover_letter_draft_id) throw Error('no Cover Letter Draft');
+        const actions = result.actions.filter(action => action.action === 'upload' && action.file === kind);
         if (!actions.length) throw Error('No matching file input found');
-        if (message.kind === 'resume' && !result.resume_draft_id) {
+        if (kind === 'resume' && !result.resume_draft_id) {
           // Duplicate append-only versions across panels are an accepted race (§6); the panel disables its button.
           await api(`/api/jobs/${integer(active.id)}/drafts`, {kind: 'tailored_cv'});
           result = await match(fields);
         }
-        const draftId = message.kind === 'resume' ? result.resume_draft_id : result.cover_letter_draft_id;
-        if (!draftId) throw Error('no Cover Letter Draft');
+        const draftId = kind === 'resume' ? result.resume_draft_id : result.cover_letter_draft_id;
+        if (!draftId) throw Error('No Tailored CV available after generation');
         const file = await api(`/api/drafts/${integer(draftId)}/pdf`, undefined, true);
+        if (pageURL((await chrome.tabs.get(tab.id)).url) !== pageURL(tab.url) ||
+            (await chrome.storage.session.get('active')).active?.id !== active.id)
+          throw Error('Job or page changed while preparing the CV; run Fill again');
         let filled = 0;
         for (const action of actions) {
           const applied = await chrome.tabs.sendMessage(tab.id, {type: 'upload', ref: action.ref[1], file}, {frameId: action.ref[0]});
+          if (applied.error) throw Error(applied.error);
           filled += applied.filled;
+          const row = trace.fields.find(row => JSON.stringify(row.ref) === JSON.stringify(action.ref));
+          if (row && applied.filled) { row.outcome = 'written'; row.after = true; }
         }
+        return filled;
+      }
+      if (message.type === 'attach') {
+        const filled = await attach(message.kind);
         return {...result, filled, fields};
       }
       let filled = 0;
@@ -187,11 +198,21 @@ function createBackground(chrome, fetcher = fetch) {
           });
         }
       }
-      if (message.type === 'replay') return {...result, filled, fields, trace};
+      let attached = 0, resumeStatus;
+      try {
+        if (diagnosticOnly) resumeStatus = 'No matched Job; Tailored CV not attached.';
+        else if (!result.actions.some(action => action.action === 'upload' && action.file === 'resume'))
+          resumeStatus = 'No resume file input found; Tailored CV not attached.';
+        else {
+          attached = await attach('resume');
+          resumeStatus = attached ? 'Tailored CV attached.' : 'Resume input already filled or unavailable; existing file preserved.';
+        }
+      } catch (error) { resumeStatus = `Tailored CV attachment failed: ${error.message}`; }
+      if (message.type === 'replay') return {...result, filled, attached, resumeStatus, fields, trace};
       let traceFile, traceError;
       try { traceFile = (await api('/api/fill/traces', trace)).file; }
       catch (error) { traceError = traceFailure(error); }
-      return {...result, filled, fields, traceFile, traceError};
+      return {...result, filled, attached, resumeStatus, fields, traceFile, traceError};
     } catch (error) {
       if (message.type !== 'attach') {
         trace.errors.push('fill-failed');

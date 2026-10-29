@@ -47,9 +47,11 @@ async function replay(url, origin = 'http://localhost:8000', headed = false) {
       const tab = (await chrome.tabs.query({})).find(tab => tab.url === pageURL);
       if (!tab) throw Error('Application tab disappeared');
       await chrome.scripting.executeScript({target: {tabId: tab.id, allFrames: true}, files: ['content.js']});
+      const detection = await chrome.runtime.sendMessage({type: 'detect', tabId: tab.id});
+      if (detection.error) throw Error(detection.error);
       const response = await chrome.runtime.sendMessage({type: 'replay', tabId: tab.id});
       if (response.error) throw Error(response.error);
-      return {trace: response.value.trace, filled: response.value.filled, tabId: tab.id};
+      return {trace: response.value.trace, filled: response.value.filled, attached: response.value.attached, resumeStatus: response.value.resumeStatus, tabId: tab.id};
     }, {origin, pageURL: page.url()});
     result.trace.validation = await submitValidation(context, page);
     const trace = result.trace.validation.status === 'clicked' ?
@@ -58,7 +60,7 @@ async function replay(url, origin = 'http://localhost:8000', headed = false) {
     const saved = await fetch(`${origin}/api/fill/traces`, {method: 'POST',
       headers: {'Content-Type': 'application/json'}, body: JSON.stringify(trace)});
     if (!saved.ok) throw Error(`Trace save failed: joule HTTP ${saved.status}`);
-    return {filled: result.filled, file: (await saved.json()).file, validation: trace.validation.status};
+    return {filled: result.filled, attached: result.attached, resumeStatus: result.resumeStatus, file: (await saved.json()).file, validation: trace.validation.status};
   } finally {
     if (context) await context.close();
     await fs.rm(temporary, {recursive: true, force: true});
@@ -68,7 +70,7 @@ if (require.main === module) {
   const args = process.argv.slice(2);
   if (!args[0]) { console.error('Usage: npm run replay -- URL [JOULE_ORIGIN] [--headed]'); process.exitCode = 1; }
   else replay(args[0], args[1] && !args[1].startsWith('--') ? args[1] : undefined, args.includes('--headed'))
-    .then(result => console.log(`${result.filled} filled; validation: ${result.validation}; trace: ${result.file}`))
+    .then(result => console.log(`${result.filled} filled; ${result.attached} attached; ${result.resumeStatus} validation: ${result.validation}; trace: ${result.file}`))
     .catch(error => { console.error(`Replay failed: ${error.message}`); process.exitCode = 1; });
 }
 module.exports = {replay};

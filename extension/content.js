@@ -107,14 +107,14 @@
     // https://github.com/JedWatson/react-select/blob/react-select%405.10.2/packages/react-select/src/Select.tsx
     // jsdom 26.1.0 supplies MutationObserver, but no wait-for-widget-state helper:
     // https://github.com/jsdom/jsdom/tree/26.1.0#unimplemented-parts-of-the-web-platform
-    function waitFor(predicate) {
+    function waitFor(predicate, timeout = 1500) {
       return new Promise(resolve => {
         let timer;
         const observer = new window.MutationObserver(check);
         function finish(value) { observer.disconnect(); window.clearTimeout(timer); resolve(value); }
         function check() { const value = predicate(); if (value) finish(value); }
         observer.observe(document, {subtree: true, childList: true, attributes: true});
-        timer = window.setTimeout(() => finish(null), 1500);
+        timer = window.setTimeout(() => finish(null), timeout);
         check();
       });
     }
@@ -380,9 +380,18 @@
       const bytes = Uint8Array.from(window.atob(file.base64), char => char.charCodeAt(0));
       const transfer = new window.DataTransfer();
       transfer.items.add(new window.File([bytes], file.name, {type: 'application/pdf'}));
+      const uploadRoot = element.closest('.file-upload');
       element.files = transfer.files;
       for (const type of ['input', 'change']) element.dispatchEvent(new window.Event(type, {bubbles: true}));
       element.style.outline = '2px solid #25854a';
+      // Greenhouse io commits the uploaded URL only when its filename replaces progress.
+      // https://job-boards.cdn.greenhouse.io/assets/entry.client-2CybloNd.js
+      // jsdom 26.1.0 has no ATS upload-completion helper (source linked above).
+      if (uploadRoot) return waitFor(() => uploadRoot.querySelector('.file-upload__filename') ||
+        uploadRoot.querySelector('[id$="-error"]')?.textContent.trim(), 30000).then(() => {
+        if (!uploadRoot.querySelector('.file-upload__filename')) throw Error('Resume upload was not confirmed');
+        return {filled: 1};
+      });
       return {filled: 1};
     }
     function answer(expected) {
@@ -437,7 +446,10 @@
         Promise.resolve(worker.apply(message.actions, message.expected)).then(respond, () => respond({filled: 0}));
         return true;
       }
-      if (message.type === 'upload') respond(worker.upload(message.ref, message.file));
+      if (message.type === 'upload') {
+        Promise.resolve().then(() => worker.upload(message.ref, message.file)).then(respond, () => respond({filled: 0, error: 'Resume upload was not confirmed'}));
+        return true;
+      }
       if (message.type === 'answer') {
         try { respond(worker.answer(message.expected)); }
         catch (error) { respond({error: error.message}); }

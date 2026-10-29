@@ -77,12 +77,13 @@ element('fill').addEventListener('click', () => run(async () => {
   await refreshDrafts();
   element('remaining').replaceChildren();
   const descriptor = ref => result.fields.find(field => field.ref[0] === ref[0] && field.ref[1] === ref[1]);
-  const remaining = result.actions.filter(action => action.action !== 'set');
+  const attachedResume = action => action.action === 'upload' && action.file === 'resume' && result.attached > 0;
+  const remaining = result.actions.filter(action => action.action !== 'set' && !attachedResume(action));
   const listed = result.actions
     .sort((a, b) => Number(descriptor(b.ref)?.required) - Number(descriptor(a.ref)?.required));
   for (const action of listed) {
     const field = descriptor(action.ref), item = document.createElement('li');
-    item.textContent = `${field?.required ? 'Required · ' : ''}${field?.label || field?.id || 'Field'}: ${action.action}${action.reason ? ` — ${action.reason}` : ''}`;
+    item.textContent = `${field?.required ? 'Required · ' : ''}${field?.label || field?.id || 'Field'}: ${attachedResume(action) ? 'attached' : action.action}${action.reason ? ` — ${action.reason}` : ''}`;
     if (action.action === 'ask') {
       const button = document.createElement('button');
       button.textContent = 'Ask';
@@ -105,7 +106,7 @@ element('fill').addEventListener('click', () => run(async () => {
     }
     element('remaining').append(item);
   }
-  element('status').textContent = `${result.filled} filled; ${remaining.length} remaining. Review the form.${result.traceError ? ` ${result.traceError}` : ' Trace saved.'}`;
+  element('status').textContent = `${result.filled} filled; ${remaining.length} remaining. ${result.resumeStatus || ""} Review the form.${result.traceError ? ` ${result.traceError}` : ' Trace saved.'}`;
 }));
 for (const [id, kind] of [['attach', 'resume']]) {
   element(id).addEventListener('click', () => run(async () => {

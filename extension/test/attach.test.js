@@ -83,3 +83,60 @@ for (const site of ['lever', 'rippling']) for (const existing of [true, false]) 
   assert.match(element('resume').textContent, /Tailored CV v2/);
   assert.equal(element('status').textContent, '1 attached. Review the form.');
 });
+
+for (const mode of ['reuse', 'generate', 'missing-input', 'failure', 'changed']) test(`Fill CV: ${mode}`, async () => {
+  const active = {id: 1, source: 'hotfix'}, tab = {id: 4, url: 'https://jobs.lever.co/acme/apply'};
+  const chrome = {runtime: {id: 'ext', getURL: p => `chrome-extension://ext/${p}`},
+    storage: {local: storage({origin: 'http://localhost:8000'}), session: storage({active, 'frames:4': {7: tab.url}})},
+    tabs: {get: async () => tab}};
+  const sender = {id: 'ext', url: 'chrome-extension://ext/sidepanel.html'};
+  let background, generated = mode !== 'generate', generations = 0, uploads = 0, complete = false;
+  let release; const pendingUpload = new Promise(resolve => { release = resolve; });
+  background = createBackground(chrome, async (url, options) => {
+    if (url.endsWith('/drafts')) { generated = true; generations++; return {ok: true, json: async () => ({})}; }
+    if (url.endsWith('/pdf')) {
+      if (mode === 'changed') await chrome.storage.session.set({active: {id: 2}});
+      return {ok: mode !== 'failure', status: 502,
+        headers: new Headers({'Content-Disposition': 'inline; filename="CV.pdf"'}),
+        arrayBuffer: async () => new ArrayBuffer(1)};
+    }
+    if (url.endsWith('/traces')) return {ok: true, json: async () => ({file: '/trace'})};
+    return {ok: true, json: async () => ({resume_draft_id: generated ? 9 : null,
+      actions: mode === 'missing-input' ? [] : [{ref: [7, 0], action: 'upload', file: 'resume'}]})};
+  });
+  chrome.tabs.sendMessage = async (id, message, target) => {
+    assert.equal(target.frameId, 7);
+    if (message.type === 'describe') return background.handle({type: 'frame', request: message.request,
+      fields: [{ref: 0, id: 'resume', type: 'file'}]}, {id: 'ext', tab, frameId: 7, url: tab.url});
+    if (message.type === 'trace-apply') return {filled: 2, trace: []};
+    uploads++; await pendingUpload; return {filled: 1};
+  };
+  const filling = background.handle({type: 'fill', tabId: 4}, sender).then(result => { complete = true; return result; });
+  await new Promise(resolve => setImmediate(resolve));
+  if (['reuse', 'generate'].includes(mode)) { assert.equal(uploads, 1); assert.equal(complete, false); }
+  release(); const result = await filling;
+  assert.equal(result.filled, 2);
+  assert.equal(generations, mode === 'generate' ? 1 : 0);
+  assert.equal(result.attached, ['reuse', 'generate'].includes(mode) ? 1 : 0);
+  assert.match(result.resumeStatus, mode === 'missing-input' ? /No resume file input/ :
+    ['failure', 'changed'].includes(mode) ? /attachment failed/ : /Tailored CV attached/);
+  await chrome.storage.session.set({active: null});
+  await assert.rejects(background.handle({type: 'fill', tabId: 4}, sender), /No Job selected/);
+});
+
+test('Greenhouse upload waits for its committed filename and reports an upload error', async () => {
+  for (const success of [true, false]) {
+    const document = new JSDOM('<div class="file-upload"><div><input id="resume" type="file"></div></div>').window.document;
+    const window = document.defaultView, input = document.querySelector('input'), root = document.querySelector('.file-upload');
+    window.DataTransfer = class { files = []; items = {add: file => this.files.push(file)}; };
+    Object.defineProperty(input, 'files', {value: [], writable: true});
+    input.addEventListener('change', () => input.parentElement.remove());
+    const worker = createWorker(document); worker.describe();
+    let done = false;
+    const uploading = worker.upload(0, {name: 'CV.pdf', base64: 'JVBERg=='}).finally(() => { done = true; });
+    await new Promise(resolve => setImmediate(resolve)); assert.equal(done, false);
+    root.innerHTML = success ? '<div class="file-upload__filename">CV.pdf</div>' : '<p id="resume-error">Upload failed</p>';
+    if (success) assert.equal((await uploading).filled, 1);
+    else await assert.rejects(uploading, /upload was not confirmed/);
+  }
+});
