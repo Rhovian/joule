@@ -3,9 +3,11 @@
 Accepted: 2026-10-14. Parent issue: #74. Implementation is delivered in the independent slices in §10.
 Status: final record, operator rulings incorporated (Q1 no token, Q2 shared answers, Q3 ignore sensitive fields, Q4 keep Greenhouse custom-host pages; operator tests manually). Author: designer (sole). This record describes the complete design; slice 1 implements identity matching only.
 
+Amended: 2026-10-29, operator-approved automatic Tailored CV attachment (D9). This supersedes the original explicit-only resume attachment decision in §3c and D9. The operator requested "next, fill should generate the CV and attach it as well" and ruled "#1 existing is fine" (reuse the latest Tailored CV; generate only when none exists) and "wait for the CV before it reports done" (Fill waits for attachment before completing).
+
 ## 0. Summary
 
-A personal unpacked MV3 Chrome extension, plus a small joule router `/api/fill/*`. The operator opens an employer-hosted ATS form, picks (or already has) the active Job, clicks **Fill**: joule returns values for identity fields (name, email, phone, LinkedIn, GitHub, site, current company) and the extension writes them into empty fields and attaches the latest Tailored CV PDF. Fields it can't match are listed; the operator clicks **Ask** per field to get a Codex answer from the Profile/`answers.yaml`. The extension never submits and never touches `jobs.state`; "applied" stays the operator's `a` key.
+A personal unpacked MV3 Chrome extension, plus a small joule router `/api/fill/*`. The operator opens an employer-hosted ATS form, picks (or already has) the active Job, clicks **Fill**: joule returns values for identity fields (name, email, phone, LinkedIn, GitHub, site, current company) and the extension writes them into empty fields and automatically attaches the latest Tailored CV PDF, generating one only when none exists for that Job. Fill waits for attachment before reporting completion. Fields it can't match are listed; the operator clicks **Ask** per field to get a Codex answer from the Profile/`answers.yaml`. The extension never submits and never touches `jobs.state`; "applied" stays the operator's `a` key.
 
 Reuses unchanged: `drafts.answer`/`context()` (Profile + `answers.yaml` prompt), `drafts.write` (Tailored CV), `GET /drafts/{id}/pdf`, `GET /api/jobs`, `cv.load`, `ai.structured` sandbox (read-only, tools disabled).
 
@@ -92,7 +94,7 @@ Also rejected: `Origin: chrome-extension://<id>` allowlist (forgeable by any non
 3. **Fill**: SW asks every frame of the tab for descriptors (content scripts push `{frameId, descriptors}`; refs are `(frameId,index)`), POSTs `/api/fill/jobs/{id}/match`.
 4. Response per ref: `set{value}`, `upload{file}`, `ask`, `leave{reason}`; plus `resume_draft_id`, `cover_letter_draft_id` (latest rows or null).
 5. Content scripts apply `set` with the native value setter + `input`/`change` (React-controlled inputs), highlight touched fields. Panel lists counts and every `ask`/`leave` field with reason.
-6. **Attach resume**: panel button (explicit, never automatic). If `resume_draft_id` null → `POST /api/jobs/{id}/drafts {kind:"tailored_cv"}` (spinner; up to the 300 s Codex timeout), re-match. SW `fetch`es `GET /drafts/{id}/pdf`, reads filename from `Content-Disposition` (`files.cv_prefix`+company, e.g. `JB_CV_Acme.pdf`), base64 → content script → `File` → `DataTransfer` → `input.files`, then `input`/`change`. Base64 because Chrome message passing is JSON; content-script fetch is not allowed (page origin rules).
+6. **Fill automatically attaches the Tailored CV** for the selected Job when a resume file input is available. Reuse the latest `resume_draft_id`; only if it is null → `POST /api/jobs/{id}/drafts {kind:"tailored_cv"}` (spinner; up to the 300 s Codex timeout), re-match. SW `fetch`es `GET /drafts/{id}/pdf`, reads filename from `Content-Disposition` (`files.cv_prefix`+company, e.g. `JB_CV_Acme.pdf`), base64 → content script → `File` → `DataTransfer` → `input.files`, then `input`/`change`. Fill waits for generation and attachment before reporting completion; no selected Job, no resume file input, or an attachment failure produces an explicit Fill result. Existing resume files are preserved. **Attach resume** remains available as a separate action. Base64 because Chrome message passing is JSON; content-script fetch is not allowed (page origin rules).
 7. Cover letter textarea: `set` from latest `cover_letter` draft `text`; cover-letter file input: same PDF path via `/drafts/{id}/pdf`. No draft → `leave "no Cover Letter Draft"`; extension never generates one.
 8. Operator reviews, edits, submits themselves, returns to dashboard, presses `a`.
 9. Re-clicking Fill is idempotent (invariant 4): covers ATS resume-parsers that repopulate or clear fields after upload. Whether they overwrite is **unverified** until the live trial.
@@ -169,7 +171,7 @@ None. No row, file or key is deleted or stops being kept. `answers.yaml` gains e
 
 ## 8. Timeline (real use)
 
-Wed 2026-10-14. 09:00 Scan finds Hotfix "Staff Backend Engineer, Acme" → Ashby link, Fit 82. 09:10 operator writes a Tailored CV in the drawer (≈1 min). 09:12 opens the Ashby page, side panel header "Staff Backend Engineer — Acme (hotfix)". Fill: name, email, phone, LinkedIn set (4 fields); 2 custom questions and a location combobox listed. Attach resume → `JB_CV_Acme.pdf` appears in the uploader. Ask "Why do you want to work at Acme?" → 20 s → edited. Work-authorization select: bank hit from 3 weeks ago replays. Operator reads, clicks Submit. 09:20 back on dashboard, `a`. Extension never knew. If the operator forgets `a`, the Job reappears in the list; nothing automatic.
+Wed 2026-10-14. 09:00 Scan finds Hotfix "Staff Backend Engineer, Acme" → Ashby link, Fit 82. 09:10 operator writes a Tailored CV in the drawer (≈1 min). 09:12 opens the Ashby page, side panel header "Staff Backend Engineer — Acme (hotfix)". Fill: name, email, phone, LinkedIn set (4 fields); 2 custom questions and a location combobox listed. Under amended D9, that same Fill also attaches the existing `JB_CV_Acme.pdf` before reporting completion; if no Tailored CV had been prepared, Fill would generate one first. Ask "Why do you want to work at Acme?" → 20 s → edited. Work-authorization select: bank hit from 3 weeks ago replays. Operator reads, clicks Submit. 09:20 back on dashboard, `a`. Extension never knew. If the operator forgets `a`, the Job reappears in the list; Job state remains manual.
 
 ## 9. Decisions
 
@@ -183,7 +185,7 @@ Wed 2026-10-14. 09:00 Scan finds Hotfix "Staff Backend Engineer, Acme" → Ashby
 | D6 | Matching: one generic engine in joule + hint rows; no adapters (§3a) | designer |
 | D7 | Auth: no token, no new credential; boundary hardening (§3b). Ruling: "no token" | operator |
 | D8 | Side panel UI, not injected page UI | designer |
-| D9 | Resume attach is explicit; Tailored CV generated only on click | designer |
+| D9 | Amended 2026-10-29: Fill automatically attaches the latest Tailored CV, generates one only when none exists, and waits for attachment before completing. Rulings: "#1 existing is fine"; "wait for the CV before it reports done". Supersedes the original explicit-only resume attachment decision. | operator |
 | D10 | Sensitive/consent fields ignored: left untouched, no generation, no replay. Ruling: "usually optional, ignore" | operator (mechanism: designer) |
 | D11 | Saved answers share the existing `answers.yaml`. Ruling: "shared answers" | operator |
 | D12 | Combobox widgets `leave` in v1 | designer |
@@ -210,7 +212,7 @@ Each merges alone and keeps `uv run pytest && ruff` green; usable value starts a
 | --- | --- | --- | --- |
 | 1 | **Match API (identity)**: `joule/fill.py`, router wired, glossary, spec §13, ADR | Fixtures (Greenhouse, Lever, Ashby-by-doc) classify first/last/full name, email, phone, LinkedIn (custom-question label), GitHub, portfolio, current company; file inputs → resume/cover_letter; unmatched → `ask`; combobox/hidden/consent → `leave`; Upwork Job 400; non-Primary 404; limits enforced; `jobs.state` unchanged; text/plain POST rejected; no CORS headers | 190 / 240 |
 | 2 | **Extension: connect + fill text** (manifest, options, SW, content script on 5 ATS hosts, side panel, picker, Fill) | Options Test succeeds against a local joule; picker lists non-Upwork Jobs; Fill sets identity fields on Greenhouse and Lever fixtures in jsdom, skips non-empty and hidden; no submit call exists (grep test); denylist hosts refused | 380 / 200 |
-| 3 | **Resume and cover letter attach** | Panel shows latest Tailored CV version/date or "Generate"; generate path calls existing drafts endpoint; file lands in `input.files` with `JB_CV_<company>.pdf`; change events fire; match returns both draft ids | 110 / 90 |
+| 3 | **Resume and cover letter attach** | Panel shows latest Tailored CV version/date or "Generate"; Fill reuses the latest Tailored CV, generates only when none exists through the existing drafts endpoint, and waits for attachment before completing; missing Job/input and attachment failures are reported; file lands in `input.files` with `JB_CV_<company>.pdf`; change events fire; match returns both draft ids | 110 / 90 |
 | 4 | **Ask + bank replay** | Ask returns text or option value; sensitive question returns null without invoking `ai.structured` (test fails if guard removed); prompt contains label inside untrusted block; out-of-list value rejected; exact `answers.yaml` hit replays in match with no Codex, except a sensitive label, which stays `leave` even when the bank has it; select maps saved answer to option | 180 / 160 |
 | 5 | **Unknown-site injection** | Context-menu/command injects on a non-listed host with only `activeTab`; refused on `*.upwork.com`/`linkedin`/`indeed`/`glassdoor`; no `<all_urls>` in manifest (test reads manifest) | 60 / 40 |
 | 6 | **Save to bank** | Saved question/answer appears on next match as a replay; two saves leave parseable list; >200 KB refused; state untouched | 50 / 60 |
@@ -220,7 +222,7 @@ Totals ≈ 1000 prod / 820 test. Over-target rule: re-budget from the measured d
 
 ## 11. Done-when map
 
-The brief's issue is a request, not a checklist; acceptance is the slice table. Operator's stated criteria map as: "less typing" → slices 2–3 identity+resume without retyping; "minutes saved" and "field accuracy" → judged by the operator's own manual testing in slice 7 (no telemetry built: nothing automated reports them, acceptable at one user), backed by the classifier's fixture tests; "no budget" → no paid components, Codex use only on explicit Ask/Generate.
+The brief's issue is a request, not a checklist; acceptance is the slice table. Operator's stated criteria map as: "less typing" → slices 2–3 identity+resume without retyping; "minutes saved" and "field accuracy" → judged by the operator's own manual testing in slice 7 (no telemetry built: nothing automated reports them, acceptable at one user), backed by the classifier's fixture tests; "no budget" → no paid components, Codex use only on Ask, explicit Generate, or Fill when the selected Job has no Tailored CV (amended D9).
 
 ## 12. Security: yes
 
