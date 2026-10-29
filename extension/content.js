@@ -340,6 +340,11 @@
           if (result.filled && !remoteSave(element) && !group(element) && !combo(element)) {
             element.focus(); await Promise.resolve(); element.blur();
           }
+          // Greenhouse Cn/dt replace form state from a render snapshot. Allow a render
+          // between writes; a zero-delay task still races in the isolated world.
+          // https://job-boards.cdn.greenhouse.io/assets/entry.client-2CybloNd.js
+          // react-select 5.10.2 confirms only its own state (Select.tsx linked above).
+          if (result.filled) await new Promise(resolve => window.setTimeout(resolve, 50));
         } catch { row.outcome = 'error'; row.error = 'apply-failed'; }
         rows.push(row);
       }
