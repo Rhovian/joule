@@ -157,7 +157,7 @@ function createBackground(chrome, fetcher = fetch) {
         if (kind === 'resume' && !result.resume_draft_id) {
           // Duplicate append-only versions across panels are an accepted race (§6); the panel disables its button.
           await api(`/api/jobs/${integer(active.id)}/drafts`, {kind: 'tailored_cv'});
-          result = await match(fields);
+          result = {...await match([]), actions: result.actions};
         }
         const draftId = kind === 'resume' ? result.resume_draft_id : result.cover_letter_draft_id;
         if (!draftId) throw Error('No Tailored CV available after generation');

@@ -101,6 +101,7 @@ for (const mode of ['reuse', 'generate', 'missing-input', 'failure', 'changed'])
         arrayBuffer: async () => new ArrayBuffer(1)};
     }
     if (url.endsWith('/traces')) return {ok: true, json: async () => ({file: '/trace'})};
+    if (generations) assert.deepEqual(JSON.parse(options.body).fields, []); // No second AI batch.
     return {ok: true, json: async () => ({resume_draft_id: generated ? 9 : null,
       actions: mode === 'missing-input' ? [] : [{ref: [7, 0], action: 'upload', file: 'resume'}]})};
   });

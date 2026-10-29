@@ -118,7 +118,7 @@
         check();
       });
     }
-    const sensitive = element => /\b(eeo|demograph\w*|disab\w*|veteran\w*|pronouns?|criminal|consent|attest\w*|privacy|race|ethnic\w*|hispanic|latino|gender|sex|sexual|agree|agreement|certify|certification)\b/i.test(question(element));
+    const sensitive = element => /\b(eeo|demograph\w*|disab\w*|veteran\w*|pronouns?|criminal|consent|attest\w*|privacy|race|ethnic\w*|hispanic|latino|gender|sex|sexual|agree|agreement|certify|certification)\b|\b(?:would|do) you (?:also )?(?:like|want|wish) to receive\b|\b(?:record(?:ed|ing)?|transcrib(?:e|ed|ing))\b.{0,80}\binterviews?\b|\binterviews?\b.{0,80}\b(?:record(?:ed|ing)?|transcrib(?:e|ed|ing))\b/i.test(question(element).replace(/\s+/g, " "));
     async function prepare() {
       for (const element of document.querySelectorAll('[role=combobox]')) {
         if (autocomplete(element)) continue; // Ashby location results exist only after a search query.
@@ -141,7 +141,7 @@
       for (const action of actions) {
         const element = controls[action.ref];
         if (!element || !combo(element)) { filled += (await apply([action])).filled; continue; }
-        if (action.action !== 'set' || typeof action.value !== 'string' || !required(element) || !emptyCombo(element)) continue;
+        if (action.action !== 'set' || typeof action.value !== 'string' || !required(element) || !emptyCombo(element) || sensitive(element)) continue;
         element.focus();
         key(element, 'ArrowDown');
         // Async city widgets need a query before options exist; never accept free text as a selection.

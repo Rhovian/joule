@@ -156,3 +156,13 @@ test('committed widget yields for parent form state before the next field write'
   assert.equal(form.location, 'Denver, Colorado, United States', 'submit requires stored location');
   assert.equal(form.linkedin, 'https://example.com/profile');
 });
+
+test('communication and interview recording consent menus stay untouched even with a supplied answer', async () => {
+  for (const label of ['Would you also like to receive communications via SMS?', 'We record and transcribe interviews.']) {
+    const {document, worker, input} = widget(); input.labels[0].textContent = label + '*';
+    let events = 0; input.addEventListener('keydown', () => events++);
+    await worker.prepare(); worker.describe();
+    assert.deepEqual((await worker.apply(set('Yes'))), {filled: 0});
+    assert.equal(events, 0); assert.equal(input.value, '');
+  }
+});
