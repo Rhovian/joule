@@ -135,3 +135,24 @@ test('Greenhouse controlled menu opens on keyup before Ask selects, then survive
   assert.equal(input.value, '');
   assert.equal(worker.answer(field).answer, 'Yes');
 });
+
+test('committed widget yields for parent form state before the next field write', async () => {
+  const {document, worker} = widget({choices: ['Denver, Colorado, United States']});
+  const next = document.createElement('input'); next.id = 'linkedin'; document.body.append(next);
+  let form = {}, renderSnapshot = form;
+  // Greenhouse Cn/dt use render snapshots; react-select can show a value first.
+  document.addEventListener('click', event => {
+    if (event.target.getAttribute('role') !== 'option') return;
+    form = {...renderSnapshot, location: event.target.textContent};
+    document.defaultView.setTimeout(() => { renderSnapshot = form; }, 10);
+  });
+  next.addEventListener('input', () => { form = {...renderSnapshot, linkedin: next.value}; });
+  worker.describe();
+  const result = await worker.traceApply([
+    {ref: 0, action: 'set', value: 'Denver, Colorado, United States'},
+    {ref: 1, action: 'set', value: 'https://example.com/profile'},
+  ]);
+  assert.equal(result.filled, 2);
+  assert.equal(form.location, 'Denver, Colorado, United States', 'submit requires stored location');
+  assert.equal(form.linkedin, 'https://example.com/profile');
+});
