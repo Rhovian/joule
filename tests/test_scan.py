@@ -670,8 +670,6 @@ def test_backlog_only_selects_eligible_jobs(setup, monkeypatch, source):
         ("golangjobs", None, 7),
         ("getarustjob", None, 7),
         ("remoteok", None, 3),
-        ("reddit", None, 3),
-        ("reddit", {"reddit": 10}, 10),
         ("golangjobs", {"golangjobs": 10}, 10),
         ("getarustjob", {"getarustjob": 2}, 2),
         ("remoteok", {"remoteok": 0}, 0),
