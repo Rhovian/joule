@@ -1,6 +1,7 @@
 import asyncio
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from xml.etree.ElementTree import ParseError
 
 import httpx
@@ -9,6 +10,13 @@ import pytest
 from joule.scan import ADAPTERS
 
 URLS = [f"https://www.reddit.com/r/{sub}/new/.rss" for sub in ("forhire", "hiring")]
+
+
+@pytest.fixture(autouse=True)
+def sleep(monkeypatch):
+    mock = AsyncMock()
+    monkeypatch.setattr(asyncio, "sleep", mock)
+    return mock
 
 
 def entry(id="t3_one", title="[Hiring] Engineer", date="published"):
@@ -88,15 +96,57 @@ def test_empty_feeds():
     assert run(lambda r: httpx.Response(200, text=feed(""))) == []
 
 
-@pytest.mark.parametrize("status", [403, 429])
+@pytest.mark.parametrize("entries", ["", entry()])
+@pytest.mark.parametrize("failure", [403, 429, "network", "xml"])
 @pytest.mark.parametrize("url", URLS)
-def test_source_errors(status, url):
+def test_partial_failure_keeps_jobs(failure, url, entries, caplog, sleep):
+    requests = []
+
+    def respond(request):
+        requests.append(str(request.url))
+        if str(request.url) != url:
+            return httpx.Response(200, text=feed(entries))
+        if failure == "network":
+            raise httpx.ConnectError("offline", request=request)
+        return httpx.Response(200 if failure == "xml" else failure, text="<feed>")
+
+    assert len(run(respond)) == bool(entries)
+    assert requests.count(url) == (2 if failure == 429 else 1)
+    assert url in caplog.text
+    assert 5 in [call.args[0] for call in sleep.await_args_list]
+
+
+@pytest.mark.parametrize("status", [403, 429])
+def test_all_feeds_fail(status):
     with pytest.raises(httpx.HTTPStatusError, match=str(status)):
-        run(
-            lambda r: httpx.Response(
-                status if str(r.url) == url else 200, text=feed("")
-            )
-        )
+        run(lambda r: httpx.Response(status))
+
+
+@pytest.mark.parametrize(
+    "retry_after, delay",
+    [
+        (None, 15),
+        ("7", 7),
+        ("99999", 20),
+        ("invalid", 15),
+        ("-1", 0),
+        ("Thu, 29 Oct 2099 12:00:00 GMT", 20),
+        ("Thu, 29 Oct 2020 12:00:00 GMT", 0),
+    ],
+)
+def test_429_retries_once(retry_after, delay, sleep):
+    requests = []
+
+    def respond(request):
+        requests.append(str(request.url))
+        if len(requests) == 1:
+            headers = {} if retry_after is None else {"Retry-After": retry_after}
+            return httpx.Response(429, headers=headers)
+        return httpx.Response(200, text=feed(entry()))
+
+    assert len(run(respond)) == 1
+    assert requests == [URLS[0], *URLS]
+    assert [call.args[0] for call in sleep.await_args_list] == [delay, 5]
 
 
 def test_malformed_feed_is_a_source_error():
