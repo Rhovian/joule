@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import re
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from xml.etree import ElementTree
@@ -15,15 +14,6 @@ JOBS_URLS = tuple(
 )
 USER_AGENT = "joule/0.1 (job discovery; https://github.com/Rhovian/joule)"
 ATOM = "{http://www.w3.org/2005/Atom}"
-# Source vocabulary on top of stdlib word boundaries (no built-in role classifier):
-# https://docs.python.org/3.12/library/re.html
-# Bare engineer is deliberately broad; Go needs language context, unlike golang.
-SOFTWARE = re.compile(
-    r"\b(?:developers?|engineers?|programmers?|software|back[ -]?end|front[ -]?end|"
-    r"full[ -]?stack|devops|sre|golang|go (?:language|programming)|rust|python|"
-    r"javascript|typescript|react|node\.?js|java|kotlin|swift|csharp|dotnet)\b",
-    re.IGNORECASE,
-)
 
 
 def _candidate(entry: ElementTree.Element) -> Candidate | None:
@@ -39,16 +29,13 @@ def _candidate(entry: ElementTree.Element) -> Candidate | None:
     )
     if not title.lstrip().lower().startswith("[hiring]") or not source_id or not link:
         return None
-    description = entry.findtext(f"{ATOM}content")
-    if not SOFTWARE.search(f"{title} {description or ''}"):
-        return None
     published = entry.findtext(f"{ATOM}published") or entry.findtext(f"{ATOM}updated")
     return Candidate(
         source="reddit",
         source_id=source_id,
         link=link,
         title=title,
-        description=description,
+        description=entry.findtext(f"{ATOM}content"),
         posted_at=datetime.fromisoformat(published) if published else None,
     )
 
