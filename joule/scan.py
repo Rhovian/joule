@@ -20,7 +20,6 @@ from joule.sources import (
     hn,
     hotfix,
     jobspy,
-    reddit,
     remoteok,
     upwork,
     weworkremotely,
@@ -72,7 +71,6 @@ ADAPTERS = {
     "hotfix": (fetch_hotfix, enrich_hotfix),
     "upwork": (fetch_upwork, None),
     "weworkremotely": (lambda ctx: weworkremotely.search(ctx.client), None),
-    "reddit": (lambda ctx: reddit.search(ctx.client), None),
     "remoteok": (lambda ctx: remoteok.search(ctx.client), None),
     **{
         site: (partial(fetch_jobspy, site), None)
