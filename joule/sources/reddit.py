@@ -1,4 +1,7 @@
-from datetime import datetime
+import asyncio
+import logging
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from xml.etree import ElementTree
 
 import httpx
@@ -37,16 +40,42 @@ def _candidate(entry: ElementTree.Element) -> Candidate | None:
     )
 
 
+def _retry_delay(response: httpx.Response) -> float:
+    value = response.headers.get("Retry-After", "15")
+    try:
+        delay = float(value)
+    except ValueError:
+        try:
+            delay = (parsedate_to_datetime(value) - datetime.now(UTC)).total_seconds()
+        except (ValueError, TypeError, OverflowError):
+            delay = 15
+    return max(0, min(delay, 20))
+
+
 async def search(client: httpx.AsyncClient) -> list[Candidate]:
-    candidates = {}
-    for url in JOBS_URLS:
-        response = await client.get(url, headers={"User-Agent": USER_AGENT})
-        response.raise_for_status()
-        # Python 3.12 ElementTree handles Atom namespaces, but not Job selection
-        # or ID dedup: https://docs.python.org/3.12/library/xml.etree.elementtree.html
-        feed = ElementTree.fromstring(response.content)
+    candidates, failures = {}, []
+    for index, url in enumerate(JOBS_URLS):
+        if index:
+            await asyncio.sleep(5)
+        try:
+            response = await client.get(url, headers={"User-Agent": USER_AGENT})
+            # HTTPX 0.28.1 transports only retry connection failures, not 429s:
+            # https://github.com/encode/httpx/blob/0.28.1/httpx/_transports/default.py
+            if response.status_code == 429:
+                await asyncio.sleep(_retry_delay(response))
+                response = await client.get(url, headers={"User-Agent": USER_AGENT})
+            response.raise_for_status()
+            # Python 3.12 ElementTree handles Atom namespaces, but not Job selection
+            # or ID dedup: https://docs.python.org/3.12/library/xml.etree.elementtree.html
+            feed = ElementTree.fromstring(response.content)
+        except (httpx.HTTPError, ElementTree.ParseError) as error:
+            logging.getLogger(__name__).exception("Reddit feed %s failed", url)
+            failures.append(error)
+            continue
         for entry in feed.findall(f"{ATOM}entry"):
             candidate = _candidate(entry)
             if candidate is not None:
                 candidates.setdefault(candidate.source_id, candidate)
+    if len(failures) == len(JOBS_URLS):
+        raise failures[-1]
     return list(candidates.values())
