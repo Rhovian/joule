@@ -15,6 +15,7 @@ def test_missing_settings_use_defaults(tmp_path):
     assert settings.sources == [
         "hn",
         "weworkremotely",
+        "reddit",
         "remoteok",
         "upwork",
         "hotfix",

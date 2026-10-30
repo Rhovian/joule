@@ -53,6 +53,7 @@ class Models(StrictModel):
 Source = Literal[
     "hn",
     "weworkremotely",
+    "reddit",
     "remoteok",
     "web3career",
     "indeed",
@@ -73,6 +74,7 @@ class Settings(StrictModel):
         default_factory=lambda: [
             "hn",
             "weworkremotely",
+            "reddit",
             "remoteok",
             "upwork",
             "hotfix",
