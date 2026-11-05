@@ -147,13 +147,13 @@ function createBackground(chrome, fetcher = fetch) {
           fields.push({...descriptor, ref: [frameId, descriptor.ref]});
         }
       }
-      if (!fields.length) throw Error('No supported form found. Reload the ATS page if the extension was just installed.');
+      // Fill still prepares a downloadable CV when no supported controls were discovered.
+      if (!fields.length && message.type !== 'fill') throw Error('No supported form found. Reload the ATS page if the extension was just installed.');
       if (fields.length > 200) throw Error('Form exceeds the 200-field limit');
       let result = await match(fields);
-      async function attach(kind) {
+      let resumeFile;
+      async function prepareFile(kind) {
         if (kind === 'cover_letter' && !result.cover_letter_draft_id) throw Error('no Cover Letter Draft');
-        const actions = result.actions.filter(action => action.action === 'upload' && action.file === kind);
-        if (!actions.length) throw Error('No matching file input found');
         if (kind === 'resume' && !result.resume_draft_id) {
           // Duplicate append-only versions across panels are an accepted race (§6); the panel disables its button.
           await api(`/api/jobs/${integer(active.id)}/drafts`, {kind: 'tailored_cv'});
@@ -162,6 +162,13 @@ function createBackground(chrome, fetcher = fetch) {
         const draftId = kind === 'resume' ? result.resume_draft_id : result.cover_letter_draft_id;
         if (!draftId) throw Error('No Tailored CV available after generation');
         const file = await api(`/api/drafts/${integer(draftId)}/pdf`, undefined, true);
+        if (kind === 'resume') resumeFile = file;
+        return file;
+      }
+      async function attach(kind) {
+        const actions = result.actions.filter(action => action.action === 'upload' && action.file === kind);
+        if (!actions.length) throw Error('No matching file input found');
+        const file = await prepareFile(kind);
         if (pageURL((await chrome.tabs.get(tab.id)).url) !== pageURL(tab.url) ||
             (await chrome.storage.session.get('active')).active?.id !== active.id)
           throw Error('Job or page changed while preparing the CV; run Fill again');
@@ -201,18 +208,21 @@ function createBackground(chrome, fetcher = fetch) {
       let attached = 0, resumeStatus;
       try {
         if (diagnosticOnly) resumeStatus = 'No matched Job; Tailored CV not attached.';
-        else if (!result.actions.some(action => action.action === 'upload' && action.file === 'resume'))
+        else if (!result.actions.some(action => action.action === 'upload' && action.file === 'resume')) {
           resumeStatus = 'No resume file input found; Tailored CV not attached.';
+          await prepareFile('resume');
+        }
         else {
           attached = await attach('resume');
           resumeStatus = attached ? 'Tailored CV attached.' : 'Resume input already filled or unavailable; existing file preserved.';
         }
       } catch (error) { resumeStatus = `Tailored CV attachment failed: ${error.message}`; }
+      const resumeDownload = attached ? undefined : resumeFile;
       if (message.type === 'replay') return {...result, filled, attached, resumeStatus, fields, trace};
       let traceFile, traceError;
       try { traceFile = (await api('/api/fill/traces', trace)).file; }
       catch (error) { traceError = traceFailure(error); }
-      return {...result, filled, attached, resumeStatus, fields, traceFile, traceError};
+      return {...result, filled, attached, resumeStatus, resumeDownload, fields, traceFile, traceError};
     } catch (error) {
       if (message.type !== 'attach') {
         trace.errors.push('fill-failed');

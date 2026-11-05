@@ -84,16 +84,16 @@ for (const site of ['lever', 'rippling']) for (const existing of [true, false]) 
   assert.equal(element('status').textContent, '1 attached. Review the form.');
 });
 
-for (const mode of ['reuse', 'generate', 'missing-input', 'failure', 'changed']) test(`Fill CV: ${mode}`, async () => {
+for (const mode of ['reuse', 'generate', 'missing-input', 'missing-input-generate', 'failure', 'changed', 'upload-error', 'upload-error-generated', 'preserved', 'no-cv']) test(`Fill CV: ${mode}`, async () => {
   const active = {id: 1, source: 'hotfix'}, tab = {id: 4, url: 'https://jobs.lever.co/acme/apply'};
   const chrome = {runtime: {id: 'ext', getURL: p => `chrome-extension://ext/${p}`},
     storage: {local: storage({origin: 'http://localhost:8000'}), session: storage({active, 'frames:4': {7: tab.url}})},
     tabs: {get: async () => tab}};
   const sender = {id: 'ext', url: 'chrome-extension://ext/sidepanel.html'};
-  let background, generated = mode !== 'generate', generations = 0, uploads = 0, complete = false;
+  let background, generated = !['generate', 'missing-input-generate', 'upload-error-generated', 'no-cv'].includes(mode), generations = 0, uploads = 0, complete = false;
   let release; const pendingUpload = new Promise(resolve => { release = resolve; });
   background = createBackground(chrome, async (url, options) => {
-    if (url.endsWith('/drafts')) { generated = true; generations++; return {ok: true, json: async () => ({})}; }
+    if (url.endsWith('/drafts')) { generated = mode !== 'no-cv'; generations++; return {ok: true, json: async () => ({})}; }
     if (url.endsWith('/pdf')) {
       if (mode === 'changed') await chrome.storage.session.set({active: {id: 2}});
       return {ok: mode !== 'failure', status: 502,
@@ -103,24 +103,30 @@ for (const mode of ['reuse', 'generate', 'missing-input', 'failure', 'changed'])
     if (url.endsWith('/traces')) return {ok: true, json: async () => ({file: '/trace'})};
     if (generations) assert.deepEqual(JSON.parse(options.body).fields, []); // No second AI batch.
     return {ok: true, json: async () => ({resume_draft_id: generated ? 9 : null,
-      actions: mode === 'missing-input' ? [] : [{ref: [7, 0], action: 'upload', file: 'resume'}]})};
+      actions: mode.startsWith('missing-input') ? [] : [{ref: [7, 0], action: 'upload', file: 'resume'}]})};
   });
   chrome.tabs.sendMessage = async (id, message, target) => {
     assert.equal(target.frameId, 7);
     if (message.type === 'describe') return background.handle({type: 'frame', request: message.request,
       fields: [{ref: 0, id: 'resume', type: 'file'}]}, {id: 'ext', tab, frameId: 7, url: tab.url});
     if (message.type === 'trace-apply') return {filled: 2, trace: []};
-    uploads++; await pendingUpload; return {filled: 1};
+    uploads++; await pendingUpload;
+    if (mode.startsWith('upload-error')) throw Error('Upload rejected');
+    return {filled: mode === 'preserved' ? 0 : 1};
   };
   const filling = background.handle({type: 'fill', tabId: 4}, sender).then(result => { complete = true; return result; });
   await new Promise(resolve => setImmediate(resolve));
   if (['reuse', 'generate'].includes(mode)) { assert.equal(uploads, 1); assert.equal(complete, false); }
   release(); const result = await filling;
   assert.equal(result.filled, 2);
-  assert.equal(generations, mode === 'generate' ? 1 : 0);
+  assert.equal(generations, ['generate', 'missing-input-generate', 'upload-error-generated', 'no-cv'].includes(mode) ? 1 : 0);
   assert.equal(result.attached, ['reuse', 'generate'].includes(mode) ? 1 : 0);
-  assert.match(result.resumeStatus, mode === 'missing-input' ? /No resume file input/ :
-    ['failure', 'changed'].includes(mode) ? /attachment failed/ : /Tailored CV attached/);
+  assert.match(result.resumeStatus, mode.startsWith('missing-input') ? /No resume file input/ :
+    ['failure', 'changed', 'upload-error', 'upload-error-generated', 'no-cv'].includes(mode) ? /attachment failed/ :
+    mode === 'preserved' ? /existing file preserved/ : /Tailored CV attached/);
+  if (['missing-input', 'missing-input-generate', 'changed', 'upload-error', 'upload-error-generated', 'preserved'].includes(mode)) {
+    assert.deepEqual(result.resumeDownload, {name: 'CV.pdf', base64: 'AA=='});
+  } else assert.equal(result.resumeDownload, undefined);
   await chrome.storage.session.set({active: null});
   await assert.rejects(background.handle({type: 'fill', tabId: 4}, sender), /No Job selected/);
 });
@@ -140,4 +146,35 @@ test('Greenhouse upload waits for its committed filename and reports an upload e
     if (success) assert.equal((await uploading).filled, 1);
     else await assert.rejects(uploading, /upload was not confirmed/);
   }
+});
+
+test('Fill with zero supported descriptors still offers the existing Tailored CV', async () => {
+  const tab = {id: 4, url: 'https://jobs.lever.co/acme/apply'}, active = {id: 1, source: 'hotfix'};
+  const chrome = {runtime: {id: 'ext', getURL: p => `chrome-extension://ext/${p}`},
+    storage: {local: storage({origin: 'http://localhost:8000'}), session: storage({active, 'frames:4': {7: tab.url}})},
+    tabs: {get: async () => tab}};
+  const background = createBackground(chrome, async (url, options) => {
+    if (url.endsWith('/match')) {
+      assert.deepEqual(JSON.parse(options.body), {fields: []});
+      return {ok: true, json: async () => ({resume_draft_id: 9, actions: []})};
+    }
+    if (url.endsWith('/pdf')) return {ok: true,
+      headers: new Headers({'Content-Disposition': 'inline; filename="CV.pdf"'}),
+      arrayBuffer: async () => new ArrayBuffer(1)};
+    assert.ok(url.endsWith('/traces'), `Unexpected request: ${url}`);
+    return {ok: true, json: async () => ({file: '/trace'})};
+  });
+  chrome.tabs.sendMessage = async (id, message) => {
+    if (message.type === 'describe') return background.handle({type: 'frame', request: message.request, fields: []},
+      {id: 'ext', tab, frameId: 7, url: tab.url});
+    assert.equal(message.type, 'trace-apply');
+    assert.deepEqual(message.actions, []);
+    return {filled: 0, trace: []};
+  };
+  const result = await background.handle({type: 'fill', tabId: 4}, {id: 'ext', url: 'chrome-extension://ext/sidepanel.html'});
+  assert.deepEqual(result.fields, []);
+  assert.equal(result.filled, 0);
+  assert.equal(result.attached, 0);
+  assert.match(result.resumeStatus, /No resume file input/);
+  assert.deepEqual(result.resumeDownload, {name: 'CV.pdf', base64: 'AA=='});
 });

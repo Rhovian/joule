@@ -106,6 +106,16 @@ element('fill').addEventListener('click', () => run(async () => {
     }
     element('remaining').append(item);
   }
+  if (result.resumeDownload) {
+    const item = document.createElement('li'), link = document.createElement('a');
+    // Native download links need no downloads permission; the PDF stays in the extension UI.
+    // https://html.spec.whatwg.org/multipage/links.html#downloading-resources
+    link.href = `data:application/pdf;base64,${result.resumeDownload.base64}`;
+    link.download = result.resumeDownload.name;
+    link.textContent = 'Download Tailored CV';
+    item.append(link);
+    element('remaining').append(item);
+  }
   element('status').textContent = `${result.filled} filled; ${remaining.length} remaining. ${result.resumeStatus || ""} Review the form.${result.traceError ? ` ${result.traceError}` : ' Trace saved.'}`;
 }));
 for (const [id, kind] of [['attach', 'resume']]) {

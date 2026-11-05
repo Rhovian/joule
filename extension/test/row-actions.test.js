@@ -40,3 +40,33 @@ for (const filled of [1, 0]) test(`set rows have no actions; Ask filled=${filled
   assert.equal(element('status').textContent, 'Saved to bank. Next Fill replays this answer.');
   panel.window.close();
 });
+
+test('Fill offers the PDF download and clears it on the next Fill or Job change', async () => {
+  const job = {id: 1, source: 'hotfix'};
+  let download = {name: 'JB_CV_Acme.pdf', base64: 'JVBERg=='};
+  const panel = new JSDOM(fs.readFileSync(`${__dirname}/../sidepanel.html`, 'utf8'), {runScripts: 'outside-only'});
+  panel.window.chrome = {
+    runtime: {sendMessage: async message => ({value: {
+      detect: job, select: {...job, id: 2}, jobs: [job, {...job, id: 2}], resume: {},
+      fill: {job, fields: [], actions: [], filled: 0, resumeDownload: download},
+    }[message.type]})},
+    tabs: {query: async () => [{id: 4}], onActivated: {addListener() {}}, onUpdated: {addListener() {}}},
+  };
+  panel.window.eval(fs.readFileSync(`${__dirname}/../sidepanel.js`, 'utf8'));
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  const element = id => panel.window.document.getElementById(id);
+  await settle(); element('fill').click(); await settle();
+  const link = element('remaining').querySelector('a');
+  assert.equal(link.textContent, 'Download Tailored CV');
+  assert.equal(link.download, download.name);
+  assert.equal(link.href, `data:application/pdf;base64,${download.base64}`);
+  download = undefined;
+  element('fill').click(); await settle();
+  assert.equal(element('remaining').querySelector('a'), null);
+  download = {name: 'CV.pdf', base64: 'JVBERg=='};
+  element('fill').click(); await settle();
+  element('jobs').value = '2';
+  element('jobs').dispatchEvent(new panel.window.Event('change')); await settle();
+  assert.equal(element('remaining').querySelector('a'), null);
+  panel.window.close();
+});
