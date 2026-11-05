@@ -129,7 +129,7 @@ Each Source is an adapter that returns candidate Jobs in the common fields plus 
 
 | Source | Access | Search input | Notes |
 | --- | --- | --- | --- |
-| HN Who's Hiring | HN Algolia API: newest `whoishiring` 'Who is hiring?' story → `items/<id>` top-level children | whole thread | Header line ('Company \| Role \| …') gives title, company, remote; no model call |
+| HN Who's Hiring | HN Algolia API: newest `whoishiring` 'Who is hiring?' story → `items/<id>` top-level children | whole thread | Header line ('Company \| Role \| …', also spaced dashes) gives recognized role as title (otherwise full header), company, raw location, remote/onsite/hybrid and currency salary ranges; equity ignored, uncertain fields empty, URLs kept separately; new Jobs only, no model call |
 | We Work Remotely | all-jobs RSS | whole feed | Title is "Company: Role"; attribution link required; browser User-Agent |
 | RemoteOK | `/api` JSON | whole feed | Skip the first (metadata) entry; attribution link required; salary 0 = unknown; USD, period yearly only when ≥10000, else unknown |
 | web3.career (opt-in) | token API, `limit=100`, descriptions on | whole feed, no tag | Attribution required; verify field names against a live response |
