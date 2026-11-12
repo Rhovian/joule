@@ -1,6 +1,8 @@
-import type { Counts, Scan, Source, Job, DraftKind } from './types';
-import { age, escape, dateTime } from './format';
+import type { Scan, Source, Job, DraftKind } from './types';
+import { age, escape } from './format';
 import { createSourceFilter } from './sources';
+import { createScans } from './scans';
+import { sourceStatus } from './source-status';
 import { external, score, dismiss, applied, pay } from './job';
 import { renderDrawer, draftSelection, draftKind, type DrawerEdits, type Asked } from './drawer';
 const root = document.querySelector<HTMLElement>('#dashboard')!;
@@ -89,20 +91,17 @@ async function loadJobs() {
   renderJobs();
   if (detailId) renderDetail();
 }
-function counts(c?: Counts | null) {
-  return c ? `<p class="scan-counts">${escape(c.new)} new · ${escape(c.duplicate)} Duplicate · ${escape(c.filtered)} Filtered · ${escape(c.scored ?? 0)} scored</p>${(c.errors ?? []).map(e => `<p class="scan-error">${escape(e)}</p>`).join('')}` : '';
-}
+const scansPage = createScans(replace);
 function renderSources() {
   renderScoreAll();
   if (!jobs.length && element('jobs').getAttribute('aria-busy') === 'false') renderJobs();
   const status = element('scan-status');
-  const failed = sources.filter(s => s.last?.status === 'failed').length;
-  const errors = sources.filter(s => s.last?.counts?.errors?.length).length;
-  status.classList.toggle('failed', !runningId && (failed > 0 || errors > 0));
+  const failed = sources.filter(s => sourceStatus(s).failed).length;
+  status.classList.toggle('failed', !runningId && failed > 0);
   status.textContent = starting ? 'Starting Scan…' : runningId
     ? `${scoringAll ? 'Scoring' : 'Scanning'}${scan ? ` ${scan.sources.join(', ')}` : '…'}`
-    : failed ? `${failed} Source${failed === 1 ? '' : 's'} failed · Open Scans` : errors ? `${errors} Source${errors === 1 ? '' : 's'} with errors · Open Scans` : 'Scans ready';
-  replace('a-scans', `<section class="scan-panel"><div class="section-heading"><h2>Scans</h2><button class="btn primary" data-action="scan" ${runningId || starting ? 'disabled' : ''}>Scan all</button></div><p class="muted">Discover Jobs from each Source.</p>${runningId ? `<div class="scan-progress" role="status"><strong>${scoringAll ? 'Scoring in progress' : 'Scan in progress'}</strong>${scan ? scan.sources.map(name => `<div>${escape(name)}${counts(scan?.per_source[name])}</div>`).join('') : '<span>Waiting for Source counts…</span>'}</div>` : '<p class="scan-idle">Ready for a new Scan</p>'}<div class="scan-sources">${sources.map(s => `<article class="scan-source"><div><strong>${escape(s.name)}</strong><button data-action="scan" data-source="${escape(s.name)}" ${runningId || starting ? 'disabled' : ''}>Scan</button></div>${s.last ? `<small>Last Scan · ${escape(dateTime(s.last.finished_at ?? s.last.started_at))} · ${escape(s.last.status)}</small>${counts(s.last.counts)}` : '<small>No Scan yet</small>'}${s.name === 'upwork' ? `<p class="connect">${connected ? '<span class="connected">● Upwork connected</span>' : '<button data-action="connect">Connect Upwork</button>'}</p><button data-action="schedule" aria-pressed="${scheduled}">Scheduled Scans: ${scheduled ? 'On' : 'Off'}</button><button data-action="telegram">Start Telegram queue</button>` : ''}</article>`).join('')}</div></section>`);
+    : failed ? `${failed} Source${failed === 1 ? '' : 's'} failed · Open Scans` : 'Scans ready';
+  scansPage.update({ sources, scan, running: runningId, starting, scoring: scoringAll, scheduled, connected });
 }
 async function toggleSchedule() {
   scheduled = (await api<{ upwork: boolean }>('schedule', 'PUT', { upwork: !scheduled })).upwork;
