@@ -18,7 +18,7 @@ def client(tmp_path):
         with closing(connect(tmp_path / "joule.db")) as db, db:
             for id, score, posted, reason, state, primary in [
                 (1, 85, "2026-01-01", None, "new", None),
-                (2, 80, "2026-01-02", None, "new", None),
+                (2, 80, "2026-01-02", None, "seen", None),
                 (3, None, "2026-01-03", None, "new", None),
                 (4, 90, "2026-01-04", "pay", "new", None),
                 (5, 95, "2026-01-05", None, "dismissed", None),
@@ -57,6 +57,9 @@ def client(tmp_path):
         ("?dismissed=true", [5, 2, 1, 3]),
         ("?applied=true", [7, 2, 1, 3]),
         ("?filtered=true&dismissed=true", [5, 4, 2, 1, 3]),
+        ("?new=false", [3]),
+        ("?new=false&filtered=true", [4, 3]),
+        ("?new=false&unscored=false", []),
         ("?source=hn", [1]),
         ("?source=hotfix", [1, 3]),
         ("?source=hn&source=remoteok", [2, 1]),
@@ -66,12 +69,32 @@ def client(tmp_path):
 def test_list(client, query, ids):
     rows = client.get("/api/jobs" + query).json()
     assert [row["id"] for row in rows] == ids
-    assert not {"description", "extra", "score_points"} & rows[0].keys()
-    assert type(rows[0]["remote"]) is int and rows[0]["location_unclear"] == 0
-    primary = next(row for row in rows if row["id"] == 1)
-    assert primary["duplicates"] == [
-        {"id": 6, "source": "hn", "link": "https://example.com"}
+    assert all(
+        not {"description", "extra", "score_points"} & row.keys() for row in rows
+    )
+    assert all(
+        type(row["remote"]) is int and row["location_unclear"] == 0 for row in rows
+    )
+    assert [row["duplicates"] for row in rows] == [
+        [{"id": 6, "source": "hn", "link": "https://example.com"}] if id == 1 else []
+        for id in ids
     ]
+
+
+@pytest.mark.parametrize(
+    "query, expected",
+    [
+        ("", [2, 1, 1, 1, 1]),
+        ("?source=hn", [1, 0, 0, 0, 0]),
+        ("?source=absent", [0, 0, 0, 0, 0]),
+    ],
+)
+def test_show_counts(client, query, expected):
+    with closing(connect(client.app.state.data_dir / "joule.db")) as db, db:
+        db.execute("UPDATE jobs SET score=NULL WHERE id IN (4, 5, 7)")
+    assert client.get("/api/jobs/counts" + query).json() == dict(
+        zip(["new", "unscored", "filtered", "applied", "dismissed"], expected)
+    )
 
 
 @pytest.mark.parametrize(
@@ -81,6 +104,7 @@ def test_list(client, query, ids):
         ("?source=remoteok", [2]),
         ("?filtered=true&dismissed=true&applied=true", [1, 2, 3, 4, 5, 7]),
         ("?unscored=false", []),
+        ("?unscored=false&filtered=true&dismissed=true&applied=true", [4, 5, 7]),
     ],
 )
 def test_score_all_visible_snapshot(client, monkeypatch, query, expected):

@@ -11,6 +11,22 @@ from joule.db import connect
 from joule.scan import ADAPTERS, ScanInProgress
 
 router = APIRouter(prefix="/api")
+SOURCE_FILTER = (
+    "(? OR source IN (SELECT value FROM json_each(?)) OR EXISTS "
+    "(SELECT 1 FROM jobs d WHERE d.primary_id = jobs.id "
+    "AND d.source IN (SELECT value FROM json_each(?))))"
+)
+
+SHOW_CATEGORY = (
+    "CASE WHEN state='applied' THEN 'applied' "
+    "WHEN state='dismissed' THEN 'dismissed' "
+    "WHEN filtered_reason IS NOT NULL THEN 'filtered' "
+    "WHEN score IS NULL THEN 'unscored' ELSE 'new' END"
+)
+
+
+def source_params(source):
+    return (not source, json.dumps(source or []), json.dumps(source or []))
 
 
 def duplicates(db, job_id):
@@ -27,6 +43,7 @@ def duplicates(db, job_id):
 async def list_jobs(
     request: Request,
     unscored: bool = True,
+    new: bool = True,
     filtered: bool = False,
     dismissed: bool = False,
     applied: bool = False,
@@ -40,21 +57,21 @@ async def list_jobs(
             f"SELECT jobs.*, {score.RANK} AS rank, drafted.job_id IS NOT NULL AS has_drafts "
             "FROM jobs LEFT JOIN (SELECT DISTINCT job_id FROM drafts) drafted "
             "ON drafted.job_id=jobs.id WHERE primary_id IS NULL "
-            "AND (? OR score IS NOT NULL) AND (? OR filtered_reason IS NULL) "
-            "AND (? OR state != 'dismissed') "
-            "AND (? OR state != 'applied') "
-            "AND (? OR source IN (SELECT value FROM json_each(?)) OR EXISTS "
-            "(SELECT 1 FROM jobs d WHERE d.primary_id = jobs.id "
-            "AND d.source IN (SELECT value FROM json_each(?)))) "
+            f"AND {SHOW_CATEGORY} IN (SELECT value FROM json_each(?)) "
+            f"AND {SOURCE_FILTER} "
             f"ORDER BY {sort} DESC NULLS LAST, posted_at DESC LIMIT 500",
             (
-                unscored,
-                filtered,
-                dismissed,
-                applied,
-                not source,
-                json.dumps(source or []),
-                json.dumps(source or []),
+                json.dumps(
+                    [
+                        name
+                        for name, enabled in zip(
+                            ["new", "unscored", "filtered", "applied", "dismissed"],
+                            [new, unscored, filtered, applied, dismissed],
+                        )
+                        if enabled
+                    ]
+                ),
+                *source_params(source),
             ),
         ).fetchall()
         return [
@@ -71,6 +88,19 @@ async def list_jobs(
             }
             for row in rows
         ]
+
+
+@router.get("/jobs/counts")
+def job_counts(request: Request, source: Annotated[list[str] | None, Query()] = None):
+    with closing(connect(request.app.state.data_dir / "joule.db")) as db:
+        rows = db.execute(
+            f"SELECT {SHOW_CATEGORY} AS category, COUNT(*) AS count "
+            f"FROM jobs WHERE primary_id IS NULL AND {SOURCE_FILTER} GROUP BY category",
+            source_params(source),
+        ).fetchall()
+        return dict.fromkeys(
+            ["new", "unscored", "filtered", "applied", "dismissed"], 0
+        ) | {row["category"]: row["count"] for row in rows}
 
 
 @router.get("/jobs/resolve")
