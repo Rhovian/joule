@@ -142,14 +142,17 @@ async def get_job(request: Request, job_id: int):
         if row is None:
             raise HTTPException(404, "Job not found")
         result = dict(row) | {"duplicates": duplicates(db, job_id)}
-        result["drafts"] = {
-            draft["kind"]: dict(draft) | {"content": json.loads(draft["content"])}
-            for draft in db.execute(
-                "SELECT id,kind,text AS content,note,created_at FROM drafts "
-                "WHERE job_id=? AND id IN "
-                "(SELECT MAX(id) FROM drafts WHERE job_id=? GROUP BY kind)",
-                (job_id, job_id),
+        result["draft_versions"] = {}
+        for draft in db.execute(
+            "SELECT id,kind,text AS content,note,created_at FROM drafts "
+            "WHERE job_id=? ORDER BY id",
+            (job_id,),
+        ):
+            result["draft_versions"].setdefault(draft["kind"], []).append(
+                dict(draft) | {"content": json.loads(draft["content"])}
             )
+        result["drafts"] = {
+            kind: versions[-1] for kind, versions in result["draft_versions"].items()
         }
     directory = request.app.state.data_dir
     result["score_stale"] = result["score"] is not None and result[
