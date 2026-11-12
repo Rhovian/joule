@@ -6,7 +6,7 @@ type State = { sources: Source[]; scan: Scan | null; running: number | null; sta
 export function createScans(replace: (id: string, html: string) => void) {
   const page = document.getElementById('a-scans')!;
   page.innerHTML = `<div class="scans-layout"><div class="scans-main"><header class="scans-heading"><div><h2>Scans</h2><p id="scans-summary" class="muted">Loading Sources…</p></div><button id="scan-all" class="btn primary" data-action="scan">Scan all</button></header><div id="scans-progress" class="scan-progress" role="status"></div><div class="scans-filters" role="group" aria-label="Filter Sources">${[['all', 'All'], ['failed', 'Failed'], ['stale', 'Stale'], ['never', 'Never scanned']].map(([key, label]) => `<button class="chip" data-scan-filter="${key}" aria-pressed="${key === 'all'}">${label} <span data-scan-count="${key}">0</span></button>`).join('')}<span class="scans-sort muted">Needs attention first, then newest Scan</span><label class="scan-search"><span class="sr-only">Find a Source</span><input id="scan-search" type="search" placeholder="Find a Source" autocomplete="off"></label></div><div class="table-wrap"><table class="scan-table"><thead><tr>${['Source', 'Status', 'Last Scan', 'New', 'Duplicate', 'Filtered', 'Scored', ''].map(label => `<th scope="col">${label || '<span class="sr-only">Actions</span>'}</th>`).join('')}</tr></thead><tbody id="scan-rows"></tbody></table></div></div><aside id="scan-settings" aria-label="Scan settings"></aside></div>`;
-  let state: State, filter = 'all';
+  let state: State, filter = 'all', settingsHTML = '';
   const search = document.getElementById('scan-search') as HTMLInputElement;
   const closedErrors = new Set<string>();
   function renderRows() {
@@ -15,7 +15,7 @@ export function createScans(replace: (id: string, html: string) => void) {
     const rows = sources.map(source => {
       if (running && scan?.id === running && scan.sources.includes(source.name)) source = { ...source, last_finished: sourceStatus(source).finished ?? null,
         last: { id: scan.id, status: scan.status, started_at: scan.started_at, finished_at: scan.finished_at, counts: scan.per_source[source.name] ?? null } };
-      return { source, ...sourceStatus(source) };
+      return { source, inScan: !!running && source.last?.id === running, ...sourceStatus(source) };
     });
     page.querySelectorAll<HTMLElement>('[data-scan-count]').forEach(node => {
       const key = node.dataset.scanCount!;
@@ -25,10 +25,8 @@ export function createScans(replace: (id: string, html: string) => void) {
     const matching = rows.filter(row => (filter === 'all' || row[filter as 'failed' | 'stale' | 'never']) && row.source.name.toLocaleLowerCase().includes(query));
     const attention = (row: typeof rows[number]) => Number(row.failed || row.stale || row.never || row.interrupted);
     matching.sort((a, b) => attention(b) - attention(a) || Date.parse(b.source.last?.started_at ?? '1970-01-01') - Date.parse(a.source.last?.started_at ?? '1970-01-01') || a.source.name.localeCompare(b.source.name));
-    replace('scan-rows', matching.map(({ source: s, finished, stamp, days, failed, interrupted, stale, never }) => {
-      const inScan = !!running && (scan?.id === running ? scan.sources.includes(s.name) : s.last?.id === running);
-      const live = inScan ? scan?.per_source[s.name] ?? (s.last?.status === 'running' ? s.last.counts : null) : null;
-      const counts = live ?? finished?.counts;
+    replace('scan-rows', matching.map(({ source: s, inScan, finished, stamp, days, failed, interrupted, stale, never }) => {
+      const counts = (inScan ? s.last?.counts : null) ?? finished?.counts;
       const errors = [...new Set([...(inScan ? finished?.counts?.errors ?? [] : []), ...(counts?.errors ?? [])])];
       if (failed && !errors.length) errors.push('Scan failed; no Source error details were recorded.');
       const errorId = `scan-errors-${s.name}`, open = !closedErrors.has(s.name);
@@ -55,7 +53,9 @@ export function createScans(replace: (id: string, html: string) => void) {
     const progress = document.getElementById('scans-progress')!;
     progress.hidden = !running && !starting;
     progress.innerHTML = `<strong>${starting && !running ? 'Starting Scan…' : `${scoring ? 'Scoring' : 'Scanning'} ${escape(scan?.sources.join(', ') ?? 'Sources…')}`}</strong><span class="muted">${counts.length ? `${counts.reduce((n, c) => n + c.new, 0)} new · ${counts.reduce((n, c) => n + c.duplicate, 0)} Duplicate · ${counts.reduce((n, c) => n + c.filtered, 0)} Filtered · ${counts.reduce((n, c) => n + c.scored, 0)} scored` : 'Waiting for Source counts…'}</span><progress aria-label="Scan in progress"></progress>${scan && running ? age(scan.started_at, true) : ''}`;
-    replace('scan-settings', sources.some(s => s.name === 'upwork') ? `<section class="scan-card"><div class="schedule-heading"><div><h3>Scheduled Scans</h3><p class="muted">${scheduled ? 'On' : 'Off'} · Upwork only</p></div><button class="schedule-switch" data-action="schedule" role="switch" aria-label="Scheduled Upwork Scans" aria-checked="${scheduled}"><span></span></button></div></section><section class="scan-card"><h3>Telegram queue</h3><p class="muted">Review queued Upwork Proposals in Telegram.</p><button class="btn" data-action="telegram">Start Telegram queue</button></section><section class="scan-card"><h3>Upwork connection</h3><p class="${connected ? 'connected' : 'muted'}">${connected ? '● Connected' : 'Not connected'}</p>${connected ? '' : '<button class="btn" data-action="connect">Connect Upwork</button>'}</section><p class="muted scan-keys"><kbd>s</kbd> opens Scans · <kbd>Esc</kbd> returns to Triage</p>` : '<p class="muted">Upwork controls appear when that Source is enabled.</p>');
+    const settings = sources.some(s => s.name === 'upwork') ? `<section class="scan-card"><div class="schedule-heading"><div><h3>Scheduled Scans</h3><p class="muted">${scheduled ? 'On' : 'Off'} · Upwork only</p></div><button class="schedule-switch" data-action="schedule" role="switch" aria-label="Scheduled Upwork Scans" aria-checked="${scheduled}"><span></span></button></div></section><section class="scan-card"><h3>Telegram queue</h3><p class="muted">Review queued Upwork Proposals in Telegram.</p><button class="btn" data-action="telegram">Start Telegram queue</button></section><section class="scan-card"><h3>Upwork connection</h3><p class="${connected ? 'connected' : 'muted'}">${connected ? '● Connected' : 'Not connected'}</p>${connected ? '' : '<button class="btn" data-action="connect">Connect Upwork</button>'}</section><p class="muted scan-keys"><kbd>s</kbd> opens Scans · <kbd>Esc</kbd> returns to Triage</p>` : '<p class="muted">Upwork controls appear when that Source is enabled.</p>';
+    // astro@7.3.8/dist/runtime/client/load.js only hydrates; retain unchanged controls across polls.
+    if (settings !== settingsHTML) { replace('scan-settings', settings); settingsHTML = settings; }
     renderRows();
   } };
 }
