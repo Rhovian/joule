@@ -7,7 +7,8 @@ export function createSourceFilter(onChange: () => void, onOpen: () => void, onI
   const trigger = document.getElementById('sources-button')!;
   const search = document.getElementById('source-search') as HTMLInputElement;
   const options = document.getElementById('source-options')!;
-  let sources: Source[] = [], selected = new Set<string>();
+  // undefined keeps manual picks; null means all Sources; names keep a preset’s fixed scope.
+  let sources: Source[] = [], selected = new Set<string>(), loaded = false, preset: string[] | null | undefined;
   const isOpen = () => menu.matches(':popover-open');
   const rows = () => Array.from(options.querySelectorAll<HTMLButtonElement>('[data-source]'));
   function close() { if (menu.hasAttribute('popover') && isOpen()) menu.hidePopover(); }
@@ -34,7 +35,7 @@ export function createSourceFilter(onChange: () => void, onOpen: () => void, onI
       if (button.dataset[only ? 'only' : 'source'] === name) button.focus({ preventScroll: true });
     });
   }
-  function choose(names: string[]) { selected = new Set(names); render(); onChange(); }
+  function choose(names: string[]) { preset = undefined; selected = new Set(names); render(); onChange(); }
   menu.addEventListener('beforetoggle', event => {
     trigger.setAttribute('aria-expanded', String((event as ToggleEvent).newState === 'open'));
     if ((event as ToggleEvent).newState === 'open') { search.value = ''; render(); onOpen(); }
@@ -83,14 +84,30 @@ export function createSourceFilter(onChange: () => void, onOpen: () => void, onI
     }
     if (event.key === 'o' && index >= 0) { event.preventDefault(); choose([buttons[index].dataset.source!]); }
   });
+  function selection() {
+    if (!loaded && preset !== undefined) return preset;
+    // An unavailable named preset selects none, even when no Sources are enabled.
+    const emptyNamedPreset = sources.length === 0 && Array.isArray(preset);
+    return selected.size === sources.length && !emptyNamedPreset ? null : [...selected];
+  }
+  function set(names: string[] | null) {
+    preset = names;
+    selected = new Set(sources.filter(s => names === null || names.includes(s.name)).map(s => s.name));
+    if (loaded) render();
+  }
   return {
     update(next: Source[]) {
-      selected = new Set(next.filter(s => sources.some(old => old.name === s.name) ? selected.has(s.name) : true).map(s => s.name));
-      sources = next; render();
+      const before = JSON.stringify(selection()?.slice().sort());
+      selected = new Set(next.filter(s => {
+        if (preset !== undefined) return preset === null || preset.includes(s.name);
+        return !sources.some(old => old.name === s.name) || selected.has(s.name);
+      }).map(s => s.name));
+      sources = next; loaded = true; render();
+      return before !== JSON.stringify(selection()?.slice().sort());
     },
-    selection: () => selected.size === sources.length ? null : [...selected],
+    selection,
     count: () => selected.size,
-    reset() { selected = new Set(sources.map(s => s.name)); render(); },
+    set,
     close,
   };
 }
