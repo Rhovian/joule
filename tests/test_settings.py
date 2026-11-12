@@ -1,14 +1,19 @@
+from pathlib import Path
+from unittest.mock import patch
+
 from fastapi.testclient import TestClient
 
 from joule.app import create_app
 
 
-def test_appearance_defaults_persist_and_validate(tmp_path):
+def test_appearance_defaults_persist_and_validate(tmp_path, caplog):
     with TestClient(create_app(tmp_path), base_url="http://localhost") as client:
-        assert client.get("/api/appearance").json() == {
-            "theme": "system",
-            "density": "compact",
-        }
+        defaults = {"theme": "system", "density": "compact"}
+        assert client.get("/api/appearance").json() == defaults
+        assert not caplog.records
+        (tmp_path / "appearance.json").write_text("{")
+        assert client.get("/api/appearance").json() == defaults
+        assert "Using default appearance" in caplog.text
         for theme, density in [
             ("light", "comfortable"),
             ("dark", "compact"),
@@ -24,5 +29,17 @@ def test_appearance_defaults_persist_and_validate(tmp_path):
             "appearance.json",
             "joule.db",
         ]
-    with TestClient(create_app(tmp_path), base_url="http://localhost") as client:
+    with TestClient(
+        create_app(tmp_path), base_url="http://localhost", raise_server_exceptions=False
+    ) as client:
         assert client.get("/api/appearance").json() == expected
+        with patch.object(Path, "replace", side_effect=OSError("Disk failure")):
+            assert (
+                client.put("/api/appearance", json={"theme": "light"}).status_code
+                == 500
+            )
+        assert client.get("/api/appearance").json() == expected
+        assert sorted(p.name for p in tmp_path.iterdir()) == [
+            "appearance.json",
+            "joule.db",
+        ]

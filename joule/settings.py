@@ -1,6 +1,7 @@
 """Dashboard appearance, shared with Joule Fill, and observable connection signals."""
 
 import json
+import logging
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Literal
@@ -10,6 +11,7 @@ from fastapi import APIRouter, Request
 from joule.config import StrictModel
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class Appearance(StrictModel):
@@ -20,11 +22,14 @@ class Appearance(StrictModel):
 @router.get("/api/appearance")
 def get_appearance(request: Request):
     path = request.app.state.data_dir / "appearance.json"
-    return (
-        Appearance.model_validate_json(path.read_text())
-        if path.exists()
-        else Appearance()
-    )
+    try:
+        return Appearance.model_validate_json(path.read_text())
+    except (OSError, ValueError) as error:
+        if not isinstance(error, FileNotFoundError):
+            logger.warning(
+                "Using default appearance: %s (%s)", path, type(error).__name__
+            )
+        return Appearance()
 
 
 @router.put("/api/appearance")
@@ -32,9 +37,15 @@ def set_appearance(request: Request, body: Appearance):
     directory = request.app.state.data_dir
     # tempfile provides unique writers; Path.replace atomically publishes a complete file.
     # https://docs.python.org/3.13/library/tempfile.html#tempfile.NamedTemporaryFile
-    with NamedTemporaryFile(mode="w", dir=directory, delete=False) as file:
-        file.write(body.model_dump_json() + "\n")
-    Path(file.name).replace(directory / "appearance.json")
+    temporary = None
+    try:
+        with NamedTemporaryFile(mode="w", dir=directory, delete=False) as file:
+            temporary = Path(file.name)
+            file.write(body.model_dump_json() + "\n")
+        temporary.replace(directory / "appearance.json")
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     return body
 
 

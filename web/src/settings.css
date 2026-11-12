@@ -25,7 +25,7 @@
 #settings-link { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--control-border); border-radius: 6px; padding: 5px 9px; font-size: 12px; color: var(--ink); }
 .app-header:has(#job-search-box[hidden]) #settings-link { margin-left: auto; }
 #settings-link[aria-current=page] { background: var(--selected); border-color: var(--green); }
-:root[data-density=comfortable] .triage-table td { padding-top: 15px; padding-bottom: 15px; }
+:root[data-density=comfortable] .triage-table td { padding-top: 14px; padding-bottom: 14px; }
 @media (max-width: 1100px) { .settings-grid { grid-template-columns: 1fr; } }
 @media (max-width: 740px) {
   body:has(#a-settings:not([hidden])) { background: var(--ground); }
