@@ -87,8 +87,7 @@ async function loadJobs() {
   jobs = next;
   if (!jobs.some(j => j.id === selected)) selected = jobs[Math.min(previousIndex, jobs.length - 1)]?.id ?? 0;
   renderJobs();
-  if (detailId && detailId !== selected) { if (selected) await openJob(selected, false); else closeDetail(); }
-  else if (detailId) renderDetail();
+  if (detailId) renderDetail();
 }
 function counts(c?: Counts | null) {
   return c ? `<p class="scan-counts">${escape(c.new)} new · ${escape(c.duplicate)} Duplicate · ${escape(c.filtered)} Filtered · ${escape(c.scored ?? 0)} scored</p>${(c.errors ?? []).map(e => `<p class="scan-error">${escape(e)}</p>`).join('')}` : '';
@@ -221,11 +220,13 @@ async function openJob(id: number, focus = !detailId) {
 }
 function closeDetail() {
   if (!detailId) return;
-  const id = detailId; detailId = 0; detail = null; detailVersion++; renderDetail(); renderJobs();
+  const id = jobs.some(j => j.id === detailId) ? detailId : selected; detailId = 0; detail = null; detailVersion++; renderDetail(); renderJobs();
   root.querySelector<HTMLElement>(`[data-action="open"][data-id="${id}"]`)?.focus({ preventScroll: true });
 }
 function moveJob(step: number) {
-  const index = jobs.findIndex(j => j.id === selected), next = jobs[Math.max(0, Math.min(jobs.length - 1, index + step))];
+  const index = jobs.findIndex(j => j.id === (detailId || selected));
+  const nextIndex = index < 0 ? jobs.findIndex(j => j.id === selected) : index + step;
+  const next = jobs[Math.max(0, Math.min(jobs.length - 1, nextIndex))];
   if (!next) return;
   if (detailId) void openJob(next.id, false).catch(notice);
   else { selected = next.id; renderJobs(); }
@@ -294,7 +295,10 @@ root.addEventListener('click', event => {
   const id = Number(target.dataset.id);
   if (target.dataset.action === 'move') moveJob(Number(target.dataset.step));
   if (target.dataset.action === 'section') jumpSection(target.dataset.section!);
-  if (target.dataset.action === 'version') { editing(detailId).versions[target.dataset.kind as DraftKind] = id; renderDetail(); }
+  if (target.dataset.action === 'version') {
+    const kind = target.dataset.kind as DraftKind;
+    editing(detailId).versions[kind] = id; renderDetail(); element(`draft-versions-${kind}`).focus({ preventScroll: true });
+  }
   if (target.dataset.action === 'sort') { byScore = !byScore; void loadJobs().catch(notice); }
   if (target.dataset.action === 'queue') void queueJob(id).catch(notice);
   if (target.dataset.action === 'telegram') void api('telegram/start', 'POST', {}).then(() => notice('Sent the queue head to Telegram')).catch(notice);
@@ -322,19 +326,24 @@ root.addEventListener('input', event => {
   if (target.id === 'ask-question') editing(detailId).question = target.value;
 });
 document.addEventListener('keydown', event => {
+  const versions = root.querySelector<HTMLElement>('.draft-version-menu:popover-open');
+  if (event.key === 'Escape' && versions) {
+    event.preventDefault(); versions.hidePopover(); element(versions.id.replace('draft-version-menu-', 'draft-versions-')).focus({ preventScroll: true }); return;
+  }
   if (event.key === 'Escape' && detailId) { closeDetail(); return; }
   if ((event.target as HTMLElement).closest('input:not([type=checkbox]), textarea, select, [contenteditable]') || event.ctrlKey || event.metaKey || event.altKey) return;
   if (event.key === 's') { event.preventDefault(); location.hash = 'scans'; return; }
   if (event.key === 'Escape' && view === 'scans') { location.hash = 'triage'; return; }
-  if (view !== 'triage' || !jobs.length) return;
+  if (view !== 'triage' || (!jobs.length && !detailId)) return;
   if (detailId && ['1', '2', '3', '4'].includes(event.key)) { event.preventDefault(); jumpSection(['fit', 'draft', 'cv', 'ask'][Number(event.key) - 1]); return; }
   if (detailId && event.key === 'c') { event.preventDefault(); void copyDraft(-1).catch(notice); return; }
   if (['j', 'k', 'o', 'd', 'a'].includes(event.key)) event.preventDefault();
   if (event.key === 'j' || event.key === 'k') moveJob(event.key === 'j' ? 1 : -1);
-  if (event.key === 'o') void openJob(selected).catch(notice);
+  if (event.key === 'o' && selected) void openJob(selected).catch(notice);
   if (detailId && !detail) return;
   const job = detail ?? jobs.find(j => j.id === selected);
-  if (event.key === 'a') void changeState(selected, job?.state === 'applied' ? 'seen' : 'applied').catch(notice);
-  if (event.key === 'd') void changeState(selected, job?.state === 'dismissed' ? 'seen' : 'dismissed').catch(notice);
+  if (!job) return;
+  if (event.key === 'a') void changeState(job.id, job.state === 'applied' ? 'seen' : 'applied').catch(notice);
+  if (event.key === 'd') void changeState(job.id, job.state === 'dismissed' ? 'seen' : 'dismissed').catch(notice);
 });
 void Promise.allSettled([loadJobs(), loadSources()]).then(results => results.forEach(r => { if (r.status === 'rejected') notice(r.reason); }));
