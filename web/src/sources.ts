@@ -58,8 +58,8 @@ export function createSourceFilter(onChange: () => void, onOpen: () => void) {
     if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return;
     const typing = (event.target as HTMLElement).closest('input:not([type=checkbox]), textarea, select, [contenteditable]');
     if (!isOpen()) {
-      if (event.key === 'f' && !typing && !document.getElementById('triage')!.hidden && !document.querySelector('.drawer')) {
-        event.preventDefault(); menu.showPopover(); event.stopImmediatePropagation();
+      if (event.key === 'f' && !typing && !document.getElementById('triage')!.hidden) {
+        event.preventDefault(); const filters = trigger.closest('details'); if (filters) filters.open = true; menu.showPopover(); event.stopImmediatePropagation();
       }
       return;
     }

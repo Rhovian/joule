@@ -377,7 +377,9 @@ def test_cover_letter_versions_and_prompt(client, monkeypatch):
     ).json()["drafts"]["cover_letter"]
     assert first["content"] == {"text": "Letter 1"}
     assert second["id"] > first["id"] and second["note"] == "Keep it brief"
-    assert client.get("/api/jobs/1").json()["drafts"]["cover_letter"] == second
+    stored = client.get("/api/jobs/1").json()
+    assert stored["drafts"]["cover_letter"] == second
+    assert stored["draft_versions"]["cover_letter"] == [first, second]
     for fragment in (
         "samples/voice.md",
         "My distinctive style",
