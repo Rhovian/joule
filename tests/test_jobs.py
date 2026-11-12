@@ -644,6 +644,16 @@ def test_queue_and_start_telegram(client, monkeypatch):
     job = client.post("/api/jobs/1/queue", json={}).json()
     assert (job["queued"], job["state"], write.await_count) == (1, "new", 1)
     assert client.post("/api/telegram/start", json={}).status_code == 409
-    client.app.state.telegram = Mock(start=AsyncMock())
+    assert client.get("/api/connections").json()["telegram"] == {
+        "configured": False,
+        "awaiting_reply": False,
+    }
+    client.app.state.telegram = Mock(start=AsyncMock(), awaiting=None)
+    assert client.get("/api/connections").json()["telegram"] == {
+        "configured": True,
+        "awaiting_reply": False,
+    }
+    client.app.state.telegram.awaiting = 1
+    assert client.get("/api/connections").json()["telegram"]["awaiting_reply"] is True
     assert client.post("/api/telegram/start", json={}).status_code == 200
     client.app.state.telegram.start.assert_awaited_once()
