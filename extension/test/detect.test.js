@@ -11,6 +11,8 @@ test('panel detects on open, tab switch and navigation; unmatched pages allow ma
   const storage = {get: async key => ({[key]: values[key]}), set: async data => Object.assign(values, data)};
   let tab = {id: 4, active: true, url: 'https://jobs.lever.co/acme/1/apply?utm_source=feed'};
   let listed = true, resolveFails = false, theme = 'dark', themeFails = false;
+  let releaseTheme;
+  let themeGate = new Promise(resolve => { releaseTheme = resolve; });
   const ui = {id: 'extension', url: 'chrome-extension://extension/sidepanel.html'};
   const chrome = {runtime: {id: 'extension', getURL: path => `chrome-extension://extension/${path}`},
     storage: {local: storage, session: storage}, tabs: {
@@ -25,6 +27,7 @@ test('panel detects on open, tab switch and navigation; unmatched pages allow ma
     const path = new URL(url);
     let value = {};
     if (path.pathname === '/api/appearance') {
+      if (themeGate) await themeGate;
       if (themeFails) return {ok: false, status: 404};
       value = {theme};
     } else if (path.pathname === '/api/jobs/resolve') {
@@ -50,12 +53,13 @@ test('panel detects on open, tab switch and navigation; unmatched pages allow ma
   const settle = () => new Promise(resolve => setImmediate(resolve));
   const element = id => panel.window.document.getElementById(id);
   await settle();
-  assert.equal(panel.window.document.documentElement.classList.contains('dark'), true);
   assert.equal(element('matched').hidden, false);
   assert.equal(element('fill').disabled, false);
   assert.equal(element('active').textContent, 'Engineer');
   assert.match(element('job-meta').textContent, /Acme/);
   assert.match(element('status').textContent, /Detected Job from page URL/);
+  releaseTheme(); themeGate = null; await settle();
+  assert.equal(panel.window.document.documentElement.classList.contains('dark'), true);
   tab = {...tab, id: 5, url: 'https://employer.example/unknown'};
   listeners.activate({tabId: 5});
   await settle();
