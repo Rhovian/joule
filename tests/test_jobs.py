@@ -257,13 +257,13 @@ def test_sources(client):
     )
     assert client.get("/api/sources").json() == {
         "sources": [
-            {"name": name, "last": None}
-            for name in ("hotfix", "hn", "remoteok", "upwork")
+            {"name": name, "new_jobs": count, "last": None, "last_finished": None}
+            for name, count in zip(("hotfix", "hn", "remoteok", "upwork"), (2, 1, 1, 0))
         ],
         "running": None,
         "scheduled": False,
     }
-    counts = {"new": 2, "duplicate": 1, "filtered": 3, "errors": ["error"]}
+    counts = {"new": 99, "duplicate": 1, "filtered": 3, "errors": ["error"]}
     with closing(connect(directory / "joule.db")) as db, db:
         for id, sources, status in [
             (1, ["hotfix", "remoteok"], "done"),
@@ -279,17 +279,33 @@ def test_sources(client):
                     json.dumps({sources[0]: counts}),
                 ),
             )
+        db.execute(
+            "INSERT INTO jobs (source, source_id, link, title, first_seen_at, primary_id) "
+            "VALUES ('hn', 'second-duplicate', 'https://example.com', 'Engineer', 'now', 1)"
+        )
     result = client.get("/api/sources").json()
+    assert [s["new_jobs"] for s in result["sources"]] == [2, 1, 1, 0]
+    client.patch("/api/jobs/1", json={"state": "applied"})
+    refreshed = client.get("/api/sources").json()["sources"]
+    assert [s["new_jobs"] for s in refreshed] == [1, 0, 1, 0]
     assert result["running"] == 2
-    assert [s["last"]["id"] if s["last"] else None for s in result["sources"]] == [
-        2,
-        None,
-        2,
-        None,
-    ]
+    assert [
+        tuple(s[key]["id"] if s[key] else None for key in ("last", "last_finished"))
+        for s in result["sources"]
+    ] == [(2, 1), (None, None), (2, 1), (None, None)]
     assert result["sources"][0]["last"]["counts"] == counts
     # The running Scan hasn't reached remoteok yet: no counts, not zeros.
     assert result["sources"][2]["last"]["counts"] is None
+    with closing(connect(directory / "joule.db")) as db, db:
+        db.executemany(
+            "INSERT INTO scans (sources, trigger, started_at, status) "
+            "VALUES ('[\"hn\"]', 'manual', 'later', 'done')",
+            [()] * 50,
+        )
+    assert (
+        client.get("/api/sources").json()["sources"][0]["last"]
+        == result["sources"][0]["last"]
+    )
 
 
 def test_missing_static_build(tmp_path):
