@@ -41,7 +41,7 @@ async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> 
 }
 let jobs: Job[] = [], sources: Source[] = [], selected = 0, detail: Job | null = null;
 let scheduled = false, detailId = 0, jobsVersion = 0, connected = true, runningId: number | null = null, scan: Scan | null = null, starting = false;
-let byScore = false, scoringAll = false;
+let byScore = false, scoringAll = false, view = 'triage';
 let noticeTimer: ReturnType<typeof setTimeout>, pollTimer: ReturnType<typeof setTimeout>;
 function notice(error: unknown) {
   element('notice').textContent = error instanceof Error ? error.message : String(error);
@@ -64,9 +64,9 @@ const pendingScores = new Set<number>();
 const scoreAgain = (j: Job) => j.score === null && !j.filtered_reason ? `<button data-action="score" data-id="${escape(j.id)}" ${pendingScores.has(j.id) ? 'disabled' : ''}>Score again</button>` : '';
 const dismiss = (j: Job) => `<button data-action="state" data-state="${j.state === 'dismissed' ? 'seen' : 'dismissed'}" data-id="${escape(j.id)}">${j.state === 'dismissed' ? 'Restore' : 'Dismiss'}</button>`;
 const applied = (j: Job) => `<button data-action="state" data-state="${j.state === 'applied' ? 'seen' : 'applied'}" data-id="${escape(j.id)}">${j.state === 'applied' ? 'Unmark applied' : 'Mark applied'}</button>`;
-const score = (j: Job) => `<span class="score ${j.score === null ? 'unscored' : j.score >= 75 ? 'high' : j.score >= 50 ? 'mid' : 'low'}">${escape(j.score ?? '—')}</span>`;
+const score = (j: Job) => `<span class="score ${j.score === null ? 'unscored' : j.score >= 90 ? 'high' : j.score >= 80 ? 'good' : j.score >= 70 ? 'mid' : 'low'}${j.score_stale && j.score !== null ? ' stale' : ''}" title="${j.score_stale && j.score !== null ? 'Fit Score out of date' : 'Fit Score'}">${escape(j.score ?? '—')}</span>`;
 const links = (j: Job) => `<div class="source-links">Primary · ${external(j.link, j.source)}${j.duplicates.map(d => `<span>Duplicate · ${external(d.link, d.source)}</span>`).join('')}</div>`;
-const flags = (j: Job) => `<span class="state ${['new', 'seen', 'dismissed', 'applied'].includes(j.state) ? j.state : ''}">${escape(j.state)}</span>${j.score_stale ? '<span class="flag">score out of date</span>' : ''}${j.content_purged_at ? '<span class="flag">expired; open on Upwork</span>' : ''}${j.location_unclear ? '<span class="flag">location unclear</span>' : ''}${j.filtered_reason ? '<span class="flag">Filtered</span>' : ''}`;
+const flags = (j: Job) => `<span class="tag state ${['new', 'seen', 'dismissed', 'applied'].includes(j.state) ? j.state : ''}">${escape(j.state)}</span>${j.score_stale ? '<span class="flag">score out of date</span>' : ''}${j.content_purged_at ? '<span class="flag">expired; open on Upwork</span>' : ''}${j.location_unclear ? '<span class="flag">location unclear</span>' : ''}${j.filtered_reason ? '<span class="tag filtered">Filtered</span>' : ''}`;
 const reason = (j: Job) => `<p class="reason">${escape(j.score_reason)}</p>${j.filtered_reason ? `<p class="reason">Filtered · ${escape(j.filtered_reason)}</p>` : ''}`;
 function pay(j: Job) {
   const values = [j.pay_min, j.pay_max].filter((n): n is number => n !== null);
@@ -107,7 +107,14 @@ function scanTime(value: string) {
 }
 function renderSources() {
   renderScoreAll();
-  replace('a-scans', `<section class="scan-panel"><div class="section-heading"><h2>Scans</h2><button data-action="scan" ${runningId || starting ? 'disabled' : ''}>Scan all</button></div><p class="muted">Discover Jobs from each Source.</p>${runningId ? `<div class="scan-progress" role="status"><strong>${scoringAll ? 'Scoring in progress' : 'Scan in progress'}</strong>${scan ? scan.sources.map(name => `<div>${escape(name)}${counts(scan?.per_source[name])}</div>`).join('') : '<span>Waiting for Source counts…</span>'}</div>` : '<p class="scan-idle">Ready for a new Scan</p>'}<div class="scan-sources">${sources.map(s => `<article class="scan-source"><div><strong>${escape(s.name)}</strong><button data-action="scan" data-source="${escape(s.name)}" ${runningId || starting ? 'disabled' : ''}>Scan</button></div>${s.last ? `<small>Last Scan · ${escape(scanTime(s.last.finished_at ?? s.last.started_at))} · ${escape(s.last.status)}</small>${counts(s.last.counts)}` : '<small>No Scan yet</small>'}${s.name === 'upwork' ? `<p class="connect">${connected ? '<span class="connected">● Upwork connected</span>' : '<button data-action="connect">Connect Upwork</button>'}</p><button data-action="schedule" aria-pressed="${scheduled}">Scheduled Scans: ${scheduled ? 'On' : 'Off'}</button><button data-action="telegram">Start Telegram queue</button>` : ''}</article>`).join('')}</div></section>`);
+  const status = element('scan-status');
+  const failed = sources.filter(s => s.last?.status === 'failed').length;
+  const errors = sources.filter(s => s.last?.counts?.errors?.length).length;
+  status.classList.toggle('failed', !runningId && (failed > 0 || errors > 0));
+  status.textContent = starting ? 'Starting Scan…' : runningId
+    ? `${scoringAll ? 'Scoring' : 'Scanning'}${scan ? ` ${scan.sources.join(', ')}` : '…'}`
+    : failed ? `${failed} Source${failed === 1 ? '' : 's'} failed · Open Scans` : errors ? `${errors} Source${errors === 1 ? '' : 's'} with errors · Open Scans` : 'Scans ready';
+  replace('a-scans', `<section class="scan-panel"><div class="section-heading"><h2>Scans</h2><button class="btn primary" data-action="scan" ${runningId || starting ? 'disabled' : ''}>Scan all</button></div><p class="muted">Discover Jobs from each Source.</p>${runningId ? `<div class="scan-progress" role="status"><strong>${scoringAll ? 'Scoring in progress' : 'Scan in progress'}</strong>${scan ? scan.sources.map(name => `<div>${escape(name)}${counts(scan?.per_source[name])}</div>`).join('') : '<span>Waiting for Source counts…</span>'}</div>` : '<p class="scan-idle">Ready for a new Scan</p>'}<div class="scan-sources">${sources.map(s => `<article class="scan-source"><div><strong>${escape(s.name)}</strong><button data-action="scan" data-source="${escape(s.name)}" ${runningId || starting ? 'disabled' : ''}>Scan</button></div>${s.last ? `<small>Last Scan · ${escape(scanTime(s.last.finished_at ?? s.last.started_at))} · ${escape(s.last.status)}</small>${counts(s.last.counts)}` : '<small>No Scan yet</small>'}${s.name === 'upwork' ? `<p class="connect">${connected ? '<span class="connected">● Upwork connected</span>' : '<button data-action="connect">Connect Upwork</button>'}</p><button data-action="schedule" aria-pressed="${scheduled}">Scheduled Scans: ${scheduled ? 'On' : 'Off'}</button><button data-action="telegram">Start Telegram queue</button>` : ''}</article>`).join('')}</div></section>`);
 }
 async function toggleSchedule() {
   scheduled = (await api<{ upwork: boolean }>('schedule', 'PUT', { upwork: !scheduled })).upwork;
@@ -249,11 +256,21 @@ async function scoreJob(id: number) {
     await loadJobs();
   } finally { pendingScores.delete(id); renderJobs(); renderDetail(); }
 }
-function focusScans() {
-  if (matchMedia('(width < 900px)').matches) { closeDetail(); element('a-scans').classList.add('is-open'); }
-  root.querySelector('[data-action="scans"]')?.setAttribute('aria-expanded', String(element('a-scans').classList.contains('is-open')));
-  element('a-scans').focus();
+function showView(next: string, focus = false) {
+  view = next === 'scans' ? 'scans' : 'triage';
+  closeDetail();
+  element('triage').hidden = view !== 'triage';
+  element('a-scans').hidden = view !== 'scans';
+  element('manual').hidden = view !== 'triage';
+  document.querySelectorAll<HTMLElement>('.app-nav [data-view]').forEach(tab => {
+    if (tab.dataset.view === view) tab.setAttribute('aria-current', 'page');
+    else tab.removeAttribute('aria-current');
+  });
+  document.title = `joule · ${view === 'triage' ? 'Triage' : 'Scans'}`;
+  if (focus) element(view === 'triage' ? 'triage' : 'a-scans').focus();
 }
+window.addEventListener('hashchange', () => showView(location.hash.slice(1), true));
+showView(location.hash.slice(1));
 root.addEventListener('click', event => {
   const target = (event.target as HTMLElement).closest<HTMLElement>('[data-action]');
   if (!target || target instanceof HTMLInputElement) return;
@@ -273,10 +290,6 @@ root.addEventListener('click', event => {
   if (target.dataset.action === 'close') closeDetail();
   if (target.dataset.action === 'scan') void startScan(target.dataset.source).catch(notice);
   if (target.dataset.action === 'connect') window.open('/auth/upwork/connect', 'upwork-connect', 'popup,width=640,height=760');
-  if (target.dataset.action === 'scans') {
-    const open = element('a-scans').classList.toggle('is-open'); target.setAttribute('aria-expanded', String(open));
-    if (open) element('a-scans').focus();
-  }
 });
 window.addEventListener('message', event => {
   if (event.origin === location.origin && event.data === 'upwork-connected') { notice('Upwork connected'); void loadSources().catch(notice); }
@@ -285,8 +298,9 @@ root.addEventListener('change', event => { if ((event.target as HTMLElement).clo
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && detailId) { closeDetail(); return; }
   if ((event.target as HTMLElement).closest('input, textarea, select, [contenteditable]') || event.ctrlKey || event.metaKey || event.altKey) return;
-  if (event.key === 's') { event.preventDefault(); focusScans(); return; }
-  if (detailId || !jobs.length) return;
+  if (event.key === 's') { event.preventDefault(); location.hash = 'scans'; return; }
+  if (event.key === 'Escape' && view === 'scans') { location.hash = 'triage'; return; }
+  if (view !== 'triage' || detailId || !jobs.length) return;
   if (['j', 'k', 'o', 'd', 'a'].includes(event.key)) event.preventDefault();
   const index = jobs.findIndex(j => j.id === selected);
   if (event.key === 'j' || event.key === 'k') {

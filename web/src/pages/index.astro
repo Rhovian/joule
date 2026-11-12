@@ -3,17 +3,18 @@ import '../dashboard.css';
 ---
 <!doctype html>
 <html lang="en">
-  <head><meta charset="utf-8" /><meta name="viewport" content="width=device-width" /><meta name="description" content="joule Job dashboard" /><title>joule · Jobs</title><link rel="icon" href="data:," /></head>
+  <head><meta charset="utf-8" /><meta name="viewport" content="width=device-width" /><meta name="description" content="joule Job dashboard" /><title>joule · Triage</title><link rel="icon" href="data:," /><link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin /><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Inter+Tight:wght@700;800&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet" /></head>
   <body>
-    <header class="app-header"><a class="brand" href="/">joule<span class="brand-dot">.</span></a><span class="header-divider"></span><span>Jobs</span></header>
-    <main id="dashboard" class="variant-a">
-      <div class="page-title"><div><span class="eyebrow">01 / TRIAGE</span><h1>Find the next good fit.</h1><p>Scan the details. Keep the Jobs worth a closer look.</p></div><div class="keyboard-hint"><kbd>j</kbd> / <kbd>k</kbd> move · <kbd>o</kbd> open · <kbd>d</kbd> dismiss / restore · <kbd>a</kbd> applied · <kbd>s</kbd> Scans</div></div>
-      <section id="manual" class="job-content draft" aria-label="Manual input"></section>
-      <button class="a-scans-toggle" data-action="scans" aria-controls="a-scans" aria-expanded="false">Scans</button>
-      <div class="a-layout"><aside id="a-scans" class="a-scan-sidebar" tabindex="-1" aria-label="Scans"><p class="empty">Loading Sources…</p></aside><div class="a-table-area">
+    <header class="app-header"><a class="brand" href="/">joule<span class="brand-dot">.</span></a><nav class="app-nav" aria-label="Main"><a href="#triage" data-view="triage" aria-current="page">Triage</a><a href="#scans" data-view="scans">Scans <kbd>s</kbd></a></nav><a id="scan-status" class="scan-status" href="#scans" data-view="scans">Loading Scans…</a></header>
+    <main id="dashboard">
+      <section id="triage" aria-label="Triage" tabindex="-1">
         <div class="controls"><label><input type="checkbox" name="unscored" checked /> Show unscored</label><label><input type="checkbox" name="filtered" /> Show Filtered</label><label><input type="checkbox" name="dismissed" /> Show dismissed</label><label><input type="checkbox" name="applied" /> Show applied</label><fieldset class="source-picks" aria-label="Sources"></fieldset><span id="job-count"></span><button id="score-all" data-action="score-all" disabled>Score all</button></div>
         <div id="jobs" class="table-wrap" aria-label="Jobs"><p class="empty">Loading Jobs…</p></div>
-      </div></div><div id="detail"></div>
+        <footer class="keyboard-hint"><kbd>j</kbd> / <kbd>k</kbd> move · <kbd>o</kbd> open · <kbd>d</kbd> dismiss / restore · <kbd>a</kbd> applied · <kbd>s</kbd> Scans · <kbd>Esc</kbd> close</footer>
+      </section>
+      <section id="a-scans" tabindex="-1" aria-label="Scans" hidden><p class="empty">Loading Sources…</p></section>
+      <section id="manual" class="job-content draft" aria-label="Manual input"></section>
+      <div id="detail"></div>
       <noscript><p>Enable JavaScript to load Jobs and run Scans.</p></noscript>
     </main><div id="notice" role="status" aria-live="polite"></div>
     <script>import '../dashboard'; import '../manual';</script>
