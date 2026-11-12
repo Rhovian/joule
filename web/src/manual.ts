@@ -28,12 +28,16 @@ let pdfUrl: string | null = null;
 let navHome: { parent: Node; next: Node | null } | null = null;
 const nav = document.getElementById('mobile-nav')!;
 const triggers = document.querySelectorAll<HTMLButtonElement>('[data-open-fill]');
-function defaults() {
+function defaults(reset = false) {
   const upwork = kind.value === 'upwork';
   const count = readPaste(paste.value).questions.length;
-  proposal.disabled = !upwork; proposal.checked = upwork;
-  answers.disabled = !upwork || !count; answers.checked = upwork && count > 0;
-  cv.checked = letter.checked = !upwork;
+  proposal.disabled = !upwork;
+  answers.disabled = !upwork || !count;
+  if (reset || !edited.has('outputs')) {
+    proposal.checked = upwork;
+    answers.checked = upwork && count > 0;
+    cv.checked = letter.checked = !upwork;
+  }
   get('answers-help').textContent = upwork ? `${count} screening question${count === 1 ? '' : 's'} detected.` : 'Board-question answers are not available for pasted Jobs.';
   dialog.querySelector('.fill-kind-help')!.textContent = kind.value === 'questions' ? 'Paste the Job posting above the questions to provide context, then correct the kind.' : 'Detected locally. Correct the kind or edit the pasted text if needed.';
   updateButton();
@@ -44,21 +48,25 @@ function updateButton() {
   button.textContent = busy ? 'Generating…' : `Generate ${count} output${count === 1 ? '' : 's'}`;
   button.disabled = busy || !count || kind.value === 'questions';
 }
+function updateFilename() {
+  if (!edited.has('filename')) filename.value = `JB_CV_${(company.value || title.value || 'Job').replace(/[^\p{L}\p{N}_-]+/gu, '_')}.pdf`;
+}
 function detect() {
   const data = readPaste(paste.value);
+  const previousKind = kind.value;
   if (!kindChanged) kind.value = data.kind;
   if (!edited.has('title')) title.value = data.title;
   if (!edited.has('company')) company.value = data.company;
-  if (!edited.has('filename')) filename.value = `JB_CV_${(company.value || title.value || 'Job').replace(/[^\p{L}\p{N}_-]+/gu, '_')}.pdf`;
+  updateFilename();
   get('question-count').textContent = `${data.questions.length} question${data.questions.length === 1 ? '' : 's'}`;
   const review = get<HTMLDetailsElement>('question-review'); review.hidden = !data.questions.length;
   review.querySelector('ol')!.replaceChildren(...data.questions.map(question => { const li = document.createElement('li'); li.textContent = question; return li; }));
-  defaults();
+  defaults(kind.value !== previousKind);
 }
 paste.addEventListener('input', detect);
-kind.addEventListener('change', () => { kindChanged = true; defaults(); });
-for (const [name, input] of [['title', title], ['company', company], ['filename', filename]] as const) input.addEventListener('input', () => edited.add(name));
-[letter, cv, answers, proposal].forEach(input => input.addEventListener('change', updateButton));
+kind.addEventListener('change', () => { kindChanged = true; defaults(true); });
+for (const [name, input] of [['title', title], ['company', company], ['filename', filename]] as const) input.addEventListener('input', () => { edited.add(name); updateFilename(); });
+[letter, cv, answers, proposal].forEach(input => input.addEventListener('change', () => { edited.add('outputs'); updateButton(); }));
 function open() {
   if (dialog.open) return;
   navHome = { parent: nav.parentNode!, next: nav.nextSibling }; dialog.append(nav);
