@@ -2,7 +2,7 @@ import type { Source } from './types';
 import { age, escape } from './format';
 import { sourceStatus } from './source-status';
 
-export function createSourceFilter(onChange: () => void, onOpen: () => void) {
+export function createSourceFilter(onChange: () => void, onOpen: () => void, onInlineOpen: () => void) {
   const menu = document.getElementById('sources-menu')!;
   const trigger = document.getElementById('sources-button')!;
   const search = document.getElementById('source-search') as HTMLInputElement;
@@ -10,10 +10,11 @@ export function createSourceFilter(onChange: () => void, onOpen: () => void) {
   let sources: Source[] = [], selected = new Set<string>();
   const isOpen = () => menu.matches(':popover-open');
   const rows = () => Array.from(options.querySelectorAll<HTMLButtonElement>('[data-source]'));
-  function close() { if (isOpen()) menu.hidePopover(); }
+  function close() { if (menu.hasAttribute('popover') && isOpen()) menu.hidePopover(); }
   function render() {
     menu.querySelectorAll<HTMLButtonElement>('[data-pick]').forEach(button => { button.disabled = !sources.length; });
     document.getElementById('source-count')!.textContent = `${selected.size} of ${sources.length}`;
+    document.getElementById('mobile-source-count')!.textContent = `Sources · ${selected.size} of ${sources.length}`;
     const focused = (document.activeElement as HTMLElement)?.dataset;
     const query = search.value.trim().toLocaleLowerCase();
     const matching = sources.filter(s => s.name.toLocaleLowerCase().includes(query))
@@ -39,7 +40,7 @@ export function createSourceFilter(onChange: () => void, onOpen: () => void) {
     if ((event as ToggleEvent).newState === 'open') { search.value = ''; render(); onOpen(); }
   });
   menu.addEventListener('focusout', event => {
-    if (event.relatedTarget instanceof Node && !menu.contains(event.relatedTarget) && event.relatedTarget !== trigger) close();
+    if (menu.hasAttribute('popover') && event.relatedTarget instanceof Node && !menu.contains(event.relatedTarget) && event.relatedTarget !== trigger) close();
   });
   search.addEventListener('input', render);
   menu.addEventListener('click', event => {
@@ -55,6 +56,10 @@ export function createSourceFilter(onChange: () => void, onOpen: () => void) {
   document.addEventListener('keydown', event => {
     if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return;
     const typing = (event.target as HTMLElement).closest('input:not([type=checkbox]), textarea, select, [contenteditable]');
+    if (!menu.hasAttribute('popover')) {
+      if (event.key === 'f' && !typing && !document.getElementById('triage')!.hidden) { event.preventDefault(); onInlineOpen(); }
+      return;
+    }
     if (!isOpen()) {
       if (event.key === 'f' && !typing && !document.getElementById('triage')!.hidden) {
         event.preventDefault(); const filters = trigger.closest('details'); if (filters) filters.open = true; menu.showPopover(); event.stopImmediatePropagation();

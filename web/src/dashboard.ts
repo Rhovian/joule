@@ -2,6 +2,7 @@ import type { Scan, Source, Job, DraftKind } from './types';
 import { age, escape } from './format';
 import { createSourceFilter } from './sources';
 import { createScans } from './scans';
+import { createMobile } from './mobile';
 import { sourceStatus } from './source-status';
 import { external, score, dismiss, applied, pay } from './job';
 import { renderDrawer, draftSelection, draftKind, type DrawerEdits, type Asked } from './drawer';
@@ -19,7 +20,7 @@ let detailVersion = 0, activeSection = 'fit';
 let scheduled = false, detailId = 0, jobsVersion = 0, connected = true, runningId: number | null = null, scan: Scan | null = null, starting = false;
 let byScore = false, scoringAll = false, view = 'triage';
 let jobCounts: Record<string, number> = {};
-const sourceFilter = createSourceFilter(() => void loadJobs().catch(notice), () => void loadSources().catch(notice));
+const sourceFilter = createSourceFilter(() => void loadJobs().catch(notice), () => void loadSources().catch(notice), () => mobile.openFilters());
 let noticeTimer: ReturnType<typeof setTimeout>, pollTimer: ReturnType<typeof setTimeout>;
 function notice(error: unknown) {
   element('notice').textContent = error instanceof Error ? error.message : String(error);
@@ -64,13 +65,15 @@ function emptyJobs() {
 function renderJobs() {
   renderScoreAll();
   element('split-summary').textContent = `${jobs.length} Jobs · ${Array.from(root.querySelectorAll<HTMLInputElement>('.controls > label input:checked'), input => input.name[0].toUpperCase() + input.name.slice(1)).join(', ')} · ${sourceFilter.count()} Sources`;
+  mobile.update(jobs.length, `${Array.from(root.querySelectorAll<HTMLInputElement>('.controls > label input:checked'), input => input.name[0].toUpperCase() + input.name.slice(1)).join(', ')} · ${sourceFilter.count()} of ${sources.length} Sources`);
+  element('mobile-job-count').textContent = `${jobs.length} Jobs`;
   element('job-count').textContent = `${jobs.length} visible`;
   element('row-position').textContent = `Row ${Math.max(0, jobs.findIndex(j => j.id === selected) + 1)} of ${jobs.length}`;
   element('job-sort').textContent = byScore ? 'Fit Score ↓' : 'Rank ↓';
   element('job-sort').setAttribute('aria-pressed', String(byScore));
   element('jobs').setAttribute('aria-busy', 'false');
   replace('jobs', jobs.length ? `<table class="triage-table"><thead><tr><th scope="col">Rank</th><th scope="col">Fit</th><th scope="col">Job</th><th scope="col">Reason</th><th scope="col">Sources</th><th scope="col">Age</th><th scope="col">State</th></tr></thead><tbody>${jobs.map(j =>
-    `<tr class="${j.id === selected ? 'selected' : ''} ${j.state === 'dismissed' ? 'is-dismissed' : ''}" data-job="${escape(j.id)}" aria-selected="${j.id === selected}"><td class="rank">${j.id === selected ? '› ' : ''}${j.rank == null ? '—' : Math.round(j.rank)}</td><td>${score(j)}</td><td><button class="job-title" data-action="open" data-id="${escape(j.id)}" title="${escape(j.title)}">${escape(j.title)}</button><p class="company" title="${escape([j.company, j.location_raw, pay(j)].filter(Boolean).join(' · '))}">${escape((detailId ? [j.company, j.source, j.duplicates.length ? `+${j.duplicates.length}` : null] : [j.company, j.location_raw]).filter(Boolean).join(' · '))}</p></td><td><div class="row-reason">${escape(j.filtered_reason ? `Filtered · ${j.filtered_reason}` : j.score_reason ?? (j.score === null ? 'Not scored yet.' : ''))}</div>${scoreAgain(j)}</td><td class="row-sources">${external(j.link, j.source)}${j.duplicates.length ? `<button class="tag duplicate" data-action="open" data-id="${escape(j.id)}" title="${escape(j.duplicates.map(d => d.source).join(', '))}" aria-label="${j.duplicates.length} Duplicates; open Job Sources">+${j.duplicates.length}</button>` : ''}</td><td class="age">${age(j.posted_at ?? j.first_seen_at)}</td><td><div class="flags">${j.state === 'new' ? '' : `<span class="tag state ${['seen', 'dismissed', 'applied'].includes(j.state) ? j.state : ''}">${escape(j.state)}</span>`}${j.filtered_reason ? '<span class="tag filtered">Filtered</span>' : j.score === null ? '<span class="tag unscored">unscored</span>' : ''}${j.score_stale ? '<span class="flag">out of date</span>' : ''}${j.content_purged_at ? '<span class="flag">expired</span>' : ''}${j.location_unclear ? '<span class="flag">location unclear</span>' : ''}</div>${j.id === selected ? `<div class="row-actions">${applied(j, j.state === 'applied' ? 'Unmark' : 'Applied')}${dismiss(j)}</div>` : ''}</td></tr>`).join('')}</tbody></table>` : emptyJobs());
+    `<tr class="${j.id === selected ? 'selected' : ''} ${j.state === 'dismissed' ? 'is-dismissed' : ''}" data-job="${escape(j.id)}" aria-selected="${j.id === selected}"><td class="rank">${j.id === selected ? '› ' : ''}${j.rank == null ? '—' : Math.round(j.rank)}</td><td>${score(j)}</td><td><button class="job-title" data-action="open" data-id="${escape(j.id)}" title="${escape(j.title)}">${escape(j.title)}</button><span class="mobile-only mobile-title">${escape(j.title)}</span><button class="mobile-only mobile-card-action" data-action="open" data-id="${j.id}" aria-label="Open Job: ${escape(j.title)}"></button><p class="company" title="${escape([j.company, j.location_raw, pay(j)].filter(Boolean).join(' · '))}">${escape((detailId ? [j.company, j.source, j.duplicates.length ? `+${j.duplicates.length}` : null] : [j.company, j.location_raw]).filter(Boolean).join(' · '))}</p><p class="mobile-only mobile-job-meta">${escape([j.company, j.location_raw, j.source + (j.duplicates.length ? ` +${j.duplicates.length}` : '')].filter(Boolean).join(' · '))} · ${age(j.posted_at ?? j.first_seen_at)}</p></td><td><div class="row-reason">${escape(j.filtered_reason ? `Filtered · ${j.filtered_reason}` : j.score_reason ?? (j.score === null ? 'Not scored yet.' : ''))}</div>${scoreAgain(j)}</td><td class="row-sources">${external(j.link, j.source)}${j.duplicates.length ? `<button class="tag duplicate" data-action="open" data-id="${escape(j.id)}" title="${escape(j.duplicates.map(d => d.source).join(', '))}" aria-label="${j.duplicates.length} Duplicates; open Job Sources">+${j.duplicates.length}</button>` : ''}</td><td class="age">${age(j.posted_at ?? j.first_seen_at)}</td><td><div class="flags">${j.state === 'new' ? '' : `<span class="tag state ${['seen', 'dismissed', 'applied'].includes(j.state) ? j.state : ''}">${escape(j.state)}</span>`}${j.filtered_reason ? '<span class="tag filtered">Filtered</span>' : j.score === null ? '<span class="tag unscored">unscored</span>' : ''}${j.score_stale ? '<span class="flag">out of date</span>' : ''}${j.content_purged_at ? '<span class="flag">expired</span>' : ''}${j.location_unclear ? '<span class="flag">location unclear</span>' : ''}</div>${j.id === selected ? `<div class="row-actions">${applied(j, j.state === 'applied' ? 'Unmark' : 'Applied')}${dismiss(j)}</div>` : ''}</td></tr>`).join('')}</tbody></table>` : emptyJobs());
 }
 async function loadJobs() {
   const version = ++jobsVersion;
@@ -220,7 +223,7 @@ async function openJob(id: number, focus = !detailId) {
 function closeDetail() {
   if (!detailId) return;
   const id = jobs.some(j => j.id === detailId) ? detailId : selected; detailId = 0; detail = null; detailVersion++; renderDetail(); renderJobs();
-  root.querySelector<HTMLElement>(`[data-action="open"][data-id="${id}"]`)?.focus({ preventScroll: true });
+  Array.from(root.querySelectorAll<HTMLElement>(`[data-action="open"][data-id="${id}"]`)).find(button => button.getClientRects().length)?.focus({ preventScroll: true });
 }
 function moveJob(step: number) {
   const index = jobs.findIndex(j => j.id === (detailId || selected));
@@ -233,10 +236,11 @@ function moveJob(step: number) {
 }
 function jumpSection(section: string) {
   const target = document.getElementById(`drawer-${section}`);
+  element('detail').querySelector<HTMLElement>('.drawer')?.setAttribute('data-section', section);
   if (!target) return;
   activeSection = section;
   const pane = target.closest<HTMLElement>('.drawer-scroll');
-  if (pane) pane.scrollTo({ top: target.offsetTop - (pane.querySelector('.drawer-nav')?.clientHeight ?? 0) - 12 });
+  if (pane) pane.scrollTo({ top: matchMedia('(max-width: 740px)').matches ? 0 : target.offsetTop - (pane.querySelector('.drawer-nav')?.clientHeight ?? 0) - 12 });
   target.focus({ preventScroll: true });
   root.querySelectorAll<HTMLElement>('.drawer-nav button').forEach(button => {
     if (button.dataset.section === section) button.setAttribute('aria-current', 'location'); else button.removeAttribute('aria-current');
@@ -259,6 +263,7 @@ async function scoreJob(id: number) {
     await loadJobs();
   } finally { pendingScores.delete(id); renderJobs(); renderDetail(); }
 }
+const mobile = createMobile({ state: changeState, error: notice, refresh: () => void loadSources().catch(notice) });
 function showView(next: string, focus = false) {
   sourceFilter.close();
   view = next === 'scans' ? 'scans' : 'triage';
@@ -266,11 +271,12 @@ function showView(next: string, focus = false) {
   element('triage').hidden = view !== 'triage';
   element('a-scans').hidden = view !== 'scans';
   element('manual-panel').hidden = view !== 'triage';
-  document.querySelectorAll<HTMLElement>('.app-nav [data-view]').forEach(tab => {
+  document.querySelectorAll<HTMLElement>('.app-nav [data-view], #mobile-nav [data-view]').forEach(tab => {
     if (tab.dataset.view === view) tab.setAttribute('aria-current', 'page');
     else tab.removeAttribute('aria-current');
   });
   document.title = `joule · ${view === 'triage' ? 'Triage' : 'Scans'}`;
+  if ((element('mobile-filters') as HTMLDialogElement).open) (element('mobile-filters') as HTMLDialogElement).close();
   if (focus) element(view === 'triage' ? 'triage' : 'a-scans').focus();
 }
 window.addEventListener('hashchange', () => showView(location.hash.slice(1), true));
@@ -325,6 +331,7 @@ root.addEventListener('input', event => {
   if (target.id === 'ask-question') editing(detailId).question = target.value;
 });
 document.addEventListener('keydown', event => {
+  if ((element('mobile-filters') as HTMLDialogElement).open) return;
   const versions = root.querySelector<HTMLElement>('.draft-version-menu:popover-open');
   if (event.key === 'Escape' && versions) {
     event.preventDefault(); versions.hidePopover(); element(versions.id.replace('draft-version-menu-', 'draft-versions-')).focus({ preventScroll: true }); return;
