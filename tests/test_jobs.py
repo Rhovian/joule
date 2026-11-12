@@ -57,6 +57,7 @@ def client(tmp_path):
         ("?dismissed=true", [5, 2, 1, 3]),
         ("?applied=true", [7, 2, 1, 3]),
         ("?filtered=true&dismissed=true", [5, 4, 2, 1, 3]),
+        ("?new=false&applied=true", [7]),
         ("?source=hn", [1]),
         ("?source=hotfix", [1, 3]),
         ("?source=hn&source=remoteok", [2, 1]),
@@ -64,10 +65,24 @@ def client(tmp_path):
     ],
 )
 def test_list(client, query, ids):
+    if not query:
+        for source, expected in [
+            (None, [3, 1, 1, 1, 1]),
+            ("hn", [1, 0, 0, 0, 0]),
+            ("absent", [0, 0, 0, 0, 0]),
+        ]:
+            counts = client.get(
+                "/api/jobs/counts", params={"source": source} if source else {}
+            ).json()
+            assert counts == dict(
+                zip(["new", "unscored", "filtered", "applied", "dismissed"], expected)
+            )
     rows = client.get("/api/jobs" + query).json()
     assert [row["id"] for row in rows] == ids
     assert not {"description", "extra", "score_points"} & rows[0].keys()
     assert type(rows[0]["remote"]) is int and rows[0]["location_unclear"] == 0
+    if query.startswith("?new=false"):
+        return
     primary = next(row for row in rows if row["id"] == 1)
     assert primary["duplicates"] == [
         {"id": 6, "source": "hn", "link": "https://example.com"}

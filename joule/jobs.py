@@ -11,6 +11,15 @@ from joule.db import connect
 from joule.scan import ADAPTERS, ScanInProgress
 
 router = APIRouter(prefix="/api")
+SOURCE_FILTER = (
+    "(? OR source IN (SELECT value FROM json_each(?)) OR EXISTS "
+    "(SELECT 1 FROM jobs d WHERE d.primary_id = jobs.id "
+    "AND d.source IN (SELECT value FROM json_each(?))))"
+)
+
+
+def source_params(source):
+    return (not source, json.dumps(source or []), json.dumps(source or []))
 
 
 def duplicates(db, job_id):
@@ -27,6 +36,7 @@ def duplicates(db, job_id):
 async def list_jobs(
     request: Request,
     unscored: bool = True,
+    new: bool = True,
     filtered: bool = False,
     dismissed: bool = False,
     applied: bool = False,
@@ -43,18 +53,16 @@ async def list_jobs(
             "AND (? OR score IS NOT NULL) AND (? OR filtered_reason IS NULL) "
             "AND (? OR state != 'dismissed') "
             "AND (? OR state != 'applied') "
-            "AND (? OR source IN (SELECT value FROM json_each(?)) OR EXISTS "
-            "(SELECT 1 FROM jobs d WHERE d.primary_id = jobs.id "
-            "AND d.source IN (SELECT value FROM json_each(?)))) "
+            "AND (? OR state NOT IN ('new', 'seen') OR filtered_reason IS NOT NULL) "
+            f"AND {SOURCE_FILTER} "
             f"ORDER BY {sort} DESC NULLS LAST, posted_at DESC LIMIT 500",
             (
                 unscored,
                 filtered,
                 dismissed,
                 applied,
-                not source,
-                json.dumps(source or []),
-                json.dumps(source or []),
+                new,
+                *source_params(source),
             ),
         ).fetchall()
         return [
@@ -71,6 +79,21 @@ async def list_jobs(
             }
             for row in rows
         ]
+
+
+@router.get("/jobs/counts")
+def job_counts(request: Request, source: Annotated[list[str] | None, Query()] = None):
+    with closing(connect(request.app.state.data_dir / "joule.db")) as db:
+        row = db.execute(
+            "SELECT COUNT(CASE WHEN state IN ('new', 'seen') AND filtered_reason IS NULL THEN 1 END) AS new, "
+            "COUNT(CASE WHEN score IS NULL THEN 1 END) AS unscored, "
+            "COUNT(filtered_reason) AS filtered, "
+            "COUNT(CASE WHEN state='applied' THEN 1 END) AS applied, "
+            "COUNT(CASE WHEN state='dismissed' THEN 1 END) AS dismissed "
+            f"FROM jobs WHERE primary_id IS NULL AND {SOURCE_FILTER}",
+            source_params(source),
+        ).fetchone()
+        return dict(row)
 
 
 @router.get("/jobs/resolve")
