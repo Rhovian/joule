@@ -17,7 +17,7 @@ async function connect(chrome, value, fetcher = fetch) {
   return 'Connected to joule';
 }
 if (typeof module !== 'undefined') module.exports = {connect, normalizeOrigin};
-if (typeof document !== 'undefined') {
+if (typeof document !== 'undefined' && document.body.id === 'options') {
   const input = document.getElementById('origin');
   chrome.storage.local.get('origin').then(config => { input.value = config.origin || ''; });
   document.getElementById('test').addEventListener('click', async () => {
