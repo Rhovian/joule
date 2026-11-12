@@ -33,7 +33,9 @@ for (const filled of [1, 0]) test(`set rows have no actions; Ask filled=${filled
   const askRow = [...element('remaining').querySelectorAll('.field-row')].find(row => row.textContent.includes('Why us?'));
   const buttons = () => [...askRow.querySelectorAll('button')].filter(button => !button.hidden);
   assert.deepEqual(buttons().map(button => button.textContent), ['Ask', 'Save to bank']);
+  const settings = element('settings'); settings.disabled = true;
   buttons()[0].click(); await settle();
+  assert.equal(settings.disabled, true, 'actions preserve unrelated disabled controls');
   assert.deepEqual(buttons().map(button => button.textContent), ['Ask again', 'Copy', 'Save to bank']);
   assert.equal(askRow.querySelector('.field-answer').textContent, 'Profile answer <b>as text</b>');
   assert.equal(askRow.querySelector('b'), null);

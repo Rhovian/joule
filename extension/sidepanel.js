@@ -81,6 +81,7 @@ function picker() {
 async function run(work) {
   if (busy) return;
   busy = true;
+  const focused = document.activeElement, disabled = new Set(document.querySelectorAll('button:disabled,input:disabled'));
   document.querySelectorAll('button,input').forEach(node => { node.disabled = true; });
   showActive(active); status('Working…');
   try { await work(); }
@@ -90,8 +91,9 @@ async function run(work) {
     try { showActive(await send({type: 'active'})); } catch { showActive(null); }
   } finally {
     busy = false;
-    document.querySelectorAll('button,input').forEach(node => { node.disabled = false; });
+    document.querySelectorAll('button,input').forEach(node => { node.disabled = disabled.has(node); });
     showActive(active);
+    if (document.activeElement === document.body && focused.isConnected) focused.focus({preventScroll: true});
     if (refreshPending) { refreshPending = false; void run(refresh); }
   }
 }
