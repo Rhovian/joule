@@ -1,7 +1,18 @@
 const element = id => document.getElementById(id);
 const text = (tag, value, className = '') => Object.assign(document.createElement(tag), {textContent: value ?? '', className});
 let jobs = [], busy = false, active = null, refreshPending = false, choosing = false, connected = null, origin = '';
-let resumeDraft = null, displayedPage = null, lastResult = null;
+let resumeDraft = null, displayedPage = null, lastResult = null, theme = 'system';
+const systemTheme = matchMedia('(prefers-color-scheme: dark)');
+function applyTheme() {
+  document.documentElement.classList.toggle('dark', theme === 'dark' || theme === 'system' && systemTheme.matches);
+}
+systemTheme.addEventListener('change', applyTheme);
+applyTheme();
+async function refreshTheme() {
+  try { const value = await send({type: 'appearance'}); theme = ['light', 'dark'].includes(value?.theme) ? value.theme : 'system'; }
+  catch { theme = 'system'; }
+  applyTheme();
+}
 async function send(message) {
   const result = await chrome.runtime.sendMessage(message);
   if (result.error) throw Error(result.error);
@@ -22,7 +33,7 @@ function online(value, reason = '') {
   element('connection-state').textContent = value ? 'Connected' : 'Offline';
   element('connection-title').textContent = value ? 'Connection options' : 'Can’t reach Joule';
   element('connection-message').textContent = reason;
-  if (!value) connectionOptions(true);
+  if (!value) { theme = 'system'; applyTheme(); connectionOptions(true); }
 }
 function score(job) {
   const value = job.score;
@@ -112,6 +123,7 @@ async function refresh() {
   catch (error) { online(false, error.message); throw error; }
   const reconnecting = connected === false;
   online(true); if (reconnecting) connectionOptions(false);
+  await refreshTheme();
   await refreshDrafts(); picker();
   status(detection, detection.startsWith('Auto-detect failed:'));
 }

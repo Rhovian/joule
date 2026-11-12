@@ -49,6 +49,7 @@ function createBackground(chrome, fetcher = fetch) {
       return {};
     }
     if (!trusted(sender)) throw Error('Only extension UI can request joule data');
+    if (message.type === 'appearance') return api('/api/appearance');
     if (message.type === 'detect') {
       await chrome.storage.session.set({active: null});
       const tab = await chrome.tabs.get(integer(message.tabId));
