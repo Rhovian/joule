@@ -1,0 +1,43 @@
+.settings-heading { display: flex; align-items: baseline; gap: 12px; margin: 8px 0 20px; }
+.settings-heading h1 { font-size: 24px; letter-spacing: -.7px; }
+.settings-heading p { font-size: 12.5px; color: var(--muted); }
+#settings-refresh { margin-left: auto; }
+.settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.settings-card { min-width: 0; background: var(--paper); border: 1px solid var(--line); border-radius: 8px; }
+.settings-card > h2 { padding: 12px 16px; font-size: 16px; letter-spacing: -.4px; border-bottom: 1px solid var(--soft-line); }
+.connection-row, .appearance-row { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--soft-line); }
+.connection-row:last-child, .appearance-row:last-child { border-bottom: 0; }
+.connection-row > div, .appearance-row > div:first-child { flex: 1; min-width: 0; }
+.settings-card h3 { font: 600 13px var(--font-ui); margin: 0 0 3px; }
+.settings-card p { font-size: 12px; line-height: 1.5; color: var(--muted); }
+.connection-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--score-outline); }
+.connection-dot.active { background: var(--green); }
+#settings-joule-url { display: block; font: 11px var(--font-mono); color: var(--muted); overflow-wrap: anywhere; margin-top: 4px; }
+#telegram-setup { max-width: 45%; font-size: 12px; }
+#telegram-setup p { margin-top: 8px; overflow-wrap: anywhere; }
+#appearance-controls { border: 0; padding: 0; margin: 0; min-width: 0; }
+.settings-segment { display: flex; border: 1px solid var(--control-border); border-radius: 6px; overflow: hidden; flex-shrink: 0; }
+.settings-segment button { border: 0; border-radius: 0; border-right: 1px solid var(--soft-line); padding: 0 12px; min-height: 28px; font-size: 12px; color: var(--ink-3); background: var(--paper); }
+.settings-segment button:last-child { border-right: 0; }
+.settings-segment button[aria-pressed=true] { background: var(--ink); color: var(--paper); }
+.settings-segment button:focus-visible { outline-offset: -3px; }
+#appearance-status:not(:empty) { padding: 8px 16px; border-top: 1px solid var(--soft-line); }
+#settings-link { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--control-border); border-radius: 6px; padding: 5px 9px; font-size: 12px; color: var(--ink); }
+.app-header:has(#job-search-box[hidden]) #settings-link { margin-left: auto; }
+#settings-link[aria-current=page] { background: var(--selected); border-color: var(--green); }
+:root[data-density=comfortable] .triage-table td { padding-top: 15px; padding-bottom: 15px; }
+@media (max-width: 1100px) { .settings-grid { grid-template-columns: 1fr; } }
+@media (max-width: 740px) {
+  body:has(#a-settings:not([hidden])) { background: var(--ground); }
+  #a-settings { padding: 16px; }
+  .settings-heading { flex-wrap: wrap; gap: 8px; }
+  .settings-heading h1 { font-size: 22px; }
+  .settings-heading p { order: 1; width: 100%; font-size: 14px; }
+  .settings-card h3 { font-size: 14px; }
+  .appearance-row { flex-wrap: wrap; }
+  .appearance-row > div:first-child { flex-basis: 100%; }
+  .settings-segment button { min-height: 44px; }
+  #settings-link { min-height: 44px; }
+  #telegram-setup summary { display: flex; align-items: center; }
+  :root[data-density=comfortable] .triage-table tr { padding-top: 18px; padding-bottom: 18px; }
+}
