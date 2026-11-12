@@ -324,7 +324,23 @@ async def update_job(request: Request, job_id: int, body: StateRequest):
 async def get_sources(request: Request):
     settings = load_settings(request.app.state.data_dir)
     with closing(connect(request.app.state.data_dir / "joule.db")) as db:
-        scans = db.execute("SELECT * FROM scans ORDER BY id DESC LIMIT 50").fetchall()
+        new_jobs = dict(
+            db.execute(
+                "WITH inbox AS (SELECT id, source FROM jobs WHERE primary_id IS NULL "
+                "AND state IN ('new', 'seen') AND filtered_reason IS NULL), "
+                "memberships AS (SELECT id, source FROM inbox UNION "
+                "SELECT inbox.id, d.source FROM inbox JOIN jobs d ON d.primary_id=inbox.id) "
+                "SELECT source, COUNT(*) FROM memberships GROUP BY source"
+            ).fetchall()
+        )
+        scans = {
+            row["source"]: row
+            for row in db.execute(
+                "WITH latest AS (SELECT json_each.value AS source, MAX(scans.id) AS id "
+                "FROM scans, json_each(scans.sources) GROUP BY json_each.value) "
+                "SELECT scans.*, latest.source FROM latest JOIN scans ON scans.id=latest.id"
+            )
+        }
         running = db.execute(
             "SELECT id FROM scans WHERE status='running' ORDER BY id DESC LIMIT 1"
         ).fetchone()
@@ -332,15 +348,12 @@ async def get_sources(request: Request):
     for name in settings.sources:
         if name not in ADAPTERS:
             continue
+        row = scans.get(name)
         last = None
-        for row in scans:
-            if name in json.loads(row["sources"]):
-                last = {
-                    k: row[k] for k in ("id", "status", "started_at", "finished_at")
-                }
-                last["counts"] = json.loads(row["per_source"] or "{}").get(name)
-                break
-        sources.append({"name": name, "last": last})
+        if row:
+            last = {k: row[k] for k in ("id", "status", "started_at", "finished_at")}
+            last["counts"] = json.loads(row["per_source"] or "{}").get(name)
+        sources.append({"name": name, "new_jobs": new_jobs.get(name, 0), "last": last})
     return {
         "sources": sources,
         "running": running["id"] if running else None,

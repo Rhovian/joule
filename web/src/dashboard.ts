@@ -1,7 +1,6 @@
-export {};
-type Counts = { new: number; duplicate: number; filtered: number; scored: number; errors: string[] };
-type Scan = { id: number; status: string; started_at: string; finished_at: string | null; sources: string[]; per_source: Record<string, Counts> };
-type Source = { name: string; last: (Omit<Scan, 'sources' | 'per_source'> & { counts: Counts | null }) | null };
+import type { Counts, Scan, Source } from './types';
+import { age, escape } from './format';
+import { createSourceFilter } from './sources';
 type DraftKind = 'cover_letter' | 'proposal' | 'tailored_cv';
 type Draft = { id: number; content: { text?: string; cover?: string; answers?: string[] }; note: string | null };
 type Job = {
@@ -16,7 +15,6 @@ type Job = {
 };
 const root = document.querySelector<HTMLElement>('#dashboard')!;
 const element = (id: string) => document.getElementById(id)!;
-const escape = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 function external(url: unknown, label: unknown) {
   try {
     const parsed = new URL(String(url));
@@ -44,6 +42,7 @@ let jobs: Job[] = [], sources: Source[] = [], selected = 0, detail: Job | null =
 let scheduled = false, detailId = 0, jobsVersion = 0, connected = true, runningId: number | null = null, scan: Scan | null = null, starting = false;
 let byScore = false, scoringAll = false, view = 'triage';
 let jobCounts: Record<string, number> = {};
+const sourceFilter = createSourceFilter(() => void loadJobs().catch(notice), () => void loadSources().catch(notice));
 let noticeTimer: ReturnType<typeof setTimeout>, pollTimer: ReturnType<typeof setTimeout>;
 function notice(error: unknown) {
   element('notice').textContent = error instanceof Error ? error.message : String(error);
@@ -80,12 +79,8 @@ function renderScoreAll() {
   button.disabled = !!runningId || starting || !unscoredVisible().length;
   button.textContent = scoringAll && runningId ? 'Scoring…' : `Score all${unscoredVisible().length ? ` ${unscoredVisible().length}` : ''}`;
 }
-function age(stamp: string, relative = false) {
-  const date = new Date(stamp), hours = Math.max(0, Math.floor((Date.now() - date.getTime()) / 3600000));
-  return `<time datetime="${escape(stamp)}" title="${escape(stamp)}">${Number.isNaN(hours) ? '—' : hours < 1 ? relative ? 'just now' : 'now' : `${hours < 24 ? `${hours}h` : hours < 168 ? `${Math.floor(hours / 24)}d` : `${Math.floor(hours / 168)}w`}${relative ? ' ago' : ''}`}</time>`;
-}
 function emptyJobs() {
-  const showing = root.querySelectorAll('.source-picks input:checked').length;
+  const showing = sourceFilter.count();
   const filtered = root.querySelector<HTMLInputElement>('[name="filtered"]')!;
   const hidden = ['filtered', 'dismissed'].filter(name => !root.querySelector<HTMLInputElement>(`[name="${name}"]`)!.checked);
   const last = sources.map(s => s.last?.finished_at ?? s.last?.started_at)
@@ -107,16 +102,13 @@ function renderJobs() {
 async function loadJobs() {
   const version = ++jobsVersion;
   const query = new URLSearchParams(Array.from(root.querySelectorAll<HTMLInputElement>('.controls > label input'), input => [input.name, String(input.checked)]));
-  const picks = Array.from(root.querySelectorAll<HTMLInputElement>('.source-picks input'));
-  const checked = picks.filter(p => p.checked).map(p => p.value);
-  if (byScore) query.set('sort', 'score');
-  if (checked.length < picks.length) checked.forEach(name => query.append('source', name));
+  const selectedSources = sourceFilter.selection();
   const sourceQuery = new URLSearchParams();
-  if (checked.length < picks.length) checked.forEach(name => sourceQuery.append('source', name));
-  const [next, totals]: [Job[], Record<string, number>] = picks.length && !checked.length ? [[], {}] : await Promise.all([
+  selectedSources?.forEach(name => { query.append('source', name); sourceQuery.append('source', name); });
+  if (byScore) query.set('sort', 'score');
+  const [next, totals]: [Job[], Record<string, number>] = selectedSources?.length === 0 ? [[], {}] : await Promise.all([
     api<Job[]>(`jobs?${query}`), api<Record<string, number>>(`jobs/counts?${sourceQuery}`),
   ]);
-
   if (version !== jobsVersion) return;
   root.querySelectorAll<HTMLElement>('[data-count]').forEach(node => { node.textContent = String(totals[node.dataset.count!] ?? 0); });
   jobCounts = totals;
@@ -148,20 +140,13 @@ async function toggleSchedule() {
   scheduled = (await api<{ upwork: boolean }>('schedule', 'PUT', { upwork: !scheduled })).upwork;
   renderSources();
 }
-function renderSourceCount() {
-  const picks = Array.from(root.querySelectorAll<HTMLInputElement>('.source-picks input'));
-  element('source-count').textContent = `${picks.filter(input => input.checked).length} of ${picks.length}`;
-}
 async function loadSources() {
   const result = await api<{ sources: Source[]; running: number | null; scheduled: boolean }>('sources');
   sources = result.sources; scheduled = result.scheduled;
-  const box = root.querySelector('.source-picks')!;
-  const was = new Map(Array.from(box.querySelectorAll('input'), input => [input.value, input.checked]));
-  if (was.size !== sources.length) box.innerHTML = sources.map(s => `<label><input type="checkbox" value="${escape(s.name)}" ${(was.get(s.name) ?? true) ? 'checked' : ''} /> ${escape(s.name)}</label>`).join('');
+  sourceFilter.update(sources);
   if (sources.some(s => s.name === 'upwork')) connected = (await api<{ connected: boolean }>('upwork/status')).connected;
   renderSources();
   if (result.running && !runningId) watchScan(result.running);
-  renderSourceCount();
 }
 function watchScan(id: number) {
   runningId = id; scan = null; clearTimeout(pollTimer); renderSources();
@@ -290,6 +275,7 @@ async function scoreJob(id: number) {
   } finally { pendingScores.delete(id); renderJobs(); renderDetail(); }
 }
 function showView(next: string, focus = false) {
+  sourceFilter.close();
   view = next === 'scans' ? 'scans' : 'triage';
   closeDetail();
   element('triage').hidden = view !== 'triage';
@@ -316,8 +302,8 @@ root.addEventListener('click', event => {
     void loadJobs().catch(notice);
   }
   if (target.dataset.action === 'clear-filters') {
-    root.querySelectorAll<HTMLInputElement>('.controls input').forEach(input => { input.checked = input.closest('.source-picks') !== null || ['new', 'unscored'].includes(input.name); });
-    renderSourceCount();
+    sourceFilter.reset();
+    root.querySelectorAll<HTMLInputElement>('.controls > label input').forEach(input => { input.checked = ['new', 'unscored'].includes(input.name); });
     void loadJobs().catch(notice);
   }
   const id = Number(target.dataset.id);
@@ -340,7 +326,7 @@ root.addEventListener('click', event => {
 window.addEventListener('message', event => {
   if (event.origin === location.origin && event.data === 'upwork-connected') { notice('Upwork connected'); void loadSources().catch(notice); }
 });
-root.addEventListener('change', event => { if ((event.target as HTMLElement).closest('.controls')) { renderSourceCount(); void loadJobs().catch(notice); } });
+root.addEventListener('change', event => { if ((event.target as HTMLElement).matches('.controls > label input')) void loadJobs().catch(notice); });
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && detailId) { closeDetail(); return; }
   if ((event.target as HTMLElement).closest('input, textarea, select, [contenteditable]') || event.ctrlKey || event.metaKey || event.altKey) return;
