@@ -30,16 +30,17 @@ small { color: var(--muted); font-size: 11px; }
 #sources-menu { position: fixed; position-anchor: --sources-button; top: anchor(bottom); left: clamp(12px, anchor(left), max(12px, calc(100vw - 376px))); inset-inline-end: auto; inset-block-end: auto; position-try-fallbacks: --sources-fit; margin: 6px 0 0; padding: 0; width: min(364px, calc(100vw - 24px)); max-height: calc(100dvh - 120px); border: 1px solid var(--line); border-radius: 10px; background: var(--paper); color: var(--ink); box-shadow: 0 16px 40px var(--shadow); }
 @position-try --sources-fit { top: 12px; left: 12px; max-height: calc(100dvh - 24px); }
 #sources-menu:popover-open { display: flex; flex-direction: column; }
-.controls .source-search { display: flex; gap: 8px; padding: 8px 14px; border: 0; border-bottom: 1px solid var(--soft-line); border-radius: 0; background: var(--paper); color: var(--muted); }
+.controls .source-search { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--soft-line); color: var(--muted); }
 .source-search svg { flex-shrink: 0; }
 .source-search input { width: 100%; min-width: 0; height: 28px; border: 0; outline-offset: 0; background: transparent; font-size: 13px; }
 .source-bulk { display: flex; align-items: center; gap: 6px; padding: 8px 14px; }
 .source-bulk > span { margin-left: auto; color: var(--muted); font-size: 11.5px; }
 #source-options { overflow-y: auto; max-height: 448px; min-height: 0; overscroll-behavior: contain; }
 .source-group { font: 600 10.5px var(--font-ui); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding: 8px 14px 4px; border-top: 1px solid var(--soft-line); }
-.source-row { position: relative; }
-.source-option { display: grid; grid-template-columns: 18px minmax(0, 1fr) 62px 34px 62px; gap: 10px; align-items: center; width: 100%; height: 34px; padding: 0 14px; border: 0; border-radius: 0; background: var(--paper); text-align: left; font-weight: 400; }
-.source-option:hover, .source-option:focus-visible, .source-row:has(.source-only:focus-visible) .source-option { background: var(--selected); outline: 0; }
+.source-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) [status] 74px 34px 62px; column-gap: 10px; padding: 0 14px; background: var(--paper); }
+.source-row:hover, .source-row:focus-within { background: var(--selected); }
+.source-option { grid-area: 1 / 1 / 2 / -1; display: grid; grid-template-columns: subgrid; align-items: center; width: 100%; height: 34px; padding: 0; border: 0; border-radius: 0; background: transparent; text-align: left; font-weight: 400; }
+.source-option:focus-visible { outline: 0; }
 .source-check { width: 16px; height: 16px; border: 1.5px solid var(--score-outline); border-radius: 4px; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; }
 .source-option[aria-checked=true] .source-check { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .source-name { overflow: hidden; text-overflow: ellipsis; font-size: 13px; color: var(--ink-3); }
@@ -47,7 +48,7 @@ small { color: var(--muted); font-size: 11px; }
 .source-status .tag { height: 18px; padding: 0 6px; font-size: 10.5px; }
 .source-new { font: 400 12px var(--font-mono); text-align: right; }
 .source-age { color: var(--muted); font-size: 11.5px; text-align: right; }
-.source-only { position: absolute; right: 132px; top: 5px; height: 24px; opacity: 0; pointer-events: none; }
+.source-only { grid-column: status; grid-row: 1; align-self: center; justify-self: end; z-index: 1; height: 24px; opacity: 0; pointer-events: none; }
 .source-row:hover .source-only, .source-row:focus-within .source-only { opacity: 1; pointer-events: auto; }
 .source-row:hover .source-status, .source-row:focus-within .source-status { visibility: hidden; }
 .source-only kbd { min-width: 14px; height: 14px; font-size: 9.5px; }
@@ -207,7 +208,6 @@ input, textarea, select { background: var(--paper); color: var(--ink); }
   button, .btn, .chip, .controls label, .row-actions button { min-height: 44px; }
   #sources-menu { max-height: calc(100dvh - 24px); }
   .source-option { height: 44px; }
-  .source-only { top: 0; }
   .source-bulk { flex-wrap: wrap; }
   .job-detail { padding: 24px; }
   .scan-sources { grid-template-columns: 1fr; }

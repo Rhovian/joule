@@ -257,7 +257,7 @@ def test_sources(client):
     )
     assert client.get("/api/sources").json() == {
         "sources": [
-            {"name": name, "new_jobs": count, "last": None}
+            {"name": name, "new_jobs": count, "last": None, "last_finished": None}
             for name, count in zip(("hotfix", "hn", "remoteok", "upwork"), (2, 1, 1, 0))
         ],
         "running": None,
@@ -286,19 +286,13 @@ def test_sources(client):
     result = client.get("/api/sources").json()
     assert [s["new_jobs"] for s in result["sources"]] == [2, 1, 1, 0]
     client.patch("/api/jobs/1", json={"state": "applied"})
-    assert [s["new_jobs"] for s in client.get("/api/sources").json()["sources"]] == [
-        1,
-        0,
-        1,
-        0,
-    ]
+    refreshed = client.get("/api/sources").json()["sources"]
+    assert [s["new_jobs"] for s in refreshed] == [1, 0, 1, 0]
     assert result["running"] == 2
-    assert [s["last"]["id"] if s["last"] else None for s in result["sources"]] == [
-        2,
-        None,
-        2,
-        None,
-    ]
+    assert [
+        tuple(s[key]["id"] if s[key] else None for key in ("last", "last_finished"))
+        for s in result["sources"]
+    ] == [(2, 1), (None, None), (2, 1), (None, None)]
     assert result["sources"][0]["last"]["counts"] == counts
     # The running Scan hasn't reached remoteok yet: no counts, not zeros.
     assert result["sources"][2]["last"]["counts"] is None

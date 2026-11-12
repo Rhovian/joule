@@ -333,14 +333,13 @@ async def get_sources(request: Request):
                 "SELECT source, COUNT(*) FROM memberships GROUP BY source"
             ).fetchall()
         )
-        scans = {
-            row["source"]: row
-            for row in db.execute(
-                "WITH latest AS (SELECT json_each.value AS source, MAX(scans.id) AS id "
-                "FROM scans, json_each(scans.sources) GROUP BY json_each.value) "
-                "SELECT scans.*, latest.source FROM latest JOIN scans ON scans.id=latest.id"
-            )
-        }
+        scans = db.execute(
+            "WITH latest AS (SELECT json_each.value AS source, MAX(scans.id) AS id, "
+            "MAX(CASE WHEN status != 'running' THEN scans.id END) AS finished_id "
+            "FROM scans, json_each(scans.sources) GROUP BY json_each.value) "
+            "SELECT scans.*, latest.source FROM latest JOIN scans "
+            "ON scans.id IN (latest.id, latest.finished_id) ORDER BY scans.id"
+        ).fetchall()
         running = db.execute(
             "SELECT id FROM scans WHERE status='running' ORDER BY id DESC LIMIT 1"
         ).fetchone()
@@ -348,12 +347,22 @@ async def get_sources(request: Request):
     for name in settings.sources:
         if name not in ADAPTERS:
             continue
-        row = scans.get(name)
-        last = None
-        if row:
-            last = {k: row[k] for k in ("id", "status", "started_at", "finished_at")}
-            last["counts"] = json.loads(row["per_source"] or "{}").get(name)
-        sources.append({"name": name, "new_jobs": new_jobs.get(name, 0), "last": last})
+        history = [
+            {k: row[k] for k in ("id", "status", "started_at", "finished_at")}
+            | {"counts": json.loads(row["per_source"] or "{}").get(name)}
+            for row in scans
+            if row["source"] == name
+        ]
+        sources.append(
+            {
+                "name": name,
+                "new_jobs": new_jobs.get(name, 0),
+                "last": history[-1] if history else None,
+                "last_finished": next(
+                    (s for s in reversed(history) if s["status"] != "running"), None
+                ),
+            }
+        )
     return {
         "sources": sources,
         "running": running["id"] if running else None,

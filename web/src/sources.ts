@@ -20,11 +20,14 @@ export function createSourceFilter(onChange: () => void, onOpen: () => void) {
     options.innerHTML = [true, false].map(showing => {
       const group = matching.filter(s => selected.has(s.name) === showing);
       return `<section aria-label="${showing ? 'Showing' : 'Hidden'}"><h3 class="source-group">${showing ? 'Showing' : 'Hidden'} · ${group.length}</h3>${group.map(s => {
-        const last = s.last, stamp = last?.finished_at ?? last?.started_at;
+        const last = s.last, finished = last?.status === 'running' ? s.last_finished : last;
+        const stamp = finished?.finished_at ?? finished?.started_at;
+        const jobsLabel = `${s.new_jobs} new Job${s.new_jobs === 1 ? '' : 's'}`;
         const days = stamp ? Math.floor((Date.now() - Date.parse(stamp)) / 86400000) : 0;
         const failed = last?.status === 'failed' || !!last?.counts?.errors?.length;
-        const flag = failed ? '<span class="tag failed">failed</span>' : last?.status === 'running' ? '<span class="tag running">scanning</span>' : days >= 14 ? `<span class="tag filtered">${days}d old</span>` : '';
-        return `<div class="source-row"><button type="button" class="source-option" role="checkbox" aria-checked="${showing}" data-source="${escape(s.name)}" aria-label="${escape(s.name)}, ${s.new_jobs} new Jobs" aria-describedby="source-status-${escape(s.name)} source-age-${escape(s.name)}"><span class="source-check" aria-hidden="true">${showing ? '✓' : ''}</span><span class="source-name">${escape(s.name)}</span><span class="source-status" id="source-status-${escape(s.name)}">${flag}</span><span class="source-new" title="new Jobs">${s.new_jobs}</span><span class="source-age" id="source-age-${escape(s.name)}"><span class="sr-only">Last Scan </span>${stamp ? age(stamp, true) : 'never'}</span></button><button type="button" class="source-only btn small" data-only="${escape(s.name)}" aria-label="Show only ${escape(s.name)}">only <kbd>o</kbd></button></div>`;
+        // Running status belongs to a shared Scan; label Source membership.
+        const flag = failed ? '<span class="tag failed">failed</span>' : last?.status === 'interrupted' ? '<span class="tag filtered">interrupted</span>' : last?.status === 'running' ? '<span class="tag running" title="Included in the current Scan">in Scan</span>' : days >= 14 ? `<span class="tag filtered">${days}d old</span>` : '';
+        return `<div class="source-row"><button type="button" class="source-option" role="checkbox" aria-checked="${showing}" data-source="${escape(s.name)}" aria-label="${escape(s.name)}, ${jobsLabel}" aria-describedby="source-status-${escape(s.name)} source-age-${escape(s.name)}"><span class="source-check" aria-hidden="true">${showing ? '✓' : ''}</span><span class="source-name">${escape(s.name)}</span><span class="source-status" id="source-status-${escape(s.name)}">${flag}</span><span class="source-new" title="${jobsLabel}">${s.new_jobs}</span><span class="source-age" id="source-age-${escape(s.name)}"><span class="sr-only">Last finished Scan </span>${stamp ? age(stamp, true) : 'never'}</span></button><button type="button" class="source-only btn small" data-only="${escape(s.name)}" aria-label="Show only ${escape(s.name)}">only <kbd>o</kbd></button></div>`;
       }).join('')}</section>`;
     }).join('') + (matching.length ? '' : `<p class="source-empty">${sources.length ? 'No Sources match your search.' : 'No Sources enabled.'}</p>`);
     const only = focused?.only, name = focused?.source ?? only;
@@ -53,7 +56,7 @@ export function createSourceFilter(onChange: () => void, onOpen: () => void) {
   });
   document.addEventListener('keydown', event => {
     if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return;
-    const typing = (event.target as HTMLElement).closest('input, textarea, select, [contenteditable]');
+    const typing = (event.target as HTMLElement).closest('input:not([type=checkbox]), textarea, select, [contenteditable]');
     if (!isOpen()) {
       if (event.key === 'f' && !typing && !document.getElementById('triage')!.hidden && !document.querySelector('.drawer')) {
         event.preventDefault(); menu.showPopover(); event.stopImmediatePropagation();
@@ -68,8 +71,12 @@ export function createSourceFilter(onChange: () => void, onOpen: () => void) {
     const buttons = rows(), index = buttons.indexOf((document.activeElement as HTMLElement).closest('.source-row')?.querySelector<HTMLButtonElement>('[data-source]')!);
     if (['ArrowDown', 'ArrowUp', 'j', 'k', 'Home', 'End'].includes(event.key)) {
       event.preventDefault();
-      const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : index < 0 ? (['ArrowUp', 'k'].includes(event.key) ? buttons.length - 1 : 0) : Math.max(0, Math.min(buttons.length - 1, index + (['ArrowDown', 'j'].includes(event.key) ? 1 : -1)));
-      buttons[next]?.focus();
+      const backward = ['ArrowUp', 'k'].includes(event.key);
+      let next = index + (backward ? -1 : 1);
+      if (index < 0) next = backward ? buttons.length - 1 : 0;
+      if (event.key === 'Home') next = 0;
+      if (event.key === 'End') next = buttons.length - 1;
+      buttons[Math.max(0, Math.min(buttons.length - 1, next))]?.focus();
     }
     if (event.key === 'o' && index >= 0) { event.preventDefault(); choose([buttons[index].dataset.source!]); }
   });
