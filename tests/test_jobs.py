@@ -45,7 +45,7 @@ def client(tmp_path):
                 )
             db.execute("UPDATE jobs SET source='hn' WHERE id=6")
             db.execute(
-                "UPDATE jobs SET source='remoteok', company='Acme', score_reason='focused' WHERE id=2"
+                "UPDATE jobs SET source='remoteok', company='Acme Zürich', score_reason='focused' WHERE id=2"
             )
         yield client
 
@@ -68,7 +68,7 @@ def client(tmp_path):
         ("?sort=score", [1, 2, 3]),
         ("?sort=newest", [3, 2, 1]),
         ("?q=ENGINEER", [2, 1, 3]),
-        ("?q=acme", [2]),
+        ("?q=ZÜRICH", [2]),
         ("?q=focused", [2]),
         ("?q=%25", []),
         ("?q=pay&filtered=true", [4]),
@@ -97,6 +97,8 @@ def test_list(client, query, ids):
         ("", [2, 1, 1, 1, 1]),
         ("?source=hn", [1, 0, 0, 0, 0]),
         ("?source=absent", [0, 0, 0, 0, 0]),
+        ("?q=ZÜRICH", [1, 0, 0, 0, 0]),
+        ("?source=hn&q=ZÜRICH", [0, 0, 0, 0, 0]),
     ],
 )
 def test_show_counts(client, query, expected):

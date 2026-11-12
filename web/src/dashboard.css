@@ -457,6 +457,8 @@ body:has(#bulk-actions:not([hidden])) #undo-toast, body:has(#notice.visible) #un
   .mobile-job-actions button { flex: 1; min-height: 48px; padding: 0 8px; font-size: 14px; border-radius: 10px; }
   .mobile-job-actions[data-state=applied] button:nth-child(2) { background: var(--applied-fill); color: var(--applied); border-color: var(--applied-fill); }
   #notice { bottom: 88px; right: 12px; max-width: calc(100vw - 24px); }
+  body:has(#bulk-actions:not([hidden])) #notice { bottom: 196px; }
+  body:has(#bulk-actions:not([hidden])):has(#notice.visible) #undo-toast { bottom: 288px; }
   body:has(#a-scans:not([hidden])) .app-header { display: none; }
   #dashboard:has(#a-scans:not([hidden])) { padding-top: 0; background: var(--ground); }
   .scans-layout, .scans-main { display: contents; }

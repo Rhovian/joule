@@ -25,6 +25,12 @@ SHOW_CATEGORY = (
 )
 
 
+SEARCH_FILTER = (
+    "instr(casefold(title || ' ' || COALESCE(company, '') || ' ' || "
+    "COALESCE(score_reason, '') || ' ' || COALESCE(filtered_reason, '')), ?) > 0"
+)
+
+
 def source_params(source):
     return (not source, json.dumps(source or []), json.dumps(source or []))
 
@@ -60,8 +66,7 @@ async def list_jobs(
             "ON drafted.job_id=jobs.id WHERE primary_id IS NULL "
             f"AND {SHOW_CATEGORY} IN (SELECT value FROM json_each(?)) "
             f"AND {SOURCE_FILTER} "
-            "AND instr(lower(title || ' ' || COALESCE(company, '') || ' ' || "
-            "COALESCE(score_reason, '') || ' ' || COALESCE(filtered_reason, '')), lower(?)) > 0 "
+            f"AND {SEARCH_FILTER} "
             f"ORDER BY {'COALESCE(posted_at, first_seen_at)' if sort == 'newest' else sort} "
             "DESC NULLS LAST, posted_at DESC, jobs.id DESC LIMIT 500",
             (
@@ -76,7 +81,7 @@ async def list_jobs(
                     ]
                 ),
                 *source_params(source),
-                q.strip(),
+                q.strip().casefold(),
             ),
         ).fetchall()
         return [
@@ -96,12 +101,15 @@ async def list_jobs(
 
 
 @router.get("/jobs/counts")
-def job_counts(request: Request, source: Annotated[list[str] | None, Query()] = None):
+def job_counts(
+    request: Request, source: Annotated[list[str] | None, Query()] = None, q: str = ""
+):
     with closing(connect(request.app.state.data_dir / "joule.db")) as db:
         rows = db.execute(
             f"SELECT {SHOW_CATEGORY} AS category, COUNT(*) AS count "
-            f"FROM jobs WHERE primary_id IS NULL AND {SOURCE_FILTER} GROUP BY category",
-            source_params(source),
+            f"FROM jobs WHERE primary_id IS NULL AND {SOURCE_FILTER} "
+            f"AND {SEARCH_FILTER} GROUP BY category",
+            (*source_params(source), q.strip().casefold()),
         ).fetchall()
         return dict.fromkeys(
             ["new", "unscored", "filtered", "applied", "dismissed"], 0

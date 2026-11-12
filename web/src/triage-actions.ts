@@ -5,11 +5,18 @@ type Change = { id: number; state: string };
 export function createTriageActions(actions: {
   jobs: () => Job[]; cursor: () => number; select: (id: number) => void; detail: () => Job | null;
   patch: (id: number, state: string) => Promise<void>; update: (id: number, state: string) => void;
-  refresh: () => Promise<void>; render: () => void; error: (error: unknown) => void;
+  refresh: () => Promise<void>; render: () => void; confirm: (message: string) => void; error: (error: unknown) => void;
 }) {
   const picks = new Set<number>(), toast = document.getElementById('undo-toast')!;
   let busy = false, undo: { changes: Change[]; cursor: number } | null = null, timer: ReturnType<typeof setTimeout>;
-  const below = () => actions.jobs().filter(j => j.score !== null && j.score < 70 && j.state !== 'dismissed');
+  const below = () => actions.jobs().filter(j => j.score !== null && j.score < 70 && ['new', 'seen'].includes(j.state) && j.filtered_reason === null);
+  // astro@7.3.8/dist/runtime/client/load.js only hydrates; native Promise chains serialize triage commands.
+  let tail = Promise.resolve();
+  function enqueue(work: () => Promise<void>) {
+    const next = tail.then(work);
+    tail = next.catch(() => {}); // A failed command must not block later input.
+    return next;
+  }
   function render() {
     document.getElementById('bulk-actions')!.hidden = !picks.size;
     document.getElementById('selected-count')!.textContent = `${picks.size} selected`;
@@ -34,7 +41,6 @@ export function createTriageActions(actions: {
     });
   }
   async function state(ids: number[], state: string) {
-    if (busy) return;
     const list = actions.jobs(), detail = actions.detail();
     const changes = [...new Set(ids)].map(id => list.find(j => j.id === id) ?? (detail?.id === id ? detail : null))
       .filter((j): j is Job => !!j && j.state !== state).map(j => ({ id: j.id, state: j.state }));
@@ -54,7 +60,7 @@ export function createTriageActions(actions: {
     } finally { busy = false; actions.render(); }
   }
   async function restore() {
-    if (!undo || busy) return;
+    if (!undo) return;
     busy = true; render();
     const saved = undo;
     try {
@@ -63,14 +69,24 @@ export function createTriageActions(actions: {
       if (!saved.changes.length) { undo = null; toast.hidden = true; clearTimeout(timer); }
       actions.select(saved.cursor);
       await actions.refresh();
+      if (restored.size) actions.confirm(`Undo applied · ${restored.size} Job${restored.size === 1 ? '' : 's'}${saved.changes.length ? ` · ${saved.changes.length} still need undo` : ''}`);
     } finally { busy = false; actions.render(); }
   }
   return {
-    has: (id: number) => picks.has(id), ids: () => [...picks], render, state, undo: restore,
+    has: (id: number) => picks.has(id), ids: () => [...picks], render,
+    state: (ids: number[], next: string) => enqueue(() => state(ids, next)), undo: () => enqueue(restore),
+    key(key: 'a' | 'd') {
+      const ids = [...picks], target = key === 'a' ? 'applied' : 'dismissed';
+      return enqueue(async () => {
+        if (ids.length) return state(ids, target);
+        const job = actions.detail() ?? actions.jobs().find(j => j.id === actions.cursor());
+        if (job) await state([job.id], job.state === target ? 'seen' : target);
+      });
+    },
     below: () => below().map(j => j.id),
     checkbox: (id: number) => `<label class="row-pick"><input type="checkbox" data-pick-job="${id}" aria-label="Select Job ${escape(id)}" ${picks.has(id) ? 'checked' : ''}></label>`,
     toggle(id: number) { if (picks.has(id)) picks.delete(id); else picks.add(id); actions.render(); },
-    clear() { picks.clear(); actions.render(); },
+    clear() { if (picks.size) { picks.clear(); actions.render(); } },
     remove(ids: number[]) { ids.forEach(id => picks.delete(id)); actions.render(); },
     sync() { const visible = new Set(actions.jobs().map(j => j.id)); picks.forEach(id => { if (!visible.has(id)) picks.delete(id); }); },
   };

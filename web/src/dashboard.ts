@@ -22,7 +22,7 @@ let scheduled = false, detailId = 0, jobsVersion = 0, connected = true, runningI
 let sort = 'rank', scoringAll = false, view = 'triage';
 let jobCounts: Record<string, number> = {};
 const sourceFilter = createSourceFilter(() => void loadJobs().catch(notice), () => void loadSources().catch(notice), () => mobile.openFilters());
-let noticeTimer: ReturnType<typeof setTimeout>, pollTimer: ReturnType<typeof setTimeout>;
+let noticeTimer: ReturnType<typeof setTimeout>, pollTimer: ReturnType<typeof setTimeout>, searchTimer: ReturnType<typeof setTimeout>;
 function notice(error: unknown) {
   element('notice').textContent = error instanceof Error ? error.message : String(error);
   element('notice').classList.add('visible');
@@ -81,6 +81,7 @@ function renderJobs() {
     `<tr class="${j.id === selected ? 'selected' : ''} ${triage.has(j.id) ? 'checked' : ''} ${j.state === 'dismissed' ? 'is-dismissed' : ''}" data-job="${escape(j.id)}" aria-selected="${triage.has(j.id)}"><td class="rank">${triage.checkbox(j.id)}<span class="rank-number">${j.id === selected ? '› ' : ''}${j.rank == null ? '—' : Math.round(j.rank)}</span></td><td>${score(j)}</td><td><button class="job-title" data-action="open" data-id="${escape(j.id)}" title="${escape(j.title)}">${escape(j.title)}</button><span class="mobile-only mobile-title">${escape(j.title)}</span><button class="mobile-only mobile-card-action" data-action="open" data-id="${j.id}" aria-label="Open Job: ${escape(j.title)}"></button><p class="company" title="${escape([j.company, j.location_raw, pay(j)].filter(Boolean).join(' · '))}">${escape((detailId ? [j.company, j.source, j.duplicates.length ? `+${j.duplicates.length}` : null] : [j.company, j.location_raw]).filter(Boolean).join(' · '))}</p><p class="mobile-only mobile-job-meta">${escape([j.company, j.location_raw, j.source + (j.duplicates.length ? ` +${j.duplicates.length}` : '')].filter(Boolean).join(' · '))} · ${age(j.posted_at ?? j.first_seen_at)}</p></td><td><div class="row-reason">${escape(j.filtered_reason ? `Filtered · ${j.filtered_reason}` : j.score_reason ?? (j.score === null ? 'Not scored yet.' : ''))}</div>${scoreAgain(j)}</td><td class="row-sources">${external(j.link, j.source)}${j.duplicates.length ? `<button class="tag duplicate" data-action="open" data-id="${escape(j.id)}" title="${escape(j.duplicates.map(d => d.source).join(', '))}" aria-label="${j.duplicates.length} Duplicates; open Job Sources">+${j.duplicates.length}</button>` : ''}</td><td class="age">${age(j.posted_at ?? j.first_seen_at)}</td><td><div class="flags">${j.state === 'new' ? '' : `<span class="tag state ${['seen', 'dismissed', 'applied'].includes(j.state) ? j.state : ''}">${escape(j.state)}</span>`}${j.filtered_reason ? '<span class="tag filtered">Filtered</span>' : j.score === null ? '<span class="tag unscored">unscored</span>' : ''}${j.score_stale ? '<span class="flag">out of date</span>' : ''}${j.content_purged_at ? '<span class="flag">expired</span>' : ''}${j.location_unclear ? '<span class="flag">location unclear</span>' : ''}</div>${j.id === selected ? `<div class="row-actions">${applied(j, j.state === 'applied' ? 'Unmark' : 'Applied')}${dismiss(j)}</div>` : ''}</td></tr>`).join('')}</tbody></table>` : emptyJobs());
 }
 async function loadJobs() {
+  clearTimeout(searchTimer);
   const version = ++jobsVersion;
   const query = new URLSearchParams(Array.from(root.querySelectorAll<HTMLInputElement>('.controls > label input'), input => [input.name, String(input.checked)]));
   const selectedSources = sourceFilter.selection();
@@ -88,6 +89,7 @@ async function loadJobs() {
   selectedSources?.forEach(name => { query.append('source', name); sourceQuery.append('source', name); });
   query.set('sort', sort);
   query.set('q', (element('job-search') as HTMLInputElement).value.trim());
+  sourceQuery.set('q', query.get('q')!);
   const [next, totals]: [Job[], Record<string, number>] = selectedSources?.length === 0 ? [[], {}] : await Promise.all([
     api<Job[]>(`jobs?${query}`), api<Record<string, number>>(`jobs/counts?${sourceQuery}`),
   ]);
@@ -274,7 +276,7 @@ const triage = createTriageActions({
     await loadJobs();
     const row = root.querySelector<HTMLElement>(`[data-job="${selected}"]`);
     if (row?.getClientRects().length) row.scrollIntoView({ block: 'nearest' });
-  }, render: renderJobs, error: notice,
+  }, render: renderJobs, confirm: notice, error: notice,
 });
 const mobile = createMobile({ state: changeState, error: notice, refresh: () => void loadSources().catch(notice) });
 function showView(next: string, focus = false) {
@@ -350,7 +352,11 @@ root.addEventListener('change', event => {
   if (input.id === 'job-sort') sort = input.value;
   if (input.matches('.controls > label input, #job-sort')) void loadJobs().catch(notice);
 });
-element('job-search').addEventListener('input', () => void loadJobs().catch(notice));
+element('job-search').addEventListener('input', () => {
+  // astro@7.3.8/dist/runtime/client/load.js only hydrates; a native trailing timer coalesces input.
+  clearTimeout(searchTimer); jobsVersion++;
+  searchTimer = setTimeout(() => void loadJobs().catch(notice), 200);
+});
 const shortcuts = element('shortcuts') as HTMLDialogElement;
 element('show-shortcuts').addEventListener('click', () => shortcuts.showModal());
 element('close-shortcuts').addEventListener('click', () => shortcuts.close());
@@ -371,21 +377,17 @@ document.addEventListener('keydown', event => {
   if ((event.target as HTMLElement).closest('input:not([type=checkbox]), textarea, select, [contenteditable]') || event.ctrlKey || event.metaKey || event.altKey) return;
   if (event.key === '?') { event.preventDefault(); shortcuts.showModal(); return; }
   if (event.key === '/' && view === 'triage') { event.preventDefault(); if (mobile.phone) closeDetail(); (element('job-search') as HTMLInputElement).focus(); return; }
-  if (event.key === 'z') { event.preventDefault(); void triage.undo().catch(notice); return; }
+  if (event.key === 'z' && view === 'triage') { event.preventDefault(); void triage.undo().catch(notice); return; }
   if (event.key === 's') { event.preventDefault(); location.hash = 'scans'; return; }
   if (event.key === 'Escape' && view === 'scans') { location.hash = 'triage'; return; }
   if (view !== 'triage' || (!jobs.length && !detailId)) return;
+  if (event.repeat && ['a', 'd', 'x'].includes(event.key)) { event.preventDefault(); return; }
   if (event.key === 'x' && selected) { event.preventDefault(); triage.toggle(selected); return; }
-  if (triage.ids().length && ['a', 'd'].includes(event.key)) { event.preventDefault(); void triage.state(triage.ids(), event.key === 'a' ? 'applied' : 'dismissed').catch(notice); return; }
+  if (['a', 'd'].includes(event.key)) { event.preventDefault(); if (!detailId || detail) void triage.key(event.key as 'a' | 'd').catch(notice); return; }
   if (detailId && ['1', '2', '3', '4'].includes(event.key)) { event.preventDefault(); jumpSection(['fit', 'draft', 'cv', 'ask'][Number(event.key) - 1]); return; }
   if (detailId && event.key === 'c') { event.preventDefault(); void copyDraft(-1).catch(notice); return; }
-  if (['j', 'k', 'o', 'd', 'a'].includes(event.key)) event.preventDefault();
+  if (['j', 'k', 'o'].includes(event.key)) event.preventDefault();
   if (event.key === 'j' || event.key === 'k') moveJob(event.key === 'j' ? 1 : -1);
   if (event.key === 'o' && selected) void openJob(selected).catch(notice);
-  if (detailId && !detail) return;
-  const job = detail ?? jobs.find(j => j.id === selected);
-  if (!job) return;
-  if (event.key === 'a') void changeState(job.id, job.state === 'applied' ? 'seen' : 'applied').catch(notice);
-  if (event.key === 'd') void changeState(job.id, job.state === 'dismissed' ? 'seen' : 'dismissed').catch(notice);
 });
 void Promise.allSettled([loadJobs(), loadSources()]).then(results => results.forEach(r => { if (r.status === 'rejected') notice(r.reason); }));
