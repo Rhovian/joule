@@ -2,8 +2,8 @@ export function createMobile(actions: { state: (id: number, state: string) => Pr
   const phone = matchMedia('(max-width: 740px)'), root = document.getElementById('dashboard')!;
   const dialog = document.getElementById('mobile-filters') as HTMLDialogElement;
   const controls = document.querySelector<HTMLElement>('.controls')!, parent = controls.parentElement!;
-  const menu = document.getElementById('sources-menu')!, opener = document.getElementById('mobile-filter-open')!;
-  function openFilters() { if (phone.matches && !dialog.open) { dialog.showModal(); document.body.classList.add('filters-open'); actions.refresh(); } }
+  const menu = document.getElementById('sources-menu')!, opener = document.getElementById('mobile-filter-open')!, notification = document.getElementById('notice')!;
+  function openFilters() { if (phone.matches && !dialog.open) { dialog.append(notification); dialog.showModal(); document.body.classList.add('filters-open'); actions.refresh(); } }
   function layout() {
     if (dialog.open) dialog.close();
     if (menu.matches(':popover-open')) menu.hidePopover();
@@ -19,7 +19,7 @@ export function createMobile(actions: { state: (id: number, state: string) => Pr
     if (scanFilters) scanFilters.open = !phone.matches;
   }
   opener.addEventListener('click', openFilters);
-  dialog.addEventListener('close', () => { document.body.classList.remove('filters-open'); if (phone.matches && !root.classList.contains('split')) opener.focus({ preventScroll: true }); });
+  dialog.addEventListener('close', () => { document.body.append(notification); document.body.classList.remove('filters-open'); if (phone.matches && !root.classList.contains('split')) opener.focus({ preventScroll: true }); });
   dialog.addEventListener('click', event => {
     const box = dialog.getBoundingClientRect();
     if ((event.target as HTMLElement).closest('[data-mobile-close]') || event.target === dialog && (event.clientY < box.top || event.clientX < box.left || event.clientX > box.right)) dialog.close();
@@ -52,7 +52,9 @@ export function createMobile(actions: { state: (id: number, state: string) => Pr
   root.addEventListener('click', event => {
     if (swiped?.contains(event.target as Node) && performance.now() - swipeTime < 400) { event.preventDefault(); event.stopImmediatePropagation(); swiped = null; }
   }, true);
-  return { openFilters, update(count: number, summary: string) {
+  return { openFilters, get phone() { return phone.matches; },
+    revealCursor(id: number) { if (phone.matches) root.querySelector(`[data-job="${id}"]`)?.scrollIntoView({ block: 'center' }); },
+    update(count: number, summary: string) {
     opener.textContent = summary;
     document.getElementById('mobile-show-jobs')!.textContent = `Show ${count} Jobs`;
     if (dialog.open && document.getElementById('triage')!.hidden) dialog.close();

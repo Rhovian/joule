@@ -224,6 +224,7 @@ function closeDetail() {
   if (!detailId) return;
   const id = jobs.some(j => j.id === detailId) ? detailId : selected; detailId = 0; detail = null; detailVersion++; renderDetail(); renderJobs();
   Array.from(root.querySelectorAll<HTMLElement>(`[data-action="open"][data-id="${id}"]`)).find(button => button.getClientRects().length)?.focus({ preventScroll: true });
+  if (view === 'triage') mobile.revealCursor(id);
 }
 function moveJob(step: number) {
   const index = jobs.findIndex(j => j.id === (detailId || selected));
@@ -239,8 +240,10 @@ function jumpSection(section: string) {
   element('detail').querySelector<HTMLElement>('.drawer')?.setAttribute('data-section', section);
   if (!target) return;
   activeSection = section;
+  const copy = root.querySelector<HTMLButtonElement>('.mobile-job-actions [data-action=copy-draft]');
+  if (copy) copy.disabled = section !== 'draft' || copy.dataset.available !== 'true';
   const pane = target.closest<HTMLElement>('.drawer-scroll');
-  if (pane) pane.scrollTo({ top: matchMedia('(max-width: 740px)').matches ? 0 : target.offsetTop - (pane.querySelector('.drawer-nav')?.clientHeight ?? 0) - 12 });
+  if (pane) pane.scrollTo({ top: mobile.phone ? 0 : target.offsetTop - (pane.querySelector('.drawer-nav')?.clientHeight ?? 0) - 12 });
   target.focus({ preventScroll: true });
   root.querySelectorAll<HTMLElement>('.drawer-nav button').forEach(button => {
     if (button.dataset.section === section) button.setAttribute('aria-current', 'location'); else button.removeAttribute('aria-current');
