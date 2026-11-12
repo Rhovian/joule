@@ -67,6 +67,7 @@ def client(tmp_path):
         ("?source=hn&source=remoteok", [2, 1]),
         ("?sort=score", [1, 2, 3]),
         ("?sort=newest", [3, 2, 1]),
+        ("?min_score=90&filtered=true", [4]),
         ("?q=ENGINEER", [2, 1, 3]),
         ("?q=ZÜRICH", [2]),
         ("?q=focused", [2]),
@@ -97,13 +98,16 @@ def test_list(client, query, ids):
         ("", [2, 1, 1, 1, 1]),
         ("?source=hn", [1, 0, 0, 0, 0]),
         ("?source=absent", [0, 0, 0, 0, 0]),
+        ("?min_score=90", [1, 0, 0, 0, 0]),
         ("?q=ZÜRICH", [1, 0, 0, 0, 0]),
         ("?source=hn&q=ZÜRICH", [0, 0, 0, 0, 0]),
     ],
 )
 def test_show_counts(client, query, expected):
     with closing(connect(client.app.state.data_dir / "joule.db")) as db, db:
-        db.execute("UPDATE jobs SET score=NULL WHERE id IN (4, 5, 7)")
+        db.execute(
+            "UPDATE jobs SET score=CASE WHEN id=1 THEN 90 END WHERE id IN (1, 4, 5, 7)"
+        )
     assert client.get("/api/jobs/counts" + query).json() == dict(
         zip(["new", "unscored", "filtered", "applied", "dismissed"], expected)
     )

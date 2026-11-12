@@ -7,6 +7,7 @@ export function createSourceFilter(onChange: () => void, onOpen: () => void, onI
   const trigger = document.getElementById('sources-button')!;
   const search = document.getElementById('source-search') as HTMLInputElement;
   const options = document.getElementById('source-options')!;
+  // undefined keeps manual picks; null means all Sources; names keep a preset’s fixed scope.
   let sources: Source[] = [], selected = new Set<string>(), loaded = false, preset: string[] | null | undefined;
   const isOpen = () => menu.matches(':popover-open');
   const rows = () => Array.from(options.querySelectorAll<HTMLButtonElement>('[data-source]'));
@@ -85,7 +86,9 @@ export function createSourceFilter(onChange: () => void, onOpen: () => void, onI
   });
   function selection() {
     if (!loaded && preset !== undefined) return preset;
-    return selected.size === sources.length && (sources.length > 0 || preset == null) ? null : [...selected];
+    // An unavailable named preset selects none, even when no Sources are enabled.
+    const emptyNamedPreset = sources.length === 0 && Array.isArray(preset);
+    return selected.size === sources.length && !emptyNamedPreset ? null : [...selected];
   }
   function set(names: string[] | null) {
     preset = names;

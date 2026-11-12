@@ -31,6 +31,9 @@ SEARCH_FILTER = (
 )
 
 
+MIN_SCORE_FILTER = "(? IS NULL OR score >= ?)"
+
+
 def source_params(source):
     return (not source, json.dumps(source or []), json.dumps(source or []))
 
@@ -56,6 +59,7 @@ async def list_jobs(
     source: Annotated[list[str] | None, Query()] = None,
     sort: Literal["rank", "score", "newest"] = "rank",
     q: str = "",
+    min_score: Annotated[int | None, Query(ge=0, le=100)] = None,
 ):
     directory = request.app.state.data_dir
     stamp = score.fingerprint(directory, load_settings(directory))
@@ -66,7 +70,7 @@ async def list_jobs(
             "ON drafted.job_id=jobs.id WHERE primary_id IS NULL "
             f"AND {SHOW_CATEGORY} IN (SELECT value FROM json_each(?)) "
             f"AND {SOURCE_FILTER} "
-            f"AND {SEARCH_FILTER} "
+            f"AND {SEARCH_FILTER} AND {MIN_SCORE_FILTER} "
             f"ORDER BY {'COALESCE(posted_at, first_seen_at)' if sort == 'newest' else sort} "
             "DESC NULLS LAST, posted_at DESC, jobs.id DESC LIMIT 500",
             (
@@ -82,6 +86,8 @@ async def list_jobs(
                 ),
                 *source_params(source),
                 q.strip().casefold(),
+                min_score,
+                min_score,
             ),
         ).fetchall()
         return [
@@ -102,14 +108,17 @@ async def list_jobs(
 
 @router.get("/jobs/counts")
 def job_counts(
-    request: Request, source: Annotated[list[str] | None, Query()] = None, q: str = ""
+    request: Request,
+    source: Annotated[list[str] | None, Query()] = None,
+    q: str = "",
+    min_score: Annotated[int | None, Query(ge=0, le=100)] = None,
 ):
     with closing(connect(request.app.state.data_dir / "joule.db")) as db:
         rows = db.execute(
             f"SELECT {SHOW_CATEGORY} AS category, COUNT(*) AS count "
             f"FROM jobs WHERE primary_id IS NULL AND {SOURCE_FILTER} "
-            f"AND {SEARCH_FILTER} GROUP BY category",
-            (*source_params(source), q.strip().casefold()),
+            f"AND {SEARCH_FILTER} AND {MIN_SCORE_FILTER} GROUP BY category",
+            (*source_params(source), q.strip().casefold(), min_score, min_score),
         ).fetchall()
         return dict.fromkeys(
             ["new", "unscored", "filtered", "applied", "dismissed"], 0

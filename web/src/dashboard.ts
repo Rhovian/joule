@@ -91,6 +91,7 @@ async function loadJobs() {
   query.set('sort', sort);
   query.set('q', (element('job-search') as HTMLInputElement).value.trim());
   sourceQuery.set('q', query.get('q')!);
+  if (views.minScore !== null) { query.set('min_score', String(views.minScore)); sourceQuery.set('min_score', String(views.minScore)); }
   const [next, totals]: [Job[], Record<string, number>] = selectedSources?.length === 0 ? [[], {}] : await Promise.all([
     api<Job[]>(`jobs?${query}`), api<Record<string, number>>(`jobs/counts?${sourceQuery}`),
   ]);
@@ -98,7 +99,7 @@ async function loadJobs() {
   root.querySelectorAll<HTMLElement>('[data-count]').forEach(node => { node.textContent = String(totals[node.dataset.count!] ?? 0); });
   jobCounts = totals;
   const previousIndex = Math.max(0, jobs.findIndex(j => j.id === selected));
-  jobs = next.filter(j => views.minScore === null || j.score !== null && j.score >= views.minScore); triage.sync();
+  jobs = next; triage.sync();
   if (!jobs.some(j => j.id === selected)) selected = jobs[Math.min(previousIndex, jobs.length - 1)]?.id ?? 0;
   renderJobs();
   if (detailId) renderDetail();
