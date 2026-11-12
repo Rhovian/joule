@@ -43,6 +43,7 @@ async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> 
 let jobs: Job[] = [], sources: Source[] = [], selected = 0, detail: Job | null = null;
 let scheduled = false, detailId = 0, jobsVersion = 0, connected = true, runningId: number | null = null, scan: Scan | null = null, starting = false;
 let byScore = false, scoringAll = false, view = 'triage';
+let jobCounts: Record<string, number> = {};
 let noticeTimer: ReturnType<typeof setTimeout>, pollTimer: ReturnType<typeof setTimeout>;
 function notice(error: unknown) {
   element('notice').textContent = error instanceof Error ? error.message : String(error);
@@ -64,7 +65,7 @@ function replace(id: string, html: string) {
 const pendingScores = new Set<number>();
 const scoreAgain = (j: Job) => j.score === null && !j.filtered_reason ? `<button data-action="score" data-id="${escape(j.id)}" ${pendingScores.has(j.id) ? 'disabled' : ''}>Score again</button>` : '';
 const dismiss = (j: Job) => `<button data-action="state" data-state="${j.state === 'dismissed' ? 'seen' : 'dismissed'}" data-id="${escape(j.id)}">${j.state === 'dismissed' ? 'Restore' : 'Dismiss'}</button>`;
-const applied = (j: Job) => `<button data-action="state" data-state="${j.state === 'applied' ? 'seen' : 'applied'}" data-id="${escape(j.id)}">${j.state === 'applied' ? 'Unmark applied' : 'Mark applied'}</button>`;
+const applied = (j: Job, label = j.state === 'applied' ? 'Unmark applied' : 'Mark applied') => `<button data-action="state" data-state="${j.state === 'applied' ? 'seen' : 'applied'}" data-id="${escape(j.id)}">${escape(label)}</button>`;
 const score = (j: Job) => `<span class="score ${j.score === null ? 'unscored' : j.score >= 90 ? 'high' : j.score >= 80 ? 'good' : j.score >= 70 ? 'mid' : 'low'}${j.score_stale && j.score !== null ? ' stale' : ''}" title="${j.score_stale && j.score !== null ? 'Fit Score out of date' : 'Fit Score'}">${escape(j.score ?? '—')}</span>`;
 const links = (j: Job) => `<div class="source-links">Primary · ${external(j.link, j.source)}${j.duplicates.map(d => `<span>Duplicate · ${external(d.link, d.source)}</span>`).join('')}</div>`;
 const flags = (j: Job) => `<span class="tag state ${['new', 'seen', 'dismissed', 'applied'].includes(j.state) ? j.state : ''}">${escape(j.state)}</span>${j.score_stale ? '<span class="flag">score out of date</span>' : ''}${j.content_purged_at ? '<span class="flag">expired; open on Upwork</span>' : ''}${j.location_unclear ? '<span class="flag">location unclear</span>' : ''}${j.filtered_reason ? '<span class="tag filtered">Filtered</span>' : ''}`;
@@ -79,10 +80,19 @@ function renderScoreAll() {
   button.disabled = !!runningId || starting || !unscoredVisible().length;
   button.textContent = scoringAll && runningId ? 'Scoring…' : `Score all${unscoredVisible().length ? ` ${unscoredVisible().length}` : ''}`;
 }
-function jobAge(j: Job) {
-  const stamp = j.posted_at ?? j.first_seen_at;
+function age(stamp: string, relative = false) {
   const date = new Date(stamp), hours = Math.max(0, Math.floor((Date.now() - date.getTime()) / 3600000));
-  return `<time datetime="${escape(stamp)}" title="${escape(stamp)}">${Number.isNaN(hours) ? '—' : hours < 1 ? 'now' : hours < 24 ? `${hours}h` : hours < 168 ? `${Math.floor(hours / 24)}d` : `${Math.floor(hours / 168)}w`}</time>`;
+  return `<time datetime="${escape(stamp)}" title="${escape(stamp)}">${Number.isNaN(hours) ? '—' : hours < 1 ? relative ? 'just now' : 'now' : `${hours < 24 ? `${hours}h` : hours < 168 ? `${Math.floor(hours / 24)}d` : `${Math.floor(hours / 168)}w`}${relative ? ' ago' : ''}`}</time>`;
+}
+function emptyJobs() {
+  const showing = root.querySelectorAll('.source-picks input:checked').length;
+  const filtered = root.querySelector<HTMLInputElement>('[name="filtered"]')!;
+  const hidden = ['filtered', 'dismissed'].filter(name => !root.querySelector<HTMLInputElement>(`[name="${name}"]`)!.checked);
+  const last = sources.map(s => s.last?.finished_at ?? s.last?.started_at)
+    .filter((stamp): stamp is string => !!stamp && Number.isFinite(Date.parse(stamp)))
+    .sort((a, b) => Date.parse(b) - Date.parse(a))[0];
+  const inbox = root.querySelector<HTMLInputElement>('[name="new"]')!.checked && root.querySelector<HTMLInputElement>('[name="unscored"]')!.checked;
+  return `<div class="empty triage-empty"><h3>Inbox zero.</h3><p>${inbox ? 'No new Jobs from' : 'No Jobs match the Show toggles for'} the ${showing} Source${showing === 1 ? '' : 's'} you’re showing.${hidden.length ? ` ${hidden.map(name => `${jobCounts[name] ?? 0} ${name === 'filtered' ? 'Filtered' : 'dismissed'}`).join(' and ')} ${hidden.length === 1 && jobCounts[hidden[0]] === 1 ? 'is' : 'are'} hidden.` : ''}</p><div class="empty-actions"><button class="btn primary" data-action="scan" ${runningId || starting ? 'disabled' : ''}>Scan all</button><button data-action="show-filtered" ${filtered.checked ? 'disabled' : ''}>Show Filtered <span class="empty-count">${jobCounts.filtered ?? 0}</span></button><button class="btn ghost" data-action="clear-filters">Clear filters</button></div><a class="muted empty-scan" href="#scans">${last ? `Last Scan ${age(last, true)}` : 'No Scan yet'} · <kbd>s</kbd> Scans</a></div>`;
 }
 function renderJobs() {
   renderScoreAll();
@@ -92,7 +102,7 @@ function renderJobs() {
   element('job-sort').setAttribute('aria-pressed', String(byScore));
   element('jobs').setAttribute('aria-busy', 'false');
   replace('jobs', jobs.length ? `<table class="triage-table"><thead><tr><th scope="col">Rank</th><th scope="col">Fit</th><th scope="col">Job</th><th scope="col">Reason</th><th scope="col">Sources</th><th scope="col">Age</th><th scope="col">State</th></tr></thead><tbody>${jobs.map(j =>
-    `<tr class="${j.id === selected ? 'selected' : ''} ${j.state === 'dismissed' ? 'is-dismissed' : ''}" data-job="${escape(j.id)}" aria-selected="${j.id === selected}"><td class="rank">${j.id === selected ? '› ' : ''}${j.rank == null ? '—' : Math.round(j.rank)}</td><td>${score(j)}</td><td><button class="job-title" data-action="open" data-id="${escape(j.id)}" title="${escape(j.title)}">${escape(j.title)}</button><p class="company" title="${escape([j.company, j.location_raw, pay(j)].filter(Boolean).join(' · '))}">${escape([j.company, j.location_raw].filter(Boolean).join(' · '))}</p></td><td><div class="row-reason">${escape(j.filtered_reason ? `Filtered · ${j.filtered_reason}` : j.score_reason ?? (j.score === null ? 'Not scored yet.' : ''))}</div>${scoreAgain(j)}</td><td class="row-sources">${external(j.link, j.source)}${j.duplicates.length ? `<button class="tag duplicate" data-action="open" data-id="${escape(j.id)}" title="${escape(j.duplicates.map(d => d.source).join(', '))}" aria-label="${j.duplicates.length} Duplicates; open Job Sources">+${j.duplicates.length}</button>` : ''}</td><td class="age">${jobAge(j)}</td><td><div class="flags">${j.state === 'new' ? '' : `<span class="tag state ${['seen', 'dismissed', 'applied'].includes(j.state) ? j.state : ''}">${escape(j.state)}</span>`}${j.filtered_reason ? '<span class="tag filtered">Filtered</span>' : j.score === null ? '<span class="tag unscored">unscored</span>' : ''}${j.score_stale ? '<span class="flag">out of date</span>' : ''}${j.content_purged_at ? '<span class="flag">expired</span>' : ''}${j.location_unclear ? '<span class="flag">location unclear</span>' : ''}</div>${j.id === selected ? `<div class="row-actions">${applied(j).replace('Mark applied', 'Applied').replace('Unmark applied', 'Unmark')}${dismiss(j)}</div>` : ''}</td></tr>`).join('')}</tbody></table>` : '<div class="empty"><h3>Inbox zero.</h3><p>No Jobs match the Sources and Show toggles you’re using.</p><a class="btn primary" href="#scans">Open Scans <kbd>s</kbd></a><button data-action="clear-filters">Clear filters</button></div>');
+    `<tr class="${j.id === selected ? 'selected' : ''} ${j.state === 'dismissed' ? 'is-dismissed' : ''}" data-job="${escape(j.id)}" aria-selected="${j.id === selected}"><td class="rank">${j.id === selected ? '› ' : ''}${j.rank == null ? '—' : Math.round(j.rank)}</td><td>${score(j)}</td><td><button class="job-title" data-action="open" data-id="${escape(j.id)}" title="${escape(j.title)}">${escape(j.title)}</button><p class="company" title="${escape([j.company, j.location_raw, pay(j)].filter(Boolean).join(' · '))}">${escape([j.company, j.location_raw].filter(Boolean).join(' · '))}</p></td><td><div class="row-reason">${escape(j.filtered_reason ? `Filtered · ${j.filtered_reason}` : j.score_reason ?? (j.score === null ? 'Not scored yet.' : ''))}</div>${scoreAgain(j)}</td><td class="row-sources">${external(j.link, j.source)}${j.duplicates.length ? `<button class="tag duplicate" data-action="open" data-id="${escape(j.id)}" title="${escape(j.duplicates.map(d => d.source).join(', '))}" aria-label="${j.duplicates.length} Duplicates; open Job Sources">+${j.duplicates.length}</button>` : ''}</td><td class="age">${age(j.posted_at ?? j.first_seen_at)}</td><td><div class="flags">${j.state === 'new' ? '' : `<span class="tag state ${['seen', 'dismissed', 'applied'].includes(j.state) ? j.state : ''}">${escape(j.state)}</span>`}${j.filtered_reason ? '<span class="tag filtered">Filtered</span>' : j.score === null ? '<span class="tag unscored">unscored</span>' : ''}${j.score_stale ? '<span class="flag">out of date</span>' : ''}${j.content_purged_at ? '<span class="flag">expired</span>' : ''}${j.location_unclear ? '<span class="flag">location unclear</span>' : ''}</div>${j.id === selected ? `<div class="row-actions">${applied(j, j.state === 'applied' ? 'Unmark' : 'Applied')}${dismiss(j)}</div>` : ''}</td></tr>`).join('')}</tbody></table>` : emptyJobs());
 }
 async function loadJobs() {
   const version = ++jobsVersion;
@@ -109,7 +119,7 @@ async function loadJobs() {
 
   if (version !== jobsVersion) return;
   root.querySelectorAll<HTMLElement>('[data-count]').forEach(node => { node.textContent = String(totals[node.dataset.count!] ?? 0); });
-  element('source-count').textContent = `${checked.length} of ${picks.length}`;
+  jobCounts = totals;
   jobs = next;
   if (!jobs.some(j => j.id === selected)) selected = jobs[0]?.id ?? 0;
   renderJobs();
@@ -124,6 +134,7 @@ function scanTime(value: string) {
 }
 function renderSources() {
   renderScoreAll();
+  if (!jobs.length && element('jobs').getAttribute('aria-busy') === 'false') renderJobs();
   const status = element('scan-status');
   const failed = sources.filter(s => s.last?.status === 'failed').length;
   const errors = sources.filter(s => s.last?.counts?.errors?.length).length;
@@ -137,6 +148,10 @@ async function toggleSchedule() {
   scheduled = (await api<{ upwork: boolean }>('schedule', 'PUT', { upwork: !scheduled })).upwork;
   renderSources();
 }
+function renderSourceCount() {
+  const picks = Array.from(root.querySelectorAll<HTMLInputElement>('.source-picks input'));
+  element('source-count').textContent = `${picks.filter(input => input.checked).length} of ${picks.length}`;
+}
 async function loadSources() {
   const result = await api<{ sources: Source[]; running: number | null; scheduled: boolean }>('sources');
   sources = result.sources; scheduled = result.scheduled;
@@ -146,7 +161,7 @@ async function loadSources() {
   if (sources.some(s => s.name === 'upwork')) connected = (await api<{ connected: boolean }>('upwork/status')).connected;
   renderSources();
   if (result.running && !runningId) watchScan(result.running);
-  if (!was.size) await loadJobs();
+  renderSourceCount();
 }
 function watchScan(id: number) {
   runningId = id; scan = null; clearTimeout(pollTimer); renderSources();
@@ -296,8 +311,13 @@ root.addEventListener('click', event => {
     if (row && !(event.target as HTMLElement).closest('a, button')) { selected = Number(row.dataset.job); renderJobs(); }
     return;
   }
+  if (target.dataset.action === 'show-filtered') {
+    root.querySelector<HTMLInputElement>('[name="filtered"]')!.checked = true;
+    void loadJobs().catch(notice);
+  }
   if (target.dataset.action === 'clear-filters') {
     root.querySelectorAll<HTMLInputElement>('.controls input').forEach(input => { input.checked = input.closest('.source-picks') !== null || ['new', 'unscored'].includes(input.name); });
+    renderSourceCount();
     void loadJobs().catch(notice);
   }
   const id = Number(target.dataset.id);
@@ -320,7 +340,7 @@ root.addEventListener('click', event => {
 window.addEventListener('message', event => {
   if (event.origin === location.origin && event.data === 'upwork-connected') { notice('Upwork connected'); void loadSources().catch(notice); }
 });
-root.addEventListener('change', event => { if ((event.target as HTMLElement).closest('.controls')) void loadJobs().catch(notice); });
+root.addEventListener('change', event => { if ((event.target as HTMLElement).closest('.controls')) { renderSourceCount(); void loadJobs().catch(notice); } });
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && detailId) { closeDetail(); return; }
   if ((event.target as HTMLElement).closest('input, textarea, select, [contenteditable]') || event.ctrlKey || event.metaKey || event.altKey) return;

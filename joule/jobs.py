@@ -17,6 +17,13 @@ SOURCE_FILTER = (
     "AND d.source IN (SELECT value FROM json_each(?))))"
 )
 
+SHOW_CATEGORY = (
+    "CASE WHEN state='applied' THEN 'applied' "
+    "WHEN state='dismissed' THEN 'dismissed' "
+    "WHEN filtered_reason IS NOT NULL THEN 'filtered' "
+    "WHEN score IS NULL THEN 'unscored' ELSE 'new' END"
+)
+
 
 def source_params(source):
     return (not source, json.dumps(source or []), json.dumps(source or []))
@@ -50,18 +57,20 @@ async def list_jobs(
             f"SELECT jobs.*, {score.RANK} AS rank, drafted.job_id IS NOT NULL AS has_drafts "
             "FROM jobs LEFT JOIN (SELECT DISTINCT job_id FROM drafts) drafted "
             "ON drafted.job_id=jobs.id WHERE primary_id IS NULL "
-            "AND (? OR score IS NOT NULL) AND (? OR filtered_reason IS NULL) "
-            "AND (? OR state != 'dismissed') "
-            "AND (? OR state != 'applied') "
-            "AND (? OR state NOT IN ('new', 'seen') OR filtered_reason IS NOT NULL) "
+            f"AND {SHOW_CATEGORY} IN (SELECT value FROM json_each(?)) "
             f"AND {SOURCE_FILTER} "
             f"ORDER BY {sort} DESC NULLS LAST, posted_at DESC LIMIT 500",
             (
-                unscored,
-                filtered,
-                dismissed,
-                applied,
-                new,
+                json.dumps(
+                    [
+                        name
+                        for name, enabled in zip(
+                            ["new", "unscored", "filtered", "applied", "dismissed"],
+                            [new, unscored, filtered, applied, dismissed],
+                        )
+                        if enabled
+                    ]
+                ),
                 *source_params(source),
             ),
         ).fetchall()
@@ -84,16 +93,14 @@ async def list_jobs(
 @router.get("/jobs/counts")
 def job_counts(request: Request, source: Annotated[list[str] | None, Query()] = None):
     with closing(connect(request.app.state.data_dir / "joule.db")) as db:
-        row = db.execute(
-            "SELECT COUNT(CASE WHEN state IN ('new', 'seen') AND filtered_reason IS NULL THEN 1 END) AS new, "
-            "COUNT(CASE WHEN score IS NULL THEN 1 END) AS unscored, "
-            "COUNT(filtered_reason) AS filtered, "
-            "COUNT(CASE WHEN state='applied' THEN 1 END) AS applied, "
-            "COUNT(CASE WHEN state='dismissed' THEN 1 END) AS dismissed "
-            f"FROM jobs WHERE primary_id IS NULL AND {SOURCE_FILTER}",
+        rows = db.execute(
+            f"SELECT {SHOW_CATEGORY} AS category, COUNT(*) AS count "
+            f"FROM jobs WHERE primary_id IS NULL AND {SOURCE_FILTER} GROUP BY category",
             source_params(source),
-        ).fetchone()
-        return dict(row)
+        ).fetchall()
+        return dict.fromkeys(
+            ["new", "unscored", "filtered", "applied", "dismissed"], 0
+        ) | {row["category"]: row["count"] for row in rows}
 
 
 @router.get("/jobs/resolve")
