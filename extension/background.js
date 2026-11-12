@@ -54,7 +54,7 @@ function createBackground(chrome, fetcher = fetch) {
       const tab = await chrome.tabs.get(integer(message.tabId));
       // Tab URL metadata needs tabs/host permission; static script matches do not grant it.
       // https://developer.chrome.com/docs/extensions/reference/api/tabs#permissions
-      if (!tab.url) throw Error('Chrome did not expose the page URL. Reload the extension to enable tab access, then Refresh Jobs.');
+      if (!tab.url) throw Error('Chrome did not expose the page URL. Reload the extension to enable tab access, then Retry in the panel.');
       const active = /^https?:/.test(tab.url) && allowed(tab.url) ?
         await api(`/api/jobs/resolve?url=${encodeURIComponent(tab.url)}`) : null;
       await chrome.storage.session.set({active});
@@ -72,7 +72,7 @@ function createBackground(chrome, fetcher = fetch) {
       await chrome.storage.session.set({active});
       return active;
     }
-    if (!['fill', 'replay', 'attach', 'resume', 'ask', 'question', 'save'].includes(message.type)) throw Error('Unknown request');
+    if (!['fill', 'replay', 'resume', 'ask', 'save'].includes(message.type)) throw Error('Unknown request');
     if (message.type === 'save') {
       if (!validRef(message.field)) throw Error('Save refused: invalid frame/field reference; run Fill again.');
       if (!Number.isSafeInteger(message.tabId) || message.tabId <= 0) throw Error('Save refused: invalid tab id.');
@@ -99,17 +99,7 @@ function createBackground(chrome, fetcher = fetch) {
         throw error;
       }
     }
-    if (message.type === 'question') {
-      if (message.jobId !== active.id) throw Error('Pick the intended Job before Ask');
-      try {
-        const result = await api(`/api/fill/jobs/${integer(active.id)}/ask`, {question: message.question});
-        if ((await chrome.storage.session.get('active')).active?.id !== active.id) throw Error('Job changed; Ask again');
-        return result;
-      }
-      catch (error) { if (error.status === 404) await chrome.storage.session.remove('active'); throw error; }
-    }
     if (message.type === 'resume') return match([]);
-    if (message.type === 'attach' && !['resume', 'cover_letter'].includes(message.kind)) throw Error('Invalid attachment kind');
     const tab = await chrome.tabs.get(integer(message.tabId));
     if (!allowed(tab.url)) throw Error('This host is refused');
     if (message.type === 'ask') {
@@ -152,23 +142,22 @@ function createBackground(chrome, fetcher = fetch) {
       if (fields.length > 200) throw Error('Form exceeds the 200-field limit');
       let result = await match(fields);
       let resumeFile;
-      async function prepareFile(kind) {
-        if (kind === 'cover_letter' && !result.cover_letter_draft_id) throw Error('no Cover Letter Draft');
-        if (kind === 'resume' && !result.resume_draft_id) {
+      async function prepareFile() {
+        if (!result.resume_draft_id) {
           // Duplicate append-only versions across panels are an accepted race (§6); the panel disables its button.
           await api(`/api/jobs/${integer(active.id)}/drafts`, {kind: 'tailored_cv'});
           result = {...await match([]), actions: result.actions};
         }
-        const draftId = kind === 'resume' ? result.resume_draft_id : result.cover_letter_draft_id;
+        const draftId = result.resume_draft_id;
         if (!draftId) throw Error('No Tailored CV available after generation');
         const file = await api(`/api/drafts/${integer(draftId)}/pdf`, undefined, true);
-        if (kind === 'resume') resumeFile = file;
+        resumeFile = file;
         return file;
       }
-      async function attach(kind) {
-        const actions = result.actions.filter(action => action.action === 'upload' && action.file === kind);
+      async function attach() {
+        const actions = result.actions.filter(action => action.action === 'upload' && action.file === 'resume');
         if (!actions.length) throw Error('No matching file input found');
-        const file = await prepareFile(kind);
+        const file = await prepareFile();
         if (pageURL((await chrome.tabs.get(tab.id)).url) !== pageURL(tab.url) ||
             (await chrome.storage.session.get('active')).active?.id !== active.id)
           throw Error('Job or page changed while preparing the CV; run Fill again');
@@ -181,10 +170,6 @@ function createBackground(chrome, fetcher = fetch) {
           if (row && applied.filled) { row.outcome = 'written'; row.after = true; }
         }
         return filled;
-      }
-      if (message.type === 'attach') {
-        const filled = await attach(message.kind);
-        return {...result, filled, fields};
       }
       let filled = 0;
       for (const frameId of request.frames.keys()) {
@@ -207,13 +192,14 @@ function createBackground(chrome, fetcher = fetch) {
       }
       let attached = 0, resumeStatus;
       try {
-        if (diagnosticOnly) resumeStatus = 'No matched Job; Tailored CV not attached.';
+        if (message.attachResume === false) resumeStatus = 'Tailored CV attachment disabled.';
+        else if (diagnosticOnly) resumeStatus = 'No matched Job; Tailored CV not attached.';
         else if (!result.actions.some(action => action.action === 'upload' && action.file === 'resume')) {
           resumeStatus = 'No resume file input found; Tailored CV not attached.';
-          await prepareFile('resume');
+          await prepareFile();
         }
         else {
-          attached = await attach('resume');
+          attached = await attach();
           resumeStatus = attached ? 'Tailored CV attached.' : 'Resume input already filled or unavailable; existing file preserved.';
         }
       } catch (error) { resumeStatus = `Tailored CV attachment failed: ${error.message}`; }
@@ -222,15 +208,13 @@ function createBackground(chrome, fetcher = fetch) {
       let traceFile, traceError;
       try { traceFile = (await api('/api/fill/traces', trace)).file; }
       catch (error) { traceError = traceFailure(error); }
-      return {...result, filled, attached, resumeStatus, resumeDownload, fields, traceFile, traceError};
+      return {...result, filled, attached, resumeStatus, resumeName: resumeFile?.name, resumeDownload, fields, trace, traceFile, traceError};
     } catch (error) {
-      if (message.type !== 'attach') {
-        trace.errors.push('fill-failed');
-        try {
-          const saved = await api('/api/fill/traces', trace);
-          error.message += ` Diagnostic trace: ${saved.file}`;
-        } catch (traceError) { error.message += ` ${traceFailure(traceError)}`; }
-      }
+      trace.errors.push('fill-failed');
+      try {
+        const saved = await api('/api/fill/traces', trace);
+        error.message += ` Diagnostic trace: ${saved.file}`;
+      } catch (traceError) { error.message += ` ${traceFailure(traceError)}`; }
       throw error;
     } finally { pending.delete(requestId); }
   }
