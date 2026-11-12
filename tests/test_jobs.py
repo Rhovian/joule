@@ -44,7 +44,9 @@ def client(tmp_path):
                     ),
                 )
             db.execute("UPDATE jobs SET source='hn' WHERE id=6")
-            db.execute("UPDATE jobs SET source='remoteok' WHERE id=2")
+            db.execute(
+                "UPDATE jobs SET source='remoteok', company='Acme', score_reason='focused' WHERE id=2"
+            )
         yield client
 
 
@@ -64,10 +66,18 @@ def client(tmp_path):
         ("?source=hotfix", [1, 3]),
         ("?source=hn&source=remoteok", [2, 1]),
         ("?sort=score", [1, 2, 3]),
+        ("?sort=newest", [3, 2, 1]),
+        ("?q=ENGINEER", [2, 1, 3]),
+        ("?q=acme", [2]),
+        ("?q=focused", [2]),
+        ("?q=%25", []),
+        ("?q=pay&filtered=true", [4]),
     ],
 )
 def test_list(client, query, ids):
-    rows = client.get("/api/jobs" + query).json()
+    response = client.get("/api/jobs" + query)
+    assert response.status_code == 200
+    rows = response.json()
     assert [row["id"] for row in rows] == ids
     assert all(
         not {"description", "extra", "score_points"} & row.keys() for row in rows
@@ -156,12 +166,13 @@ def test_score_all_backoff_validation_and_busy(client, monkeypatch):
         side_effect=[
             ai.AIError("HTTP 429"),
             score.Score(score=70, reason="fit", points=[]),
+            score.Score(score=70, reason="fit", points=[]),
         ]
     )
     pause = AsyncMock()
     monkeypatch.setattr(scoring_session.session, "structured", generate)
     monkeypatch.setattr(score, "backoff_sleep", pause)
-    # Scored rows, Duplicates and unknown IDs are ignored; repeat IDs run once.
+    # Explicit selection rescores scored rows; Duplicates/unknown IDs are ignored and repeats run once.
     response = client.post("/api/jobs/score", json={"ids": [1, 2, 3, 3, 6, 999]})
     assert response.status_code == 202
 
@@ -169,10 +180,10 @@ def test_score_all_backoff_validation_and_busy(client, monkeypatch):
         await scanner.task
 
     client.portal.call(finish)
-    assert generate.await_count == 2
+    assert generate.await_count == 3
     pause.assert_awaited_once_with(30)
     assert client.get("/api/jobs/3").json()["score"] == 70
-    assert client.get("/api/jobs/1").json()["score"] == 85
+    assert client.get("/api/jobs/1").json()["score"] == 70
 
 
 def test_list_has_drafts(client):
@@ -209,7 +220,7 @@ def test_detail(client):
 
 
 def test_patch(client):
-    for state in ("dismissed", "applied", "seen"):
+    for state in ("dismissed", "applied", "seen", "new"):
         response = client.patch("/api/jobs/1", json={"state": state})
         assert response.status_code == 200 and response.json() == {
             "id": 1,
@@ -220,7 +231,7 @@ def test_patch(client):
         assert (
             client.patch(f"/api/jobs/{id}", json={"state": "seen"}).status_code == 404
         )
-    for body in ({"state": "new"}, {}, {"state": "seen", "extra": True}):
+    for body in ({"state": "invalid"}, {}, {"state": "seen", "extra": True}):
         assert client.patch("/api/jobs/1", json=body).status_code == 422
     assert client.patch("/api/jobs/1").status_code == 422
 

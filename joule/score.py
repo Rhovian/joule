@@ -119,19 +119,19 @@ async def scan_queue(db, sources, settings, data_dir, fingerprint, *, job_ids=No
     # Unscored rows are the durable backlog; rebuilding it also recovers a restart.
     sources = [s for s in sources if s != "upwork" or settings.upwork.scoring]
     if job_ids is not None:
-        # Explicit Score all includes the visible Filtered and triaged Jobs;
+        # Explicit selection includes scored, Filtered and triaged Jobs;
         # automatic Scan exclusions and the Scan cap do not apply to this action.
         selection = "id IN (SELECT value FROM json_each(?))"
         parameters = (json.dumps(job_ids), len(job_ids))
     else:
         selection = (
             f"source IN ({','.join('?' for _ in sources)}) "
-            "AND filtered_reason IS NULL AND (source != 'upwork' OR state='new')"
+            "AND score IS NULL AND filtered_reason IS NULL AND (source != 'upwork' OR state='new')"
         )
         parameters = (*sources, settings.max_scored_per_scan)
     jobs = db.execute(
         f"SELECT id, source FROM jobs WHERE {selection} "
-        "AND primary_id IS NULL AND score IS NULL AND content_purged_at IS NULL "
+        "AND primary_id IS NULL AND content_purged_at IS NULL "
         "ORDER BY coalesce(posted_at, '') DESC, id LIMIT ?",
         parameters,
     ).fetchall()

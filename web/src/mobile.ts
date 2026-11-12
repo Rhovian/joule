@@ -2,8 +2,8 @@ export function createMobile(actions: { state: (id: number, state: string) => Pr
   const phone = matchMedia('(max-width: 740px)'), root = document.getElementById('dashboard')!;
   const dialog = document.getElementById('mobile-filters') as HTMLDialogElement;
   const controls = document.querySelector<HTMLElement>('.controls')!, parent = controls.parentElement!;
-  const menu = document.getElementById('sources-menu')!, opener = document.getElementById('mobile-filter-open')!, notification = document.getElementById('notice')!;
-  function openFilters() { if (phone.matches && !dialog.open) { dialog.append(notification); dialog.showModal(); document.body.classList.add('filters-open'); actions.refresh(); } }
+  const menu = document.getElementById('sources-menu')!, opener = document.getElementById('mobile-filter-open')!, notification = document.getElementById('notice')!, undo = document.getElementById('undo-toast')!;
+  function openFilters() { if (phone.matches && !dialog.open) { dialog.append(notification, undo); dialog.showModal(); document.body.classList.add('filters-open'); actions.refresh(); } }
   function layout() {
     if (dialog.open) dialog.close();
     if (menu.matches(':popover-open')) menu.hidePopover();
@@ -19,7 +19,7 @@ export function createMobile(actions: { state: (id: number, state: string) => Pr
     if (scanFilters) scanFilters.open = !phone.matches;
   }
   opener.addEventListener('click', openFilters);
-  dialog.addEventListener('close', () => { document.body.append(notification); document.body.classList.remove('filters-open'); if (phone.matches && !root.classList.contains('split')) opener.focus({ preventScroll: true }); });
+  dialog.addEventListener('close', () => { document.body.append(notification); root.append(undo); document.body.classList.remove('filters-open'); if (phone.matches && !root.classList.contains('split')) opener.focus({ preventScroll: true }); });
   dialog.addEventListener('click', event => {
     const box = dialog.getBoundingClientRect();
     if ((event.target as HTMLElement).closest('[data-mobile-close]') || event.target === dialog && (event.clientY < box.top || event.clientX < box.left || event.clientX > box.right)) dialog.close();
@@ -32,7 +32,7 @@ export function createMobile(actions: { state: (id: number, state: string) => Pr
   root.addEventListener('pointerdown', event => {
     if (!phone.matches || !event.isPrimary || event.button !== 0 || dialog.open || root.classList.contains('split')) return;
     const row = (event.target as HTMLElement).closest<HTMLElement>('[data-job]');
-    if (row) drag = { row, id: event.pointerId, x: event.clientX, y: event.clientY, dx: 0, active: false };
+    if (row && !(event.target as HTMLElement).closest('.row-pick')) drag = { row, id: event.pointerId, x: event.clientX, y: event.clientY, dx: 0, active: false };
   });
   root.addEventListener('pointermove', event => {
     if (!drag || drag.id !== event.pointerId) return;

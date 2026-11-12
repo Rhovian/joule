@@ -48,7 +48,8 @@ async def list_jobs(
     dismissed: bool = False,
     applied: bool = False,
     source: Annotated[list[str] | None, Query()] = None,
-    sort: Literal["rank", "score"] = "rank",
+    sort: Literal["rank", "score", "newest"] = "rank",
+    q: str = "",
 ):
     directory = request.app.state.data_dir
     stamp = score.fingerprint(directory, load_settings(directory))
@@ -59,7 +60,10 @@ async def list_jobs(
             "ON drafted.job_id=jobs.id WHERE primary_id IS NULL "
             f"AND {SHOW_CATEGORY} IN (SELECT value FROM json_each(?)) "
             f"AND {SOURCE_FILTER} "
-            f"ORDER BY {sort} DESC NULLS LAST, posted_at DESC LIMIT 500",
+            "AND instr(lower(title || ' ' || COALESCE(company, '') || ' ' || "
+            "COALESCE(score_reason, '') || ' ' || COALESCE(filtered_reason, '')), lower(?)) > 0 "
+            f"ORDER BY {'COALESCE(posted_at, first_seen_at)' if sort == 'newest' else sort} "
+            "DESC NULLS LAST, posted_at DESC, jobs.id DESC LIMIT 500",
             (
                 json.dumps(
                     [
@@ -72,6 +76,7 @@ async def list_jobs(
                     ]
                 ),
                 *source_params(source),
+                q.strip(),
             ),
         ).fetchall()
         return [
@@ -308,7 +313,7 @@ def draft_pdf(request: Request, draft_id: int):
 
 
 class StateRequest(StrictModel):
-    state: Literal["seen", "dismissed", "applied"]
+    state: Literal["new", "seen", "dismissed", "applied"]
 
 
 @router.patch("/jobs/{job_id}")
