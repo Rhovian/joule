@@ -58,21 +58,24 @@ for (const site of ['lever', 'rippling']) for (const existing of [true, false]) 
       await background.handle({type: 'frame', request: message.request, fields: worker.describe()}, sender);
       return {ok: true};
     }
+    if (message.type === 'trace-apply') return {filled: 0, trace: []};
     return worker.upload(message.ref, message.file);
   };
   chrome.runtime.sendMessage = async message => ({value: await background.handle(message, ui)});
   const panel = new JSDOM(fs.readFileSync(`${__dirname}/../sidepanel.html`, 'utf8'), {runScripts: 'outside-only'});
   panel.window.chrome = chrome;
+  panel.window.matchMedia = () => ({matches: false, addEventListener() {}});
   panel.window.eval(fs.readFileSync(`${__dirname}/../sidepanel.js`, 'utf8'));
   const settle = () => new Promise(resolve => setImmediate(resolve));
   await settle();
   const element = id => panel.window.document.getElementById(id);
-  assert.equal(element('attach').textContent, existing ? 'Attach resume' : 'Generate and attach resume');
+  assert.equal(element('attach').checked, true);
+  assert.equal(element('fill').disabled, false);
   if (existing) {
-    assert.match(element('resume').textContent, /Tailored CV v2/);
+    assert.match(element('resume').textContent, /v2/);
     assert.ok(element('resume').textContent.includes(new Date(draft.created_at).toLocaleString()));
-  } else assert.equal(element('resume').textContent, 'Generate a Tailored CV');
-  element('attach').dispatchEvent(new panel.window.Event('click'));
+  } else assert.equal(element('resume').textContent, 'Generated during Fill if attached');
+  element('fill').click();
   await settle();
   assert.equal(input.files[0].name, 'JB_CV_Acme.pdf');
   assert.equal(input.files[0].type, 'application/pdf');
@@ -80,17 +83,17 @@ for (const site of ['lever', 'rippling']) for (const existing of [true, false]) 
   assert.deepEqual(events, ['input', 'change']);
   assert.equal(calls.filter(call => call.url.endsWith('/drafts')).length, existing ? 0 : 1);
   assert.ok(calls.some(call => call.url === 'http://localhost:8000/api/drafts/9/pdf'));
-  assert.match(element('resume').textContent, /Tailored CV v2/);
-  assert.equal(element('status').textContent, '1 attached. Review the form.');
+  assert.match(element('resume').textContent, /v2/);
+  assert.match(element('resume-result').textContent, /JB_CV_Acme.pdf attached/);
 });
 
-for (const mode of ['reuse', 'generate', 'missing-input', 'missing-input-generate', 'failure', 'changed', 'upload-error', 'upload-error-generated', 'preserved', 'no-cv']) test(`Fill CV: ${mode}`, async () => {
+for (const mode of ['reuse', 'generate', 'missing-input', 'missing-input-generate', 'failure', 'changed', 'upload-error', 'upload-error-generated', 'preserved', 'no-cv', 'off']) test(`Fill CV: ${mode}`, async () => {
   const active = {id: 1, source: 'hotfix'}, tab = {id: 4, url: 'https://jobs.lever.co/acme/apply'};
   const chrome = {runtime: {id: 'ext', getURL: p => `chrome-extension://ext/${p}`},
     storage: {local: storage({origin: 'http://localhost:8000'}), session: storage({active, 'frames:4': {7: tab.url}})},
     tabs: {get: async () => tab}};
   const sender = {id: 'ext', url: 'chrome-extension://ext/sidepanel.html'};
-  let background, generated = !['generate', 'missing-input-generate', 'upload-error-generated', 'no-cv'].includes(mode), generations = 0, uploads = 0, complete = false;
+  let background, generated = !['generate', 'missing-input-generate', 'upload-error-generated', 'no-cv', 'off'].includes(mode), generations = 0, uploads = 0, complete = false;
   let release; const pendingUpload = new Promise(resolve => { release = resolve; });
   background = createBackground(chrome, async (url, options) => {
     if (url.endsWith('/drafts')) { generated = mode !== 'no-cv'; generations++; return {ok: true, json: async () => ({})}; }
@@ -114,14 +117,14 @@ for (const mode of ['reuse', 'generate', 'missing-input', 'missing-input-generat
     if (mode.startsWith('upload-error')) throw Error('Upload rejected');
     return {filled: mode === 'preserved' ? 0 : 1};
   };
-  const filling = background.handle({type: 'fill', tabId: 4}, sender).then(result => { complete = true; return result; });
+  const filling = background.handle({type: 'fill', tabId: 4, attachResume: mode !== 'off'}, sender).then(result => { complete = true; return result; });
   await new Promise(resolve => setImmediate(resolve));
   if (['reuse', 'generate'].includes(mode)) { assert.equal(uploads, 1); assert.equal(complete, false); }
   release(); const result = await filling;
   assert.equal(result.filled, 2);
   assert.equal(generations, ['generate', 'missing-input-generate', 'upload-error-generated', 'no-cv'].includes(mode) ? 1 : 0);
   assert.equal(result.attached, ['reuse', 'generate'].includes(mode) ? 1 : 0);
-  assert.match(result.resumeStatus, mode.startsWith('missing-input') ? /No resume file input/ :
+  assert.match(result.resumeStatus, mode === 'off' ? /disabled/ : mode.startsWith('missing-input') ? /No resume file input/ :
     ['failure', 'changed', 'upload-error', 'upload-error-generated', 'no-cv'].includes(mode) ? /attachment failed/ :
     mode === 'preserved' ? /existing file preserved/ : /Tailored CV attached/);
   if (['missing-input', 'missing-input-generate', 'changed', 'upload-error', 'upload-error-generated', 'preserved'].includes(mode)) {

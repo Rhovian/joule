@@ -1,18 +1,16 @@
 <!doctype html>
-<html lang="en"><meta charset="utf-8"><title>Joule Fill</title>
-<h1>Joule Fill</h1><p id="active">Pick a Job before Fill</p>
-<a href="options.html" target="_blank">Connection options</a>
-<p><button id="refresh" type="button">Refresh Jobs</button></p>
-<label>Filter Jobs <input id="filter" type="search"></label>
-<label>Job <select id="jobs"><option value="">Pick a Job</option></select></label>
-<p><button id="fill" type="button" disabled>Fill</button></p>
-<p id="resume">Generate a Tailored CV</p>
-<p><button id="attach" type="button" disabled>Generate and attach resume</button>
-</p>
-<p><label>Ask a question<br><textarea id="question" maxlength="2000" rows="3"></textarea></label><br>
-<button id="ask" type="button" disabled>Ask</button></p>
-<p><label>Answer<br><textarea id="answer" rows="5" readonly></textarea></label><br>
-<button id="copy" type="button" disabled>Copy answer</button></p>
-<p id="status" role="status"></p><ul id="remaining"></ul>
-<p>Review every value, complete remaining fields, then submit yourself.</p>
-<script src="sidepanel.js"></script></html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Joule Fill</title><link rel="stylesheet" href="sidepanel.css"></head>
+<body>
+<header class="panel-header"><span class="brand">joule<span>.</span></span><span>Fill</span><span id="connection-state" class="connection-state">Connecting…</span><button id="settings" class="icon" aria-label="Connection options" aria-controls="connection-options" aria-expanded="false"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="m9 3 1-1h4l1 3 3 1 3 1v4l-2 2 1 3-3 3-3-1-3 2H7l-1-3-3-1v-4l2-2-1-3 3-3z"/></svg></button></header>
+<main>
+<section id="connection-options" class="card connection" aria-label="Connection options" hidden><h2 id="connection-title">Connect to Joule</h2><p class="muted">The dashboard at this URL must be running.</p><label class="label" for="origin">Joule URL</label><input id="origin" type="url" placeholder="http://localhost:8000" autocomplete="url"><div class="actions"><button id="test" class="primary">Test &amp; save</button><button id="retry">Retry</button></div><p id="connection-message" role="status"></p></section>
+<section id="matched" class="card job-card" aria-label="Job" hidden><div class="job-caption"><span class="label">Job</span><span id="match-mode" class="muted">matched from page URL</span></div><button id="change" class="ghost">Change</button><div class="job-heading"><span id="score" class="score"></span><div class="job-text"><h2 id="active"></h2><p class="muted"><span id="job-meta"></span> <a id="open-joule" target="_blank" rel="noopener noreferrer" hidden>open in Joule ↗</a></p></div></div></section>
+<section id="picker" aria-label="Pick a Job" hidden><h2 id="picker-title">No Job matches this page</h2><p class="muted">Pick one, or create it from the page.</p><div class="card job-picker"><label class="sr-only" for="job-search">Search Jobs by title or company</label><input id="job-search" type="search" placeholder="Search Jobs by title or company" autocomplete="off"><div id="job-choices"></div></div><details id="create-job" class="card" hidden><summary>Create Job from this page</summary><form id="create-form"><p class="muted">Detected locally. Review before creating; nothing is saved yet.</p><label>Title<input name="title" maxlength="500" required></label><label>Company<input name="company" maxlength="500"></label><label>Kind<select name="kind"><option value="posting">Job posting</option><option value="upwork">Upwork posting</option><option value="questions">Application questions</option></select></label><label>Page URL<input name="url" type="url" maxlength="8192" required></label><button id="create" class="primary" type="submit">Create</button></form></details><button id="cancel-pick" class="ghost" hidden>Keep current Job</button></section>
+<section id="cv-card" class="card cv-card" aria-label="Tailored CV" hidden><svg class="document-icon" aria-hidden="true" width="20" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 2h9l5 5v15H6z M14 2v6h6"/></svg><div><strong>Tailored CV</strong><p id="resume" class="muted"></p></div><label class="attach"><input id="attach" type="checkbox" checked>Attach</label></section>
+<p id="status" class="sr-only" role="status" aria-live="polite" hidden></p>
+<section id="result" class="card result" aria-label="Fill result" hidden><div class="result-counts"><span><b id="filled-count">0</b> filled</span><span><b id="need-count">0</b> need you</span><span><b id="optional-count">0</b> optional</span></div><div class="result-bar" aria-hidden="true"><i id="filled-bar"></i><i id="need-bar"></i><i id="optional-bar"></i></div><p id="resume-result"></p><a id="resume-download" hidden>Download Tailored CV</a><p id="fill-warning" class="warning" hidden></p></section>
+<section id="remaining" class="card field-group" aria-label="Needs you" hidden><h2 id="need-heading" class="label">Needs you</h2><div id="need-rows"></div></section>
+<details id="optional" class="card field-group" hidden><summary id="optional-heading"></summary><div id="optional-rows"></div></details>
+<details id="filled" class="card field-group" hidden><summary id="filled-heading"></summary><div id="filled-rows"></div></details>
+<div id="fill-controls"><button id="mark-applied" class="primary" hidden>Mark applied</button><button id="undo-applied" hidden>Undo</button><button id="fill" class="primary" disabled>Fill form</button><p class="muted review">Joule never submits. Review every value, then submit yourself.</p></div>
+</main><script src="fill-paste.js"></script><script src="options.js"></script><script src="sidepanel.js"></script></body></html>

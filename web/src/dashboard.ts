@@ -118,12 +118,13 @@ function renderSources() {
   renderScoreAll();
   if (!jobs.length && element('jobs').getAttribute('aria-busy') === 'false') renderJobs();
   const status = element('scan-status');
-  const failed = sources.filter(s => sourceStatus(s).failed).length;
+  const scanSources = sources.filter(source => source.name !== 'manual');
+  const failed = scanSources.filter(s => sourceStatus(s).failed).length;
   status.classList.toggle('failed', !runningId && failed > 0);
   status.textContent = starting ? 'Starting Scan…' : runningId
     ? `${scoringAll ? 'Scoring' : 'Scanning'}${scan ? ` ${scan.sources.join(', ')}` : '…'}`
     : failed ? `${failed} Source${failed === 1 ? '' : 's'} failed · Open Scans` : 'Scans ready';
-  scansPage.update({ sources, scan, running: runningId, starting, scoring: scoringAll, scheduled, connected });
+  scansPage.update({ sources: scanSources, scan, running: runningId, starting, scoring: scoringAll, scheduled, connected });
 }
 async function toggleSchedule() {
   scheduled = (await api<{ upwork: boolean }>('schedule', 'PUT', { upwork: !scheduled })).upwork;

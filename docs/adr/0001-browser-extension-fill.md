@@ -7,7 +7,7 @@ Amended: 2026-10-29, operator-approved automatic Tailored CV attachment (D9). Th
 
 ## 0. Summary
 
-A personal unpacked MV3 Chrome extension, plus a small joule router `/api/fill/*`. The operator opens an employer-hosted ATS form, picks (or already has) the active Job, clicks **Fill**: joule returns values for identity fields (name, email, phone, LinkedIn, GitHub, site, current company) and the extension writes them into empty fields and automatically attaches the latest Tailored CV PDF, generating one only when none exists for that Job. Fill waits for attachment before reporting completion. Fields it can't match are listed; the operator clicks **Ask** per field to get a Codex answer from the Profile/`answers.yaml`. The extension never submits and never touches `jobs.state`; "applied" stays the operator's `a` key.
+A personal unpacked MV3 Chrome extension, plus a small joule router `/api/fill/*`. The operator opens an employer-hosted ATS form, picks (or already has) the active Job, clicks **Fill**: joule returns values for identity fields (name, email, phone, LinkedIn, GitHub, site, current company) and the extension writes them into empty fields and automatically attaches the latest Tailored CV PDF, generating one only when none exists for that Job. Fill waits for attachment before reporting completion. Fields it can't match are listed; the operator clicks **Ask** per field to get a Codex answer from the Profile/`answers.yaml`. The extension never submits. Applied changes only on the operator’s explicit Mark applied / Undo click, as amended by #141 below.
 
 Reuses unchanged: `drafts.answer`/`context()` (Profile + `answers.yaml` prompt), `drafts.write` (Tailored CV), `GET /drafts/{id}/pdf`, `GET /api/jobs`, `cv.load`, `ai.structured` sandbox (read-only, tools disabled).
 
@@ -33,7 +33,7 @@ Destination weights (research §2, snapshot of 565 non-Upwork rows; "clue, not p
 
 ## 2. Invariants
 
-1. **Applied is manual.** No `/api/fill/*` handler and no extension code writes `jobs.state`. Test: state unchanged after match/ask/resume/save.
+1. **Applied is manual.** Fill, Ask, resume and Save leave state unchanged. After Fill, an explicit Mark applied / Undo click uses the existing state API; nothing infers submission.
 2. **No submit.** Extension never calls `submit()`/`requestSubmit()`, never clicks a page button, never dispatches `submit`. Only writes `value`/`checked`/`files` plus `input`/`change` events.
 3. **Fill is non-Upwork only.** `/api/fill/*` returns 400 for `source='upwork'`. Extension injects nowhere on `upwork.com`, `linkedin.com`, `indeed.com`, `glassdoor.com` (static matches never list them; the on-request path refuses by host). Encodes research §6 and the operator's "not for upwork / no LinkedIn/Indeed/Glassdoor".
 4. **Write only into empty, visible, enabled, non-honeypot fields.** Never overwrites existing values; skips `type=hidden`, `aria-hidden`, `display:none`, zero-size, `disabled`/`readonly`. (File inputs are exempt from the size test: Greenhouse's is `visually-hidden`.)
@@ -233,3 +233,11 @@ Untrusted page strings (labels, names, options) flow into a Codex prompt; joule 
 ## 13. Open for the operator
 
 None. Q1 to Q4 are ruled (D7, D11, D10, D15). Remaining unknowns are live-site behaviors listed in §5, owned by the operator's manual testing (slice 7).
+
+## Amendment #141: explicit side panel actions
+
+Fill field writes only its shown answer’s referenced field on click, permitting overwrite while retaining the existing native setters, widget commits, sensitive-field and stale-descriptor guards. It does not regenerate an answer or submit.
+
+Create Job from this page reuses the dashboard’s local paste detector from one shared JS source. The operator reviews editable title/company/kind/URL before Create posts bounded page text to `POST /api/fill/jobs`. URL normalization and a write transaction reuse an existing Primary; ambiguous matches are refused for manual selection. New records are Primary Jobs in Source `manual`, use existing cheap filters, and join the existing scoring queue on a best-effort start at Create. If busy or scoring fails, it stays unscored for the existing Score action; no Manual-specific retry tick is scheduled. This is separate from the dashboard’s ephemeral Fill a Job outputs.
+
+Mark applied is a footer action after Fill, using the existing Job state API and Pipeline entry logic. Undo restores the previous state, with the same unmark/re-apply semantics as dashboard state undo. These three actions never submit a destination form.

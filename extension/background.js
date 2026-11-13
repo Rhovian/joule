@@ -14,13 +14,17 @@ function createBackground(chrome, fetcher = fetch) {
   // Fragment changes do not navigate to another document (Chrome tabs URL events include them).
   // https://developer.chrome.com/docs/extensions/reference/api/tabs#event-onUpdated
   const pageURL = url => { const page = new URL(url); page.hash = ''; return page.href; };
-  async function api(path, body, pdf = false) {
+  async function api(path, body, pdf = false, method = 'POST') {
     const {origin} = await chrome.storage.local.get('origin');
     if (!origin) throw Error('Configure the joule URL in Options first');
     const response = await fetcher(`${origin}${path}`, body === undefined ? {} : {
-      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+      method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
     });
-    if (!response.ok) { const error = Error(`joule HTTP ${response.status}`); error.status = response.status; throw error; }
+    if (!response.ok) {
+      let detail; try { detail = (await response.json()).detail; } catch { /* Non-JSON errors keep their status. */ }
+      if (Array.isArray(detail)) detail = detail.map(item => `${item.loc?.slice(1).join('.') || 'Input'}: ${item.msg}`).join('; ');
+      const error = Error(`joule HTTP ${response.status}${typeof detail === 'string' ? `: ${detail}` : ''}`); error.status = response.status; throw error;
+    }
     if (!pdf) return response.json();
     // Chrome messages use JSON, not structured clone; binary PDFs need base64:
     // https://developer.chrome.com/docs/extensions/develop/concepts/messaging#serialization
@@ -49,12 +53,13 @@ function createBackground(chrome, fetcher = fetch) {
       return {};
     }
     if (!trusted(sender)) throw Error('Only extension UI can request joule data');
+    if (message.type === 'appearance') return api('/api/appearance');
     if (message.type === 'detect') {
       await chrome.storage.session.set({active: null});
       const tab = await chrome.tabs.get(integer(message.tabId));
       // Tab URL metadata needs tabs/host permission; static script matches do not grant it.
       // https://developer.chrome.com/docs/extensions/reference/api/tabs#permissions
-      if (!tab.url) throw Error('Chrome did not expose the page URL. Reload the extension to enable tab access, then Refresh Jobs.');
+      if (!tab.url) throw Error('Chrome did not expose the page URL. Reload the extension to enable tab access, then Retry in the panel.');
       const active = /^https?:/.test(tab.url) && allowed(tab.url) ?
         await api(`/api/jobs/resolve?url=${encodeURIComponent(tab.url)}`) : null;
       await chrome.storage.session.set({active});
@@ -72,7 +77,35 @@ function createBackground(chrome, fetcher = fetch) {
       await chrome.storage.session.set({active});
       return active;
     }
-    if (!['fill', 'replay', 'attach', 'resume', 'ask', 'question', 'save'].includes(message.type)) throw Error('Unknown request');
+    if (message.type === 'page' || message.type === 'create') {
+      const tab = await chrome.tabs.get(integer(message.tabId));
+      if (!/^https?:/.test(tab.url) || !allowed(tab.url)) throw Error('This host is refused');
+      if (message.type === 'page') {
+        let page;
+        try { page = await chrome.tabs.sendMessage(tab.id, {type: 'page'}, {frameId: 0}); }
+        catch { await chrome.scripting.executeScript({target: {tabId: tab.id}, files: ['content.js']}); page = await chrome.tabs.sendMessage(tab.id, {type: 'page'}, {frameId: 0}); }
+        if (pageURL((await chrome.tabs.get(tab.id)).url) !== pageURL(tab.url)) throw Error('Page changed; try again');
+        return {...page, url: tab.url};
+      }
+      if (pageURL(tab.url) !== pageURL(message.pageURL)) throw Error('Page changed; read it again before creating a Job');
+      const active = await api('/api/fill/jobs', message.data);
+      if (pageURL((await chrome.tabs.get(tab.id)).url) !== pageURL(tab.url)) throw Error('Job saved, but the page changed; pick it manually');
+      await chrome.storage.session.set({active});
+      return active;
+    }
+    if (message.type === 'mark-applied' || message.type === 'undo-applied') {
+      const {active} = await chrome.storage.session.get('active');
+      const {appliedUndo} = await chrome.storage.session.get('appliedUndo');
+      if (active?.id !== message.jobId || active.source === 'upwork') throw Error('Active Job changed; run Fill again');
+      const previous = await api(`/api/jobs/${integer(active.id)}`);
+      if (message.type === 'undo-applied' && (appliedUndo?.id !== active.id || previous.state !== 'applied')) throw Error('Job state changed; Undo is unavailable');
+      const state = message.type === 'mark-applied' ? 'applied' : appliedUndo.state;
+      const job = await api(`/api/jobs/${active.id}`, {state}, false, 'PATCH');
+      const undo = message.type === 'mark-applied' && previous.state !== 'applied' ? {id: active.id, state: previous.state} : null;
+      await chrome.storage.session.set({active: {...active, state: job.state}, appliedUndo: undo});
+      return {job, canUndo: !!undo};
+    }
+    if (!['fill', 'replay', 'resume', 'ask', 'save', 'fill-field'].includes(message.type)) throw Error('Unknown request');
     if (message.type === 'save') {
       if (!validRef(message.field)) throw Error('Save refused: invalid frame/field reference; run Fill again.');
       if (!Number.isSafeInteger(message.tabId) || message.tabId <= 0) throw Error('Save refused: invalid tab id.');
@@ -99,19 +132,19 @@ function createBackground(chrome, fetcher = fetch) {
         throw error;
       }
     }
-    if (message.type === 'question') {
-      if (message.jobId !== active.id) throw Error('Pick the intended Job before Ask');
-      try {
-        const result = await api(`/api/fill/jobs/${integer(active.id)}/ask`, {question: message.question});
-        if ((await chrome.storage.session.get('active')).active?.id !== active.id) throw Error('Job changed; Ask again');
-        return result;
-      }
-      catch (error) { if (error.status === 404) await chrome.storage.session.remove('active'); throw error; }
-    }
     if (message.type === 'resume') return match([]);
-    if (message.type === 'attach' && !['resume', 'cover_letter'].includes(message.kind)) throw Error('Invalid attachment kind');
     const tab = await chrome.tabs.get(integer(message.tabId));
     if (!allowed(tab.url)) throw Error('This host is refused');
+    if (message.type === 'fill-field') {
+      if (message.pageURL && pageURL(message.pageURL) !== pageURL(tab.url)) throw Error('Page changed; run Fill again');
+      if (message.jobId !== active.id || !validRef(message.field) || typeof message.value !== 'string' || message.value.length > 30000) throw Error('Field changed; run Fill again');
+      const field = message.field;
+      const result = await chrome.tabs.sendMessage(tab.id, {type: 'apply', expected: {...field, ref: field.ref[1]},
+        actions: [{ref: field.ref[1], action: 'set', value: message.value, overwrite: true}]}, {frameId: field.ref[0]});
+      if (result.error) throw Error(result.error);
+      if (!result.filled) throw Error('Field could not be filled; review the form or run Fill again');
+      return result;
+    }
     if (message.type === 'ask') {
       const field = message.field;
       if (message.jobId !== active.id) throw Error('Ask refused: active Job changed since Fill; run Fill again.');
@@ -152,23 +185,22 @@ function createBackground(chrome, fetcher = fetch) {
       if (fields.length > 200) throw Error('Form exceeds the 200-field limit');
       let result = await match(fields);
       let resumeFile;
-      async function prepareFile(kind) {
-        if (kind === 'cover_letter' && !result.cover_letter_draft_id) throw Error('no Cover Letter Draft');
-        if (kind === 'resume' && !result.resume_draft_id) {
+      async function prepareFile() {
+        if (!result.resume_draft_id) {
           // Duplicate append-only versions across panels are an accepted race (§6); the panel disables its button.
           await api(`/api/jobs/${integer(active.id)}/drafts`, {kind: 'tailored_cv'});
           result = {...await match([]), actions: result.actions};
         }
-        const draftId = kind === 'resume' ? result.resume_draft_id : result.cover_letter_draft_id;
+        const draftId = result.resume_draft_id;
         if (!draftId) throw Error('No Tailored CV available after generation');
         const file = await api(`/api/drafts/${integer(draftId)}/pdf`, undefined, true);
-        if (kind === 'resume') resumeFile = file;
+        resumeFile = file;
         return file;
       }
-      async function attach(kind) {
-        const actions = result.actions.filter(action => action.action === 'upload' && action.file === kind);
+      async function attach() {
+        const actions = result.actions.filter(action => action.action === 'upload' && action.file === 'resume');
         if (!actions.length) throw Error('No matching file input found');
-        const file = await prepareFile(kind);
+        const file = await prepareFile();
         if (pageURL((await chrome.tabs.get(tab.id)).url) !== pageURL(tab.url) ||
             (await chrome.storage.session.get('active')).active?.id !== active.id)
           throw Error('Job or page changed while preparing the CV; run Fill again');
@@ -181,10 +213,6 @@ function createBackground(chrome, fetcher = fetch) {
           if (row && applied.filled) { row.outcome = 'written'; row.after = true; }
         }
         return filled;
-      }
-      if (message.type === 'attach') {
-        const filled = await attach(message.kind);
-        return {...result, filled, fields};
       }
       let filled = 0;
       for (const frameId of request.frames.keys()) {
@@ -207,13 +235,14 @@ function createBackground(chrome, fetcher = fetch) {
       }
       let attached = 0, resumeStatus;
       try {
-        if (diagnosticOnly) resumeStatus = 'No matched Job; Tailored CV not attached.';
+        if (message.attachResume === false) resumeStatus = 'Tailored CV attachment disabled.';
+        else if (diagnosticOnly) resumeStatus = 'No matched Job; Tailored CV not attached.';
         else if (!result.actions.some(action => action.action === 'upload' && action.file === 'resume')) {
           resumeStatus = 'No resume file input found; Tailored CV not attached.';
-          await prepareFile('resume');
+          await prepareFile();
         }
         else {
-          attached = await attach('resume');
+          attached = await attach();
           resumeStatus = attached ? 'Tailored CV attached.' : 'Resume input already filled or unavailable; existing file preserved.';
         }
       } catch (error) { resumeStatus = `Tailored CV attachment failed: ${error.message}`; }
@@ -222,15 +251,13 @@ function createBackground(chrome, fetcher = fetch) {
       let traceFile, traceError;
       try { traceFile = (await api('/api/fill/traces', trace)).file; }
       catch (error) { traceError = traceFailure(error); }
-      return {...result, filled, attached, resumeStatus, resumeDownload, fields, traceFile, traceError};
+      return {...result, filled, attached, resumeStatus, resumeName: resumeFile?.name, resumeDownload, fields, trace, traceFile, traceError};
     } catch (error) {
-      if (message.type !== 'attach') {
-        trace.errors.push('fill-failed');
-        try {
-          const saved = await api('/api/fill/traces', trace);
-          error.message += ` Diagnostic trace: ${saved.file}`;
-        } catch (traceError) { error.message += ` ${traceFailure(traceError)}`; }
-      }
+      trace.errors.push('fill-failed');
+      try {
+        const saved = await api('/api/fill/traces', trace);
+        error.message += ` Diagnostic trace: ${saved.file}`;
+      } catch (traceError) { error.message += ` ${traceFailure(traceError)}`; }
       throw error;
     } finally { pending.delete(requestId); }
   }

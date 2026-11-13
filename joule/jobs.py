@@ -370,9 +370,12 @@ async def get_sources(request: Request):
         running = db.execute(
             "SELECT id FROM scans WHERE status='running' ORDER BY id DESC LIMIT 1"
         ).fetchone()
+        manual = db.execute(
+            "SELECT 1 FROM jobs WHERE source='manual' LIMIT 1"
+        ).fetchone()
     sources = []
-    for name in settings.sources:
-        if name not in ADAPTERS:
+    for name in [*settings.sources, *(["manual"] if manual else [])]:
+        if name not in ADAPTERS and name != "manual":
             continue
         history = [
             {k: row[k] for k in ("id", "status", "started_at", "finished_at")}

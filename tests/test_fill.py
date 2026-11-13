@@ -69,7 +69,13 @@ def test_ats_fixtures(client, name):
     response = post(client, fields)
     assert response.status_code == 200
     assert response.json() == {
-        "job": {"id": 1, "title": "Engineer", "company": "Acme", "source": "hotfix"},
+        "job": {
+            "id": 1,
+            "title": "Engineer",
+            "company": "Acme",
+            "source": "hotfix",
+            "state": "seen",
+        },
         "actions": [
             dict(
                 ref=[7, index],
@@ -680,3 +686,101 @@ def test_bank_semantic_batch_and_guards(client, monkeypatch, mode):
     calls.clear()
     assert post(client, fields[3:]).status_code == 200
     assert calls == []  # Exact matches, optional and sensitive fields cost no call.
+
+
+def test_create_page_job_deduplicates_filters_and_scores_best_effort(
+    client, monkeypatch
+):
+    directory = client.app.state.data_dir
+    (directory / "profile" / "preferences.yaml").write_text(
+        "roles: [Engineer]\ndeal_breakers: {keywords: [unpaid]}\n"
+    )
+    scored = []
+
+    async def scoring(db, job_id, *args, **kwargs):
+        scored.append(job_id)
+        with db:
+            db.execute("UPDATE jobs SET score=91 WHERE id=?", (job_id,))
+
+    monkeypatch.setattr("joule.score.score_job", scoring)
+    scanner = client.app.state.scanner
+    scanner.busy = True
+    body = {
+        "title": "Engineer",
+        "company": "New company",
+        "description": "Build APIs",
+        "kind": "posting",
+        "url": "https://jobs.lever.co/new/123/apply?utm_source=page",
+    }
+    assert not any(
+        row["name"] == "manual" for row in client.get("/api/sources").json()["sources"]
+    )
+    assert (
+        client.post(
+            "/api/fill/jobs", json=body | {"url": "javascript:alert(1)"}
+        ).status_code
+        == 422
+    )
+    response = client.post("/api/fill/jobs", json=body)
+    assert response.status_code == 201
+    job_id = response.json()["id"]
+    assert (
+        client.post(
+            "/api/fill/jobs", json=body | {"url": "https://jobs.lever.co/new/123"}
+        ).json()["id"]
+        == job_id
+    )
+    assert (
+        client.post(
+            "/api/fill/jobs", json=body | {"url": "https://example.com"}
+        ).json()["id"]
+        == 1
+    )
+    job = client.get(f"/api/jobs/{job_id}").json()
+    assert (
+        job["source"] == "manual"
+        and job["primary_id"] is None
+        and job["score"] is None
+        and job["extra"]["kind"] == "posting"
+    )
+    assert {
+        row["name"]: row["new_jobs"]
+        for row in client.get("/api/sources").json()["sources"]
+    }["manual"] == 1
+    assert [row["id"] for row in client.get("/api/jobs?source=manual").json()] == [
+        job_id
+    ]
+    scanner.busy = False
+    assert client.post(f"/api/jobs/{job_id}/score", json={}).status_code == 200
+    assert (
+        scored == [job_id] and client.get(f"/api/jobs/{job_id}").json()["score"] == 91
+    )
+    free = client.post(
+        "/api/fill/jobs",
+        json=body | {"url": "https://jobs.lever.co/new/free", "company": ""},
+    ).json()
+    client.portal.call(lambda: scanner.task)
+    assert (
+        scored == [job_id, free["id"]]
+        and client.get(f"/api/jobs/{free['id']}").json()["company"] is None
+    )
+    blocked = client.post(
+        "/api/fill/jobs",
+        json=body
+        | {"url": "https://jobs.lever.co/new/blocked", "description": "Unpaid trial"},
+    ).json()
+    assert (
+        "unpaid" in client.get(f"/api/jobs/{blocked['id']}").json()["filtered_reason"]
+    )
+    with closing(connect(directory / "joule.db")) as db:
+        assert (
+            db.execute("SELECT count(*) FROM jobs WHERE source='manual'").fetchone()[0]
+            == 3
+        )
+    with closing(connect(directory / "joule.db")) as db, db:
+        db.execute(
+            "INSERT INTO jobs(source,source_id,link,title,first_seen_at) VALUES ('hn','ambiguous',?,'Other role','now')",
+            (body["url"],),
+        )
+    assert client.post("/api/fill/jobs", json=body).status_code == 409
+    assert scored == [job_id, free["id"]]
