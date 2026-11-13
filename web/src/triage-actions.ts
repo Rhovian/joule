@@ -47,7 +47,7 @@ export function createTriageActions(history: Undo, actions: {
       const next = list.slice(index + 1).find(j => !changed.has(j.id)) ?? list.slice(0, index).reverse().find(j => !changed.has(j.id));
       if (index >= 0) actions.select(next?.id ?? 0);
       announce(changes.filter(j => changed.has(j.id)), cursor,
-        `${state === 'dismissed' ? 'Dismissed' : state === 'applied' ? 'Applied' : 'Restored'} · ${done.length === 1 ? (list.find(j => j.id === done[0].id) ?? detail)?.title : `${done.length} Jobs`}`, view);
+        `${state === 'dismissed' ? 'Dismissed' : state === 'applied' ? 'Applied' : changes.some(j => j.state === 'applied') ? 'Unmarked applied' : 'Restored'} · ${done.length === 1 ? (list.find(j => j.id === done[0].id) ?? detail)?.title : `${done.length} Jobs`}`, view);
       await actions.refresh();
     } finally { busy = false; actions.render(); }
   }
@@ -57,11 +57,12 @@ export function createTriageActions(history: Undo, actions: {
     const saved = undo;
     try {
       const restored = new Set((await apply(saved.changes)).map(j => j.id));
+      const reapplied = saved.changes.some(j => restored.has(j.id) && j.state === 'applied');
       saved.changes = saved.changes.filter(j => !restored.has(j.id));
       if (!saved.changes.length) undo = null;
       actions.select(saved.cursor);
       await actions.refresh();
-      if (restored.size) actions.confirm(`Undo applied · ${restored.size} Job${restored.size === 1 ? '' : 's'}${saved.changes.length ? ` · ${saved.changes.length} still need undo` : ''}`);
+      if (restored.size) actions.confirm(`Undo applied · ${restored.size} Job${restored.size === 1 ? '' : 's'}${saved.changes.length ? ` · ${saved.changes.length} still need undo` : ''}${reapplied ? ' · Re-applied at Applied with a fresh Pipeline entry' : ''}`);
       return !saved.changes.length;
     } finally { busy = false; actions.render(); }
   }

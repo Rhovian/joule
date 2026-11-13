@@ -110,7 +110,8 @@ async function loadJobs() {
 }
 const scansPage = createScans(replace);
 const settingsPage = createSettings(api, notice, () => loadJobs(), watchScan);
-const pipeline = createPipeline(api, undo, { open: id => openJob(id), changed: renderDetail, error: notice, active: () => view === 'pipeline', drawer: () => detailId, replace });
+const pipeline = createPipeline(api, undo, { open: id => openJob(id), changed: renderDetail, error: notice, active: () => view === 'pipeline', drawer: () => detailId, phone: () => mobile.phone, replace });
+function refreshJobs() { return Promise.all([loadJobs(), pipeline.load()]); }
 function renderSources() {
   renderScoreAll();
   if (!jobs.length && element('jobs').getAttribute('aria-busy') === 'false') renderJobs();
@@ -144,7 +145,7 @@ async function pollScan() {
     if (scan.status !== 'running') {
       runningId = null; renderSources();
       notice(`${scoringAll ? 'Scoring' : 'Scan'} ${scan.status}`); scoringAll = false; renderScoreAll();
-      const results = await Promise.allSettled([loadJobs(), loadSources(), pipeline.load(), ...(view === 'settings' ? [settingsPage.refreshProfile(), settingsPage.refreshRules()] : [])]);
+      const results = await Promise.allSettled([refreshJobs(), loadSources(), ...(view === 'settings' ? [settingsPage.refreshProfile(), settingsPage.refreshRules()] : [])]);
       results.forEach(r => { if (r.status === 'rejected') notice(r.reason); });
       return;
     }
@@ -173,7 +174,7 @@ async function queueJob(id: number) {
   try {
     const next = await api<Job>(`jobs/${id}/queue`, 'POST', {});
     undo.forget(); pipeline.invalidate(id); updateDetail(next);
-    await Promise.all([loadJobs(), pipeline.load()]);
+    await refreshJobs();
   } finally { pendingQueue.delete(id); renderDetail(); }
 }
 async function writeDraft(id: number, kind: DraftKind) {
@@ -215,7 +216,7 @@ function renderDetail() {
   if (root.classList.contains('split') !== split) (element('triage-filters') as HTMLDetailsElement).open = !split;
   root.classList.toggle('split', split);
   if (!split) { element('detail').innerHTML = ''; return; }
-  if (activeSection === 'pipeline' && detail?.state !== 'applied') activeSection = 'fit';
+  if (activeSection === 'pipeline' && detail && detail.state !== 'applied') activeSection = 'fit';
   const ids = view === 'pipeline' ? pipeline.visible().map(row => row.job_id) : jobs.map(row => row.id);
   replace('detail', renderDrawer({ job: detail && { ...detail, rank: jobs.find(j => j.id === detailId)?.rank }, id: detailId, index: ids.indexOf(detailId), total: ids.length,
     section: activeSection, pipeline: detail?.state === 'applied' ? pipeline.section(detailId) : '', edits: editing(detailId), pendingDrafts, pendingScores, pendingQueue,
@@ -225,12 +226,12 @@ function renderDetail() {
 async function openJob(id: number, focus = !detailId) {
   if (id === detailId && detail) return;
   const version = ++detailVersion;
-  if (view === 'triage') selected = id; detailId = id; detail = null; activeSection = 'fit'; renderJobs(); renderDetail();
+  if (view === 'triage') selected = id; detailId = id; detail = null; activeSection = view === 'pipeline' ? 'pipeline' : 'fit'; renderJobs(); renderDetail();
   if (focus) element('detail').querySelector<HTMLElement>('.drawer')?.focus({ preventScroll: true });
   const j = await api<Job>(`jobs/${id}`);
   if (detailId !== id || version !== detailVersion) return;
   detail = j; renderDetail();
-  if (j.state === 'applied') await pipeline.loadEntry(id);
+  if (j.state === 'applied') { await pipeline.loadEntry(id); if (detailId === id && view === 'pipeline') jumpSection('pipeline'); }
   if (j.state === 'new' && !j.queued) {
     await api(`jobs/${id}`, 'PATCH', { state: 'seen' });
     const row = jobs.find(job => job.id === id); if (row?.state === 'new') row.state = 'seen';
@@ -276,7 +277,7 @@ async function scoreJob(id: number) {
   try {
     const next = await api<Job>(`jobs/${id}/score`, 'POST', {});
     updateDetail(next);
-    await Promise.all([loadJobs(), pipeline.load()]);
+    await refreshJobs();
   } finally { pendingScores.delete(id); renderJobs(); renderDetail(); }
 }
 const triage = createTriageActions(undo, {
@@ -288,7 +289,7 @@ const triage = createTriageActions(undo, {
     const row = jobs.find(j => j.id === id); if (row) row.state = state;
     if (detail?.id === id) { detailVersion++; detail.state = state; renderDetail(); }
   }, refresh: async () => {
-    await Promise.all([loadJobs(), pipeline.load()]);
+    await refreshJobs();
     if (detail?.state === 'applied') await pipeline.loadEntry(detail.id);
     const row = root.querySelector<HTMLElement>(`[data-job="${selected}"]`);
     if (row?.getClientRects().length) row.scrollIntoView({ block: 'nearest' });
@@ -418,4 +419,4 @@ document.addEventListener('keydown', event => {
   if (event.key === 'j' || event.key === 'k') moveJob(event.key === 'j' ? 1 : -1);
   if (event.key === 'o' && selected) void openJob(selected).catch(notice);
 });
-void Promise.allSettled([loadJobs(), loadSources(), settingsPage.init(), pipeline.load()]).then(results => results.forEach(r => { if (r.status === 'rejected') notice(r.reason); }));
+void Promise.allSettled([refreshJobs(), loadSources(), settingsPage.init()]).then(results => results.forEach(r => { if (r.status === 'rejected') notice(r.reason); }));

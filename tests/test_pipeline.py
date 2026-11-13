@@ -59,7 +59,9 @@ def test_pipeline_moves_and_reapplication(client):
     assert (
         client.get("/api/pipeline/1").json() == cleared
     )  # No reset on repeated Applied.
-    assert [row["job_id"] for row in client.get("/api/pipeline").json()] == [1]
+    summary = client.get("/api/pipeline").json()
+    assert [(r["job_id"], r["score"]) for r in summary] == [(1, 85)]
+    assert summary[0]["applied_at"] == current["applied_at"] == first["created_at"]
     for invalid in [
         {},
         {"next_at": "2027-01-07T14:00:00"},
