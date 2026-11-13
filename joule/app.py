@@ -17,6 +17,7 @@ from joule.db import init_db
 from joule.fill import router as fill_router
 from joule.jobs import router as jobs_router
 from joule.manual import router as manual_router
+from joule.pipeline import router as pipeline_router
 from joule.profile import router as profile_router
 from joule.scan import Scanner
 from joule.scan import router as scan_router
@@ -92,6 +93,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     app.include_router(settings_router)
     app.include_router(answers_router)
     app.include_router(profile_router)
+    app.include_router(pipeline_router)
     app.mount(
         "/",
         StaticFiles(

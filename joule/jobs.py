@@ -7,7 +7,7 @@ from pydantic import Field
 
 from joule import ai, cv, drafts, job_urls, score
 from joule.config import StrictModel, load_settings
-from joule.db import connect
+from joule.db import connect, sync_pipeline
 from joule.scan import ADAPTERS, ScanInProgress
 
 router = APIRouter(prefix="/api")
@@ -340,6 +340,8 @@ async def update_job(request: Request, job_id: int, body: StateRequest):
             "UPDATE jobs SET state=? WHERE id=? AND primary_id IS NULL",
             (body.state, job_id),
         ).rowcount
+        if updated:
+            sync_pipeline(db, job_id)
     if not updated:
         raise HTTPException(404, "Job not found")
     return {"id": job_id, "state": body.state}

@@ -60,6 +60,45 @@ CREATE TABLE IF NOT EXISTS scans (
 """
 
 
+PIPELINE_SCHEMA = (
+    """CREATE TABLE IF NOT EXISTS pipeline_moves (
+        id INTEGER PRIMARY KEY,
+        job_id INTEGER NOT NULL REFERENCES jobs(id),
+        stage TEXT NOT NULL CHECK (stage IN ('applied', 'screen', 'interview', 'offer', 'accepted')),
+        closed_reason TEXT CHECK (closed_reason IN ('rejected', 'no_reply', 'withdrawn')),
+        next_at TEXT,
+        next_label TEXT,
+        created_at TEXT NOT NULL,
+        how TEXT NOT NULL CHECK (how IN ('manual', 'auto')),
+        note TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS pipeline (
+        job_id INTEGER PRIMARY KEY REFERENCES jobs(id),
+        first_move_id INTEGER NOT NULL REFERENCES pipeline_moves(id),
+        move_id INTEGER NOT NULL REFERENCES pipeline_moves(id)
+    )""",
+    "CREATE INDEX IF NOT EXISTS pipeline_moves_job ON pipeline_moves(job_id, id)",
+)
+
+
+def sync_pipeline(db, job_id, how="manual"):
+    row = db.execute(
+        "SELECT j.state, p.job_id FROM jobs j LEFT JOIN pipeline p ON p.job_id=j.id "
+        "WHERE j.id=? AND j.primary_id IS NULL",
+        (job_id,),
+    ).fetchone()
+    if row is None:
+        return
+    if row["state"] != "applied":
+        db.execute("DELETE FROM pipeline WHERE job_id=?", (job_id,))
+    elif row["job_id"] is None:
+        move_id = db.execute(
+            "INSERT INTO pipeline_moves (job_id,stage,created_at,how) VALUES (?,'applied',?,?)",
+            (job_id, datetime.now(UTC).isoformat(), how),
+        ).lastrowid
+        db.execute("INSERT INTO pipeline VALUES (?,?,?)", (job_id, move_id, move_id))
+
+
 def connect(path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(path)
     connection.row_factory = sqlite3.Row
@@ -95,6 +134,13 @@ def init_db(path: Path) -> None:
                 connection.execute(
                     "ALTER TABLE jobs ADD COLUMN queued INTEGER NOT NULL DEFAULT 0"
                 )
+            for statement in PIPELINE_SCHEMA:
+                connection.execute(statement)
+            for row in connection.execute(
+                "SELECT id FROM jobs WHERE state='applied' AND primary_id IS NULL "
+                "AND NOT EXISTS (SELECT 1 FROM pipeline WHERE job_id=jobs.id)"
+            ).fetchall():
+                sync_pipeline(connection, row["id"], "auto")
             connection.execute(
                 "UPDATE scans SET status='interrupted', finished_at=? "
                 "WHERE status='running'",

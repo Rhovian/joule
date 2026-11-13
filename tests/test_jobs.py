@@ -310,6 +310,10 @@ def test_migrations(tmp_path):
         assert db.execute("PRAGMA schema_version").fetchone()[0] > version
         db.execute("UPDATE jobs SET state='applied' WHERE id=1")
         assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    init_db(path)
+    with closing(connect(path)) as db:
+        row = db.execute("SELECT job_id,stage,how FROM pipeline_moves").fetchone()
+        assert tuple(row) == (1, "applied", "auto")
     before = path.read_bytes()
     init_db(path)
     assert path.read_bytes() == before

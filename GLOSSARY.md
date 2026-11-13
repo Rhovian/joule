@@ -53,3 +53,23 @@ Writing the owner's saved identity and answers into a form on a destination site
 
 **Extension**:
 The unpacked Chrome extension that performs Fills.
+
+**Pipeline**:
+The applied Jobs Joule tracks through Stages, including Jobs closed with a Closed reason. Unmarking applied removes a Job from Pipeline, retaining its old Move history privately; re-applying starts a fresh history at Applied.
+_Avoid_: Funnel, application tracker
+
+**Stage**:
+A Pipeline milestone: Applied, Screen, Interview, Offer or Accepted. Separate from the Job's new / seen / dismissed / applied state.
+_Avoid_: Status, step
+
+**Closed reason**:
+Why a Pipeline Job was closed: Rejected, No reply or Withdrawn. It retains its last Stage and applied state until the owner unmarks applied.
+_Avoid_: Closed Stage, dismissed
+
+**Move**:
+One dated Pipeline history entry recording its Stage, Closed reason, next date, how it happened (manual or auto), and an optional note. Manual means an operator action, including confirmed Telegram Send; auto means system action, including migration. History is chronological and retained when the Job leaves Pipeline.
+_Avoid_: State change, event log
+
+**Next date**:
+An optional timezone-aware appointment or follow-up time on a Pipeline Job, with an optional label such as Technical. Stored in UTC; clearing the date also clears its label.
+_Avoid_: Deadline, reminder (no notification is implied)
