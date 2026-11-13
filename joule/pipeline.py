@@ -64,13 +64,13 @@ def refresh(db, directory):
         settings = load_settings(directory)
         with db:
             follow_up = evaluate(db, settings)
-        return follow_up, settings.pipeline, None
-    except Exception as error:
+        return follow_up, settings.pipeline, False
+    except Exception:
         db.rollback()
         logging.getLogger(__name__).exception(
             "Pipeline evaluation failed; returning current entries"
         )
-        return {}, None, str(error)
+        return {}, None, True
 
 
 def entry(db, job_id):

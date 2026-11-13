@@ -274,3 +274,8 @@ def test_follow_up_thresholds_and_automatic_closure(client, monkeypatch):
     # A fresh application can auto-close again; old auto history is hidden.
     now += timedelta(days=16)
     assert client.get("/api/pipeline/1").json()["closed_reason"] == "no_reply"
+    (directory / "settings.yaml").write_text("pipeline: {follow_up_days: 0}\n")
+    assert client.get("/api/pipeline").status_code == 200
+    stats = client.get("/api/pipeline/stats").json()
+    assert stats["follow_up_error"] is True
+    assert stats["follow_up_days"] is stats["no_reply_days"] is None

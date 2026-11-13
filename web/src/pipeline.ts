@@ -21,8 +21,8 @@ export function createPipeline(api: <T>(path: string, method?: string, body?: un
   root.append(dialog);
   let all: Card[] = [], rows: Card[] = [], selected = 0, col = 0, busy = false, error = '', version = 0;
   const metrics = createMetrics(load, actions.error, actions.replace);
-  let followUps: Record<number, number> = {}, thresholds = '', followUpError = '';
-  function statistics(stats: Statistics) { followUps = stats.follow_up_ages; followUpError = stats.follow_up_error || ''; thresholds = followUpError ? '' : `Follow up after ${stats.follow_up_days}d · Closes as No reply after ${stats.no_reply_days}d`; metrics.render(stats); }
+  let followUps: Record<number, number> = {}, thresholds = '', followUpError = false;
+  function statistics(stats: Statistics) { followUps = stats.follow_up_ages; followUpError = stats.follow_up_error; thresholds = followUpError ? '' : `Follow up after ${stats.follow_up_days}d · Closes as No reply after ${stats.no_reply_days}d`; metrics.render(stats); }
   const details = new Map<number, Entry | string>();
   const visible = () => col === 4 ? reasons.flatMap(reason => rows.filter(r => r.closed_reason === reason)) : rows.filter(r => column(r) === columns[col]);
   const current = () => rows.find(r => r.job_id === selected);

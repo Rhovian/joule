@@ -200,6 +200,7 @@ def test_list_has_drafts(client):
                 (1, "tailored_cv"),
                 (1, "tailored_cv"),
                 (1, "cover_letter"),
+                (2, "follow_up"),  # Follow-up-only does not mean drafted.
                 (6, "proposal"),
             ],
         )
