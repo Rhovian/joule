@@ -200,6 +200,7 @@ def test_list_has_drafts(client):
                 (1, "tailored_cv"),
                 (1, "tailored_cv"),
                 (1, "cover_letter"),
+                (2, "follow_up"),  # Follow-up-only does not mean drafted.
                 (6, "proposal"),
             ],
         )
@@ -294,13 +295,16 @@ def test_migrations(tmp_path):
     path = tmp_path / "joule.db"
     with closing(connect(path)) as db, db:
         db.executescript(
-            SCHEMA.replace(", 'applied'", "").replace(
-                "    queued INTEGER NOT NULL DEFAULT 0,\n", ""
-            )
+            SCHEMA.replace(", 'applied'", "")
+            .replace(", 'follow_up'", "")
+            .replace("    queued INTEGER NOT NULL DEFAULT 0,\n", "")
         )
         db.execute(
             "INSERT INTO jobs (source, source_id, link, title, first_seen_at) "
             "VALUES ('hotfix', '1', 'https://example.com', 'Engineer', 'now')"
+        )
+        db.execute(
+            "INSERT INTO drafts(job_id,kind,text,created_at) VALUES (1,'cover_letter','keep','now')"
         )
         row = dict(db.execute("SELECT * FROM jobs").fetchone())
         version = db.execute("PRAGMA schema_version").fetchone()[0]
@@ -309,6 +313,12 @@ def test_migrations(tmp_path):
         assert dict(db.execute("SELECT * FROM jobs").fetchone()) == row | {"queued": 0}
         assert db.execute("PRAGMA schema_version").fetchone()[0] > version
         db.execute("UPDATE jobs SET state='applied' WHERE id=1")
+        db.execute(
+            "INSERT INTO drafts(job_id,kind,text,created_at) VALUES (1,'follow_up','new','now')"
+        )
+        assert [
+            tuple(r) for r in db.execute("SELECT kind,text FROM drafts ORDER BY id")
+        ] == [("cover_letter", "keep"), ("follow_up", "new")]
         assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     init_db(path)
     with closing(connect(path)) as db:
@@ -487,7 +497,9 @@ def test_cover_letter_versions_and_prompt(client, monkeypatch):
     assert "\\u003c/UNTRUSTED_JOB>" in calls[-1].split("<UNTRUSTED_JOB>")[1]
 
 
-@pytest.mark.parametrize("kind", ["proposal", "cover_letter", "tailored_cv", "ask"])
+@pytest.mark.parametrize(
+    "kind", ["proposal", "cover_letter", "tailored_cv", "ask", "follow_up"]
+)
 def test_proposal_guidance_is_scoped(client, monkeypatch, kind):
     from joule import ai, drafts
 
@@ -508,7 +520,7 @@ def test_proposal_guidance_is_scoped(client, monkeypatch, kind):
         prompts.append(prompt)
         if kind == "proposal":
             return schema(cover="Proposal", answers=[])
-        if kind == "cover_letter":
+        if kind in {"cover_letter", "follow_up"}:
             return schema(text="Letter")
         if kind == "ask":
             return schema(answer="Answer")
@@ -526,6 +538,8 @@ def test_proposal_guidance_is_scoped(client, monkeypatch, kind):
     ):
         assert (fragment in prompts[0]) == (kind == "proposal")
     assert ("one-line greeting" in prompts[0]) == (kind == "cover_letter")
+    if kind == "follow_up":
+        assert "## cv.yaml" in prompts[0]
 
 
 @pytest.mark.parametrize("wrong", [True, False])

@@ -1,5 +1,6 @@
 import asyncio
-from contextlib import asynccontextmanager, suppress
+import logging
+from contextlib import asynccontextmanager, closing, suppress
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -12,11 +13,12 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from joule import scoring_session
 from joule.answers import router as answers_router
 from joule.config import data_dir as default_data_dir
-from joule.config import load_env
-from joule.db import init_db
+from joule.config import load_env, load_settings
+from joule.db import connect, init_db
 from joule.fill import router as fill_router
 from joule.jobs import router as jobs_router
 from joule.manual import router as manual_router
+from joule.pipeline import evaluate
 from joule.pipeline import router as pipeline_router
 from joule.profile import router as profile_router
 from joule.scan import Scanner
@@ -33,6 +35,13 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         init_db(directory / "joule.db")
+        try:
+            with closing(connect(directory / "joule.db")) as db, db:
+                evaluate(db, load_settings(directory))
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "Pipeline evaluation failed at startup"
+            )
         async with httpx.AsyncClient(
             timeout=30, headers={"User-Agent": "joule/0.1"}
         ) as client:

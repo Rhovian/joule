@@ -207,7 +207,7 @@ async function ask(id: number) {
 }
 async function copyDraft(index: number) {
   if (!detail) return;
-  const content = draftSelection(detail, draftKind(detail), editing(detail.id)).draft?.content;
+  const content = draftSelection(detail, draftKind(detail, editing(detail.id)), editing(detail.id)).draft?.content;
   if (!content) return;
   await navigator.clipboard.writeText((index < 0 ? content?.text ?? content?.cover : content?.answers?.[index]) ?? '');
 }
@@ -354,6 +354,8 @@ root.addEventListener('click', event => {
   if (target.dataset.action === 'queue') void queueJob(id).catch(notice);
   if (target.dataset.action === 'telegram') void api('telegram/start', 'POST', {}).then(() => { notice('Sent the queue head to Telegram'); if (view === 'settings') void settingsPage.connections(); }).catch(notice);
   if (target.dataset.action === 'open') void openJob(id).catch(notice);
+  if (target.dataset.action === 'draft-kind') { editing(detailId).kind = target.dataset.kind as DraftKind; renderDetail(); jumpSection('draft'); }
+  if (target.dataset.action === 'follow-up') void openJob(id).then(async () => { if (detailId !== id) return; editing(id).kind = 'follow_up'; renderDetail(); jumpSection('draft'); await writeDraft(id, 'follow_up'); }).catch(notice);
   if (target.dataset.action === 'draft') void writeDraft(id, target.dataset.kind as DraftKind).catch(notice);
   if (target.dataset.action === 'schedule') void toggleSchedule().catch(notice);
   if (target.dataset.action === 'ask') void ask(id).catch(notice);

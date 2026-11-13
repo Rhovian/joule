@@ -1,6 +1,9 @@
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
 
+from fastapi.testclient import TestClient
+
+from joule.app import create_app
 from joule.db import connect
 from tests import test_jobs
 
@@ -168,3 +171,111 @@ def test_pipeline_flow_and_reply_rates(client):
     client.patch("/api/jobs/1", json={"state": "new"})
     client.patch("/api/jobs/1", json={"state": "applied"})
     assert stats()["reached"] == [6, 1, 1, 1]  # Old application's history stays hidden.
+
+
+def test_follow_up_thresholds_and_automatic_closure(client, monkeypatch):
+    from joule import pipeline
+
+    now = datetime.now(UTC)
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz):
+            return now
+
+    monkeypatch.setattr(pipeline, "datetime", Clock)
+    for job_id, move in [
+        (1, None),
+        (2, None),
+        (3, None),
+        (4, {"stage": "screen"}),
+        (5, {"closed_reason": "rejected"}),
+        (7, {"closed_reason": "withdrawn"}),
+    ]:
+        client.patch(f"/api/jobs/{job_id}", json={"state": "applied"})
+        if move:
+            client.patch(f"/api/pipeline/{job_id}", json=move)
+        if job_id in (4, 5):
+            client.patch(f"/api/pipeline/{job_id}", json={"stage": "applied"})
+    directory = client.app.state.data_dir
+    with closing(connect(directory / "joule.db")) as db, db:
+        for job_id, days in [
+            (1, 14),
+            (2, 21),
+            (3, 14 - 1 / 86400),
+            (4, 30),
+            (5, 30),
+            (7, 30),
+        ]:
+            db.execute(
+                "UPDATE pipeline_moves SET created_at=? WHERE id=(SELECT first_move_id FROM pipeline WHERE job_id=?)",
+                ((now - timedelta(days=days)).isoformat(), job_id),
+            )
+    with (
+        TestClient(create_app(directory)),
+        closing(connect(directory / "joule.db")) as db,
+    ):
+        assert (
+            db.execute(
+                "SELECT m.closed_reason FROM pipeline p JOIN pipeline_moves m ON m.id=p.move_id WHERE p.job_id=2"
+            ).fetchone()[0]
+            == "no_reply"
+        )
+    rows = client.get("/api/pipeline").json()
+    assert [(r["job_id"], r["closed_reason"]) for r in rows] == [
+        (1, None),
+        (2, "no_reply"),
+        (3, None),
+        (4, None),
+        (5, None),
+        (7, "withdrawn"),
+    ]
+    stats = client.get("/api/pipeline/stats").json()
+    assert stats["follow_up_ids"] == [1] and stats["replies"] == 2
+    closed = client.get("/api/pipeline/2").json()
+    assert len(closed["history"]) == 2
+    assert (closed["stage"], closed["how"]) == ("applied", "auto")
+    assert client.get("/api/pipeline/2").json() == closed  # Idempotent reads.
+    client.patch("/api/pipeline/2", json={"stage": "applied"})
+    assert client.get("/api/pipeline/2").json()["closed_reason"] is None
+    client.patch("/api/pipeline/7", json={"stage": "applied"})
+    assert client.get("/api/pipeline/7").json()["closed_reason"] is None
+    (directory / "settings.yaml").write_text(
+        "pipeline: {follow_up_days: 13, no_reply_days: 15}\n"
+    )
+    stats = client.get("/api/pipeline/stats").json()
+    assert stats["follow_up_ids"] == [1, 3] and (
+        stats["follow_up_days"],
+        stats["no_reply_days"],
+    ) == (13, 15)
+    with closing(connect(directory / "joule.db")) as db, db:
+        db.execute(
+            "UPDATE pipeline_moves SET created_at=? WHERE id=(SELECT first_move_id FROM pipeline WHERE job_id=1)",
+            ((now - timedelta(days=16)).isoformat(),),
+        )
+    client.patch(
+        "/api/pipeline/1", json={"next_at": (now + timedelta(days=1)).isoformat()}
+    )
+    assert (
+        client.get("/api/pipeline/stats").json()["follow_up_ids"] == [3]
+        and client.get("/api/pipeline/1").json()["closed_reason"] is None
+    )
+    client.patch("/api/pipeline/1", json={"next_at": None})
+    client.app.state.scanner.tick()  # Same server timer callback, no Pipeline read.
+    with closing(connect(directory / "joule.db")) as db:
+        assert (
+            db.execute(
+                "SELECT m.closed_reason FROM pipeline p JOIN pipeline_moves m ON m.id=p.move_id WHERE p.job_id=1"
+            ).fetchone()[0]
+            == "no_reply"
+        )
+    client.patch("/api/jobs/1", json={"state": "new"})
+    client.patch("/api/jobs/1", json={"state": "applied"})
+    # A fresh application can auto-close again; old auto history is hidden.
+    now += timedelta(days=16)
+    assert client.get("/api/pipeline/1").json()["closed_reason"] == "no_reply"
+    (directory / "settings.yaml").write_text("pipeline: {follow_up_days: 0}\n")
+    assert client.get("/api/pipeline").status_code == 200
+    stats = client.get("/api/pipeline/stats").json()
+    assert stats["follow_up_error"] is True
+    assert stats["follow_up_days"] is stats["no_reply_days"] is None
