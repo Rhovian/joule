@@ -1,10 +1,11 @@
-"""Validate and store an IMAP connection; never fetch mail or alter a Job."""
+"""TLS-only IMAP sessions and private connection settings."""
 
 import base64
 import imaplib
 import json
 import re
 import ssl
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -78,7 +79,8 @@ class EmailConnection:
             else None,
         }
 
-    def validate(self, config, *, saved_password=False):
+    @contextmanager
+    def session(self, config, *, saved_password=False):
         context = ssl.create_default_context()
         try:
             client = (
@@ -118,6 +120,7 @@ class EmailConnection:
                     raise HTTPException(
                         400, "Could not open that folder. Check its name and access."
                     ) from None
+                yield client
         except (OSError, imaplib.IMAP4.error, UnicodeError):
             raise HTTPException(
                 502,
@@ -148,7 +151,8 @@ class EmailConnection:
             c in config.password.get_secret_value() for c in "\r\n\x00"
         ):
             raise HTTPException(400, "Enter a valid app password.")
-        self.validate(config, saved_password=reused)
+        with self.session(config, saved_password=reused):
+            pass
         document = config.model_dump(mode="json", exclude={"password"}) | {
             "password": config.password.get_secret_value()
         }

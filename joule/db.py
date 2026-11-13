@@ -60,6 +60,23 @@ CREATE TABLE IF NOT EXISTS scans (
 """
 
 
+EMAIL_SCHEMA = (
+    """CREATE TABLE IF NOT EXISTS email_suggestions (
+        id INTEGER PRIMARY KEY, account TEXT NOT NULL, message_id TEXT NOT NULL,
+        job_id INTEGER NOT NULL REFERENCES jobs(id), first_move_id INTEGER NOT NULL, move_id INTEGER NOT NULL,
+        folder TEXT NOT NULL, uid INTEGER NOT NULL, sender_name TEXT NOT NULL,
+        sender_address TEXT NOT NULL, subject TEXT NOT NULL, quote TEXT NOT NULL, date TEXT,
+        proposal TEXT NOT NULL, state TEXT NOT NULL CHECK (state IN ('pending','confirmed','ignored','excluded')),
+        UNIQUE(account,message_id,job_id)
+    )""",
+    "CREATE INDEX IF NOT EXISTS email_suggestions_job ON email_suggestions(job_id)",
+    """CREATE TABLE IF NOT EXISTS email_checks (
+        account TEXT NOT NULL, folder TEXT NOT NULL, validity TEXT NOT NULL,
+        uid INTEGER NOT NULL, checked_at TEXT NOT NULL, PRIMARY KEY(account,folder)
+    )""",
+)
+
+
 PIPELINE_SCHEMA = (
     """CREATE TABLE IF NOT EXISTS pipeline_moves (
         id INTEGER PRIMARY KEY,
@@ -140,7 +157,7 @@ def init_db(path: Path) -> None:
                 connection.execute(
                     "ALTER TABLE jobs ADD COLUMN queued INTEGER NOT NULL DEFAULT 0"
                 )
-            for statement in PIPELINE_SCHEMA:
+            for statement in PIPELINE_SCHEMA + EMAIL_SCHEMA:
                 connection.execute(statement)
             for row in connection.execute(
                 "SELECT id FROM jobs WHERE state='applied' AND primary_id IS NULL "

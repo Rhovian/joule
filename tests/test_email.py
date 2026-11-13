@@ -116,3 +116,153 @@ def test_email_connect_validate_private_and_disconnect(tmp_path, monkeypatch):
             "EXAMINE",
             "LOGOUT",
         }
+
+
+def test_email_suggestions_require_confirmation_and_remember_exclusions(
+    tmp_path, monkeypatch
+):
+    from contextlib import closing
+    from datetime import UTC, datetime, timedelta
+    from email.message import EmailMessage
+    from functools import partial
+
+    from joule import ai
+    from joule.db import connect, enter_pipeline
+
+    def message(subject, sender="Acme Talent <talent@acme.com>", days=0):
+        mail = EmailMessage()
+        mail["From"], mail["Subject"], mail["Message-ID"] = (
+            sender,
+            subject,
+            f"<{subject.replace(' ', '-')}@fixture>",
+        )
+        mail["Date"] = datetime.now(UTC) - timedelta(days=days)
+        mail.set_content(
+            "Intro call on Friday. "
+            + "x" * 200
+            + "\n> quoted old message\nPRIVATE BODY TAIL"
+        )
+        return mail.as_bytes()
+
+    calls = []
+
+    async def classify(model, prompt, schema):
+        calls.append(prompt)
+        action = (
+            "reject"
+            if "Update" in prompt
+            else "date"
+            if "Technical" in prompt
+            else "move"
+        )
+        return schema(
+            action=action,
+            stage="screen" if action == "move" else None,
+            next_at="2027-01-07T14:00:00Z" if action == "date" else None,
+            next_label="Technical" if action == "date" else None,
+        )
+
+    monkeypatch.setattr(ai, "structured", classify)
+    with (
+        imap_server(tmp_path / "tls") as server,
+        TestClient(
+            create_app(tmp_path / "joule"), base_url="http://localhost"
+        ) as client,
+    ):
+        monkeypatch.setenv("SSL_CERT_FILE", str(server.certificate))
+        service = client.app.state.email_suggestions
+        check = lambda: client.portal.call(partial(service.check, force=True))
+        db_path = tmp_path / "joule" / "joule.db"
+        with closing(connect(db_path)) as db, db:
+            for name in ["Acme", "Phantom", "Pinterest", "Ambiguous", "Ambiguous"]:
+                job_id = db.execute(
+                    "INSERT INTO jobs(source,source_id,link,title,company,first_seen_at,state) VALUES ('hn',?,'https://jobs.example/role','Engineer',?,?,'applied')",
+                    (name + str(db.total_changes), name, datetime.now(UTC).isoformat()),
+                ).lastrowid
+                enter_pipeline(db, job_id)
+        assert (
+            client.put(
+                "/api/email",
+                json={
+                    "inbox": "imap",
+                    "host": "localhost",
+                    "port": server.server_address[1],
+                    "username": USERNAME,
+                    "password": PASSWORD,
+                },
+            ).status_code
+            == 200
+        )
+        server.messages = {
+            1: message("Next steps"),
+            2: message("Update Pinterest", "Recruiting <jobs@greenhouse.io>"),
+            3: message("Technical", "Phantom <jobs@phantom.com>"),
+            4: message("Unmatched", "Other <other@elsewhere.com>"),
+            5: message("Ambiguous", "Other <jobs@ambiguous.com>"),
+            6: message("Too old", days=15),
+        }
+        check()
+        suggestions = client.get("/api/email/suggestions").json()["suggestions"]
+        assert len(suggestions) == len(calls) == 3
+        assert all(
+            row["stage"] == "applied" for row in client.get("/api/pipeline").json()
+        )
+        assert {
+            row["job_id"]: row["email_count"]
+            for row in client.get("/api/pipeline").json()
+        } == {1: 1, 2: 1, 3: 1, 4: 0, 5: 0}
+        by_subject = {row["subject"]: row for row in suggestions}
+        assert len(by_subject["Next steps"]["quote"]) == 140
+        for subject, action in [
+            ("Next steps", "exclude"),
+            ("Update Pinterest", "confirm"),
+            ("Technical", "confirm"),
+        ]:
+            row = by_subject[subject]
+            assert (
+                client.post(f"/api/email/suggestions/{row['id']}/{action}").status_code
+                == 200
+            )
+        assert client.get("/api/pipeline/3").json()["closed_reason"] == "rejected"
+        dated = client.get("/api/pipeline/2").json()
+        assert (
+            dated["next_at"] == "2027-01-07T14:00:00+00:00"
+            and "Technical" in dated["history"][-1]["note"]
+        )
+        assert "Phantom" in dated["history"][-1]["note"]
+        # Reset UIDVALIDITY and redeliver the excluded Message-ID: durable exclusion wins.
+        server.validity = "2"
+        server.messages[7] = server.messages[1]
+        client.app.state.email_suggestions = type(service)(
+            service.directory, service.connection
+        )
+        service = client.app.state.email_suggestions
+        check()
+        assert (
+            len(calls) == 3
+            and not client.get("/api/email/suggestions").json()["suggestions"]
+        )
+        server.messages[8] = message("Another next step")
+        check()
+        pending = client.get("/api/email/suggestions").json()["suggestions"][0]
+        assert (
+            client.post(f"/api/email/suggestions/{pending['id']}/ignore").status_code
+            == 200
+        )
+        assert not client.get("/api/email/suggestions").json()["suggestions"]
+        with closing(connect(db_path)) as db:
+            stored = " ".join(
+                str(tuple(row)) for row in db.execute("SELECT * FROM email_suggestions")
+            )
+            assert (
+                "PRIVATE BODY TAIL" not in stored
+                and "Unmatched" not in stored
+                and "Ambiguous" not in stored
+            )
+        assert all(
+            args[2] == "(BODY.PEEK[]<0.16384>)"
+            for args in server.uid_requests
+            if args[0] == "FETCH"
+        )
+        assert server.uid_requests[-2] == ["SEARCH", "UID", "8:*"]
+        assert client.get("/api/pipeline/1").json()["stage"] == "applied"

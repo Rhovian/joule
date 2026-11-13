@@ -91,7 +91,8 @@ class ScanInProgress(Exception):
 
 
 class Scanner:
-    def __init__(self, data_dir, client, auth, telegram=None):
+    def __init__(self, data_dir, client, auth, telegram=None, email=None):
+        self.email = email
         self.telegram = telegram
         self.client, self.auth = client, auth
         self.data_dir = data_dir
@@ -272,6 +273,8 @@ class Scanner:
                             scan_id,
                         ),
                     )
+                if self.email:
+                    await self.email.check(scan=True)
                 await scan_alerts.scheduled_upwork(
                     self.data_dir, self.telegram, ctx.trigger, status, progress
                 )

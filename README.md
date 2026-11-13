@@ -70,3 +70,5 @@ uv run python -m joule                   # http://localhost:8000, reads ~/.joule
 ```
 
 The email integration test uses `openssl` to create a local TLS fixture; it contacts only loopback and does not use a real inbox.
+
+Pipeline email checks are read-only: matched replies become suggestions to confirm, ignore or exclude (Not this Job); no email moves a Job without confirmation. Only sender/subject, a one-line quote and metadata are retained, never bodies or attachments.
