@@ -208,7 +208,7 @@ async def rescore_job(request: Request, job_id: int, body: StrictModel):
 
 
 class DraftRequest(StrictModel):
-    kind: Literal["cover_letter", "proposal", "tailored_cv"]
+    kind: Literal["cover_letter", "proposal", "tailored_cv", "follow_up"]
     note: str | None = Field(None, max_length=2000)
 
 
@@ -226,7 +226,7 @@ async def write_draft(request: Request, job_id: int, body: DraftRequest):
     directory = request.app.state.data_dir
     with closing(connect(directory / "joule.db")) as db:
         job = primary(db, job_id)
-        if body.kind != "tailored_cv" and (body.kind == "proposal") != (
+        if body.kind in {"cover_letter", "proposal"} and (body.kind == "proposal") != (
             job["source"] == "upwork"
         ):
             raise HTTPException(400, "Draft kind does not match Job source")

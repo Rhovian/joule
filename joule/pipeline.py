@@ -7,7 +7,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import AwareDatetime, Field
 
-from joule.config import StrictModel
+from joule.config import StrictModel, load_settings
 from joule.db import connect
 from joule.pipeline_stats import summarize
 
@@ -16,6 +16,41 @@ CURRENT = (
     " FROM pipeline p JOIN pipeline_moves m ON m.id=p.move_id "
     "JOIN pipeline_moves a ON a.id=p.first_move_id JOIN jobs j ON j.id=p.job_id WHERE j.state='applied' AND j.primary_id IS NULL"
 )
+
+
+def evaluate(db, settings, now=None):
+    """Evaluate in the caller's transaction, keeping subsequent reads under the lock."""
+    now = now or datetime.now(UTC)
+    follow_up = set()
+    db.execute("BEGIN IMMEDIATE")
+    for row in db.execute(
+        "SELECT m.*,a.created_at AS applied_at"
+        + CURRENT
+        + " AND m.stage='applied' AND m.closed_reason IS NULL AND NOT EXISTS "
+        "(SELECT 1 FROM pipeline_moves h WHERE h.job_id=p.job_id AND h.id>=p.first_move_id "
+        "AND (h.stage!='applied' OR h.closed_reason='rejected' "
+        "OR (h.closed_reason='no_reply' AND h.how='auto')))"
+    ).fetchall():
+        days = (now - datetime.fromisoformat(row["applied_at"])).total_seconds() / 86400
+        if days >= settings.pipeline.no_reply_days:
+            move = db.execute(
+                "INSERT INTO pipeline_moves(job_id,stage,closed_reason,next_at,next_label,created_at,how,note) "
+                "VALUES (?,'applied','no_reply',?,?,?,'auto',?)",
+                (
+                    row["job_id"],
+                    row["next_at"],
+                    row["next_label"],
+                    now.isoformat(),
+                    f"No reply after {settings.pipeline.no_reply_days} days",
+                ),
+            ).lastrowid
+            db.execute(
+                "UPDATE pipeline SET move_id=? WHERE job_id=?",
+                (move, row["job_id"]),
+            )
+        elif days >= settings.pipeline.follow_up_days:
+            follow_up.add(row["job_id"])
+    return follow_up
 
 
 def entry(db, job_id):
@@ -55,20 +90,31 @@ def cohort(db, days):
 
 @router.get("")
 def list_entries(request: Request, days: Literal["30", "90"] | None = None):
-    with closing(connect(request.app.state.data_dir / "joule.db")) as db:
+    with closing(connect(request.app.state.data_dir / "joule.db")) as db, db:
+        settings = load_settings(request.app.state.data_dir)
+        evaluate(db, settings)
         return cohort(db, days)
 
 
 @router.get("/stats")
 def statistics(request: Request, days: Literal["30", "90"] | None = None):
-    with closing(connect(request.app.state.data_dir / "joule.db")) as db:
-        db.execute("BEGIN")  # Keep the cohort and its history in one read snapshot.
-        return summarize(db, cohort(db, days))
+    with closing(connect(request.app.state.data_dir / "joule.db")) as db, db:
+        settings = load_settings(request.app.state.data_dir)
+        follow_up = evaluate(db, settings)
+        rows = cohort(db, days)
+        return summarize(db, rows) | {
+            "follow_up_ids": [
+                row["job_id"] for row in rows if row["job_id"] in follow_up
+            ],
+            "follow_up_days": settings.pipeline.follow_up_days,
+            "no_reply_days": settings.pipeline.no_reply_days,
+        }
 
 
 @router.get("/{job_id}")
 def get_entry(request: Request, job_id: int):
-    with closing(connect(request.app.state.data_dir / "joule.db")) as db:
+    with closing(connect(request.app.state.data_dir / "joule.db")) as db, db:
+        evaluate(db, load_settings(request.app.state.data_dir))
         return entry(db, job_id)
 
 
