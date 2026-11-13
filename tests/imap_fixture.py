@@ -80,12 +80,41 @@ def imap_server(directory, implicit=True):
                         or args != [USERNAME, PASSWORD]
                     ):
                         response = f"NO authentication failed; server echoes {PASSWORD}"
+                elif command == "UID":
+                    server.uid_requests.append(args)
+                    if args[0] == "SEARCH":
+                        ids = list(server.messages)
+                        if args[1] == "UID":
+                            ids = [
+                                uid for uid in ids if uid >= int(args[2].split(":")[0])
+                            ]
+                        else:
+                            # Old fixture messages use one fixed Date; retain UID filtering above.
+                            ids = [
+                                uid
+                                for uid in ids
+                                if b"Date: Sat, 01 Jan 2000" not in server.messages[uid]
+                            ]
+                        self.wfile.write(
+                            ("* SEARCH " + " ".join(map(str, ids)) + "\r\n").encode()
+                        )
+                    elif args[0] == "FETCH":
+                        raw = server.messages[int(args[1])][:16384]
+                        self.wfile.write(
+                            f"* 1 FETCH (UID {args[1]} BODY[] {{{len(raw)}}}\r\n".encode()
+                            + raw
+                            + b")\r\n"
+                        )
+                    else:
+                        response = "BAD unexpected UID command"
                 elif command == "EXAMINE":
                     server.folders.append(args[0])
                     if args[0] not in ("INBOX", "Jobs &- Careers", "Jobs &- &U,BTFw-"):
                         response = "NO no such folder"
                     else:
-                        self.wfile.write(b"* 0 EXISTS\r\n")
+                        self.wfile.write(
+                            f"* 0 EXISTS\r\n* OK [UIDVALIDITY {server.validity}] valid\r\n".encode()
+                        )
                 elif command == "LOGOUT":
                     self.wfile.write(f"* BYE closing\r\n{tag} OK logout\r\n".encode())
                     return
@@ -98,6 +127,7 @@ def imap_server(directory, implicit=True):
         server.daemon_threads = True
         server.allow_login, server.drop_on_login = True, False
         server.commands, server.folders = [], []
+        server.messages, server.uid_requests, server.validity = {}, [], "1"
         server.certificate = certificate
         thread = Thread(target=server.serve_forever, daemon=True)
         thread.start()

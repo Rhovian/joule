@@ -1,10 +1,11 @@
-"""Validate and store an IMAP connection; never fetch mail or alter a Job."""
+"""TLS-only IMAP sessions and private connection settings."""
 
 import base64
 import imaplib
 import json
 import re
 import ssl
+from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -12,6 +13,7 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from pydantic import Field, SecretStr
 
 from joule.config import StrictModel
+from joule.db import connect
 from joule.files import atomic_write
 
 router = APIRouter(prefix="/api/email")
@@ -78,7 +80,8 @@ class EmailConnection:
             else None,
         }
 
-    def validate(self, config, *, saved_password=False):
+    @contextmanager
+    def session(self, config, *, saved_password=False):
         context = ssl.create_default_context()
         try:
             client = (
@@ -118,6 +121,7 @@ class EmailConnection:
                     raise HTTPException(
                         400, "Could not open that folder. Check its name and access."
                     ) from None
+                yield client
         except (OSError, imaplib.IMAP4.error, UnicodeError):
             raise HTTPException(
                 502,
@@ -148,7 +152,8 @@ class EmailConnection:
             c in config.password.get_secret_value() for c in "\r\n\x00"
         ):
             raise HTTPException(400, "Enter a valid app password.")
-        self.validate(config, saved_password=reused)
+        with self.session(config, saved_password=reused):
+            pass
         document = config.model_dump(mode="json", exclude={"password"}) | {
             "password": config.password.get_secret_value()
         }
@@ -164,7 +169,7 @@ def status(request: Request):
 
 
 @router.put("")
-def connect(request: Request, body: Annotated[Any, Body()]):
+def save_connection(request: Request, body: Annotated[Any, Body()]):
     # FastAPI's default validation errors include raw input, which may be a password.
     try:
         config = EmailConfig.model_validate(body)
@@ -176,8 +181,11 @@ def connect(request: Request, body: Annotated[Any, Body()]):
 
 
 @router.delete("")
-def disconnect(request: Request):
+async def disconnect(request: Request):
     connection = request.app.state.email
     connection.path.unlink(missing_ok=True)
+    with closing(connect(request.app.state.data_dir / "joule.db")) as db, db:
+        for table in ("email_suggestions", "email_dedup", "email_checks"):
+            db.execute(f"DELETE FROM {table}")
     connection.auth_failed = False
     return connection.status()

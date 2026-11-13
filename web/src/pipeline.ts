@@ -1,14 +1,13 @@
 import './pipeline.css';
 import { createMetrics, periodSelect, type Statistics } from './pipeline-stats';
-import { age, dateTime, escape } from './format';
+import { age, dateTime, escape, label } from './format';
 import { score } from './job';
 import type { Undo } from './undo';
 const stages = ['applied', 'screen', 'interview', 'offer', 'accepted'];
 const columns = ['applied', 'screen', 'interview', 'offer', 'closed'], reasons = ['no_reply', 'rejected', 'withdrawn'];
-const label = (value: string) => value.replaceAll('_', ' ').replace(/^./, c => c.toUpperCase());
 type Move = { id: number; job_id: number; stage: string; closed_reason: string | null; next_at: string | null; next_label: string | null; created_at: string; how: string; note: string | null };
 type Entry = Move & { first_move_id: number; applied_at: string; history: Move[] };
-type Card = Omit<Entry, 'history'> & { title: string; company: string | null; source: string; score: number | null };
+type Card = Omit<Entry, 'history'> & { title: string; company: string | null; source: string; score: number | null; email_count: number };
 const column = (row: Move) => row.closed_reason ? 'closed' : row.stage === 'accepted' ? 'offer' : row.stage;
 export function createPipeline(api: <T>(path: string, method?: string, body?: unknown) => Promise<T>, undo: Undo, actions: {
   open: (id: number) => Promise<void>; changed: () => void; error: (error: unknown) => void;
@@ -33,7 +32,7 @@ export function createPipeline(api: <T>(path: string, method?: string, body?: un
   }
   function card(row: Card) {
     const chosen = selected === row.job_id;
-    return `<article id="pipeline-card-${row.job_id}" class="pipeline-card${chosen ? ' selected' : ''}${row.closed_reason ? ' closed' : ''}" tabindex="${chosen ? 0 : -1}" aria-label="${escape(row.title)}" ${chosen ? 'aria-current="true"' : ''}><button id="pipeline-select-${row.job_id}" class="pipeline-card-main" data-pipeline-select="${row.job_id}">${row.closed_reason ? '' : score(row)}<span><strong>${escape(row.title)}</strong><span class="pipeline-meta">${escape(row.company || row.source)} · ${age(row.applied_at)}</span></span></button>${row.job_id in followUps ? '<span class="tag filtered">follow up</span>' : ''}${row.stage === 'accepted' ? '<span class="tag applied">Accepted</span>' : ''}${row.closed_reason ? `<p class="pipeline-meta">at ${label(row.stage)}</p>` : ''}${row.next_at ? `<p class="pipeline-next"><b>Next</b> ${escape(row.next_label || '')} · ${escape(dateTime(row.next_at))}</p>` : ''}${chosen ? controls(row, 'board') : ''}</article>`;
+    return `<article id="pipeline-card-${row.job_id}" class="pipeline-card${chosen ? ' selected' : ''}${row.closed_reason ? ' closed' : ''}" tabindex="${chosen ? 0 : -1}" aria-label="${escape(row.title)}" ${chosen ? 'aria-current="true"' : ''}><button id="pipeline-select-${row.job_id}" class="pipeline-card-main" data-pipeline-select="${row.job_id}">${row.closed_reason ? '' : score(row)}<span><strong>${escape(row.title)}</strong><span class="pipeline-meta">${escape(row.company || row.source)} · ${age(row.applied_at)}</span></span></button>${row.email_count ? `<span class="tag applied">${row.email_count} email${row.email_count === 1 ? '' : 's'}</span>` : ''}${row.job_id in followUps ? '<span class="tag filtered">follow up</span>' : ''}${row.stage === 'accepted' ? '<span class="tag applied">Accepted</span>' : ''}${row.closed_reason ? `<p class="pipeline-meta">at ${label(row.stage)}</p>` : ''}${row.next_at ? `<p class="pipeline-next"><b>Next</b> ${escape(row.next_label || '')} · ${escape(dateTime(row.next_at))}</p>` : ''}${chosen ? controls(row, 'board') : ''}</article>`;
   }
   function render() {
     const waiting = rows.filter(row => row.job_id in followUps);
