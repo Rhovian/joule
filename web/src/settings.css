@@ -87,3 +87,14 @@
   #master-fields { grid-template-columns: 1fr; }
   #master-stale { flex-wrap: wrap; }
 }
+
+.filtered-rules > header, .filtered-rules > footer { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
+.filtered-rules h2 { font-size: 16px; }
+#rules-count { font: 12px var(--font-mono); color: var(--muted); }
+.rule-row { display: flex; gap: 12px; align-items: flex-start; padding: 12px 16px; border-top: 1px solid var(--soft-line); }
+.rule-row > div { flex: 1; min-width: 0; }
+.rule-row .tag { white-space: nowrap; }
+.rule-values, #rules-hint { overflow-wrap: anywhere; }
+.rule-row .rule-values { margin-top: 6px; color: var(--ink); }
+.filtered-rules > footer { border-top: 1px solid var(--soft-line); flex-wrap: wrap; }
+.filtered-rules footer a { margin-left: auto; display: inline-flex; align-items: center; min-height: 44px; color: var(--green); font-size: 12.5px; }

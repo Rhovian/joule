@@ -213,6 +213,55 @@ def test_list_has_drafts(client):
     assert all(type(row["has_drafts"]) is bool for row in rows)
 
 
+def test_filtered_rules(client):
+    from joule.config import Preferences
+
+    path = client.app.state.data_dir / "profile" / "preferences.yaml"
+    assert all(
+        row["values"] is None for row in client.get("/api/rules").json()["rules"]
+    )
+    path.parent.mkdir()
+    preferences = {
+        "roles": [],
+        "deal_breakers": {"keywords": ["Manager"]},
+        "work_types": ["contract"],
+        "pay": {"salary_floor": 120000, "currency": "USD"},
+        "locations": {"exclude": ["London"]},
+        "upwork_client": {"min_spend": 2000},
+    }
+    content = json.dumps(preferences)
+    path.write_text(content)
+    fields = {
+        "deal_breaker": "deal_breakers",
+        "work_type": "work_types",
+        "pay": "pay",
+        "location": "locations",
+        "upwork_client": "upwork_client",
+    }
+    reasons = [f"{key}: example" for key in (*fields, "pay", "legacy")]
+    with closing(connect(client.app.state.data_dir / "joule.db")) as db, db:
+        db.executemany(
+            "UPDATE jobs SET filtered_reason=? WHERE id=?",
+            [(reason, i) for i, reason in enumerate(reasons, 1)],
+        )
+    response = client.get("/api/rules")
+    assert response.status_code == 200
+    body = response.json()
+    rows = {row["key"]: row for row in body["rules"]}
+    assert body["total"] == 6 and {
+        key: row["count"] for key, row in rows.items()
+    } == dict.fromkeys([*fields, "other"], 1)
+    expected = Preferences.model_validate(preferences).model_dump(mode="json")
+    for key, field in fields.items():
+        assert rows[key]["values"] == expected[field]
+        assert rows[key]["scope"] == (
+            "Upwork only" if key in {"work_type", "upwork_client"} else "all Sources"
+        )
+    assert body["path"] == str(path) and path.read_text() == content
+    path.write_text('{"roles": [], "work_types": ["freelance"]}')
+    assert client.get("/api/rules").json()["rules"][1]["values"] == ["freelance"]
+
+
 def test_detail(client):
     row = client.get("/api/jobs/1").json()
     assert row["description"] == "text" and row["extra"] == {"a": 1}
