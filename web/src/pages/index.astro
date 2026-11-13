@@ -22,7 +22,7 @@ import '../dashboard.css';
       <section id="a-pipeline" aria-label="Pipeline" tabindex="-1" hidden></section>
       <section id="a-scans" tabindex="-1" aria-label="Scans" hidden><p class="empty">Loading Sources…</p></section>
       <section id="a-settings" aria-label="Settings" tabindex="-1" hidden></section>
-      <dialog id="fill-dialog" aria-labelledby="fill-title"></dialog>
+      <dialog id="fill-dialog" class="app-dialog" aria-labelledby="fill-title"></dialog>
       <div id="detail"></div>
       <dialog id="mobile-filters" aria-label="Filters"><header><h2 tabindex="-1" autofocus>Filters</h2><button data-action="clear-filters">Reset</button><button data-mobile-close aria-label="Close filters">×</button></header><div id="mobile-filter-content"></div><footer><button id="mobile-show-jobs" class="btn primary" data-mobile-close>Show Jobs</button></footer></dialog>
       <nav id="mobile-nav" class="mobile-only" aria-label="Main"><a href="#triage" data-view="triage" aria-current="page"><span aria-hidden="true">☰</span>Triage</a><a href="#pipeline" data-view="pipeline"><span aria-hidden="true">▥</span>Pipeline</a><a href="#scans" data-view="scans"><span aria-hidden="true">⟳</span>Scans</a><button data-open-fill aria-haspopup="dialog" aria-controls="fill-dialog"><span aria-hidden="true">＋</span>Fill</button></nav>

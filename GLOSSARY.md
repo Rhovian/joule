@@ -77,3 +77,7 @@ _Avoid_: Deadline, reminder (no notification is implied)
 **Follow-up**:
 A short, versioned Draft checking on an unanswered application. Generating one sends nothing; eligibility and No reply auto-close use the current application's date and Move history.
 _Avoid_: Reminder (no notification is implied), automatic message
+
+**Inbox connection**:
+The owner's validated IMAP account and read-only folder configuration for Pipeline email. Connecting validates access; it does not fetch messages or move Jobs.
+_Avoid_: Mail sync (not implemented by connecting)
