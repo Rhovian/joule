@@ -213,6 +213,54 @@ def test_list_has_drafts(client):
     assert all(type(row["has_drafts"]) is bool for row in rows)
 
 
+def test_filtered_rules(client):
+    path = client.app.state.data_dir / "profile" / "preferences.yaml"
+    assert all(
+        row["values"] is None for row in client.get("/api/rules").json()["rules"]
+    )
+    path.parent.mkdir()
+    preferences = {
+        "roles": [],
+        "deal_breakers": {"keywords": ["Manager"]},
+        "work_types": ["contract"],
+        "pay": {"salary_floor": 120000, "currency": "USD"},
+        "locations": {"exclude": ["London"]},
+        "upwork_client": {"min_spend": 2000},
+    }
+    path.write_text(json.dumps(preferences))
+    keys = ["deal_breaker", "work_type", "pay", "location", "upwork_client"]
+    # Fixture id 6 is a Duplicate: its extra pay reason must not be counted.
+    reasons = [f"{key}: example" for key in (*keys, "pay", "legacy")]
+    with closing(connect(client.app.state.data_dir / "joule.db")) as db, db:
+        db.executemany(
+            "UPDATE jobs SET filtered_reason=? WHERE id=?",
+            [(reason, i) for i, reason in enumerate(reasons, 1)],
+        )
+    response = client.get("/api/rules")
+    assert response.status_code == 200
+    body = response.json()
+    rows = {row["key"]: row for row in body["rules"]}
+    assert body["total"] == 6 and {
+        key: row["count"] for key, row in rows.items()
+    } == dict.fromkeys([*keys, "other"], 1)
+    assert rows["deal_breaker"]["values"]["keywords"] == ["Manager"]
+    assert rows["pay"]["values"]["salary_floor"] == 120000
+    assert rows["pay"]["scope"] == "all Sources"
+    assert rows["upwork_client"]["scope"] == "Upwork only"
+    assert body["path"] == str(path)
+    for invalid in ("roles: [", "{}"):
+        path.write_text(invalid)
+        response = client.get("/api/rules")
+        assert response.status_code == 200
+        broken = response.json()
+        assert broken["error"] and broken["total"] == body["total"]
+        assert [row["count"] for row in broken["rules"]] == [
+            row["count"] for row in body["rules"]
+        ]
+    path.write_text('{"roles": [], "work_types": ["freelance"]}')
+    assert client.get("/api/rules").json()["rules"][1]["values"] == ["freelance"]
+
+
 def test_detail(client):
     row = client.get("/api/jobs/1").json()
     assert row["description"] == "text" and row["extra"] == {"a": 1}

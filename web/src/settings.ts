@@ -1,4 +1,5 @@
 import './settings.css';
+import { createRulesCard } from './rules';
 import { createAnswerBank } from './answers';
 import { createProfileCard } from './profile';
 import { dateTime } from './format';
@@ -11,6 +12,7 @@ export function createSettings(api: <T>(path: string, method?: string, body?: un
   const grid = page.querySelector('.settings-grid')!;
   const left = document.createElement('div'), right = document.createElement('div');
   left.className = right.className = 'settings-column'; right.append(...Array.from(grid.children)); grid.append(left, right);
+  const rules = createRulesCard(right, api, notice);
   const bank = createAnswerBank(left, api, notice);
   const profile = createProfileCard(left, api, notice, changed, scoring);
   const get = (id: string) => document.getElementById(id)!;
@@ -55,8 +57,8 @@ export function createSettings(api: <T>(path: string, method?: string, body?: un
     catch (error) { get('appearance-status').textContent = 'Could not save appearance.'; notice(error); }
     finally { controls.disabled = false; if (document.activeElement === document.body) button.focus({ preventScroll: true }); }
   });
-  get('settings-refresh').addEventListener('click', () => { void loadAppearance(); void connections(); void bank.load(); void profile.load(); });
+  get('settings-refresh').addEventListener('click', () => { void loadAppearance(); void connections(); void bank.load(); void profile.load(); void rules.load(); });
   get('settings-joule-url').textContent = location.origin;
   get('settings-copy-url').addEventListener('click', () => void navigator.clipboard.writeText(location.origin).then(() => { get('settings-copy-url').textContent = 'Copied'; }).catch(notice));
-  return { init: loadAppearance, connections, refreshProfile: profile.load, open() { void connections(); void bank.load(); void profile.load(); } };
+  return { init: loadAppearance, connections, refreshProfile: profile.load, refreshRules: rules.load, open() { void connections(); void bank.load(); void profile.load(); void rules.load(); } };
 }
