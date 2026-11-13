@@ -71,7 +71,7 @@ An explicit `source_max_age_days` map replaces the default map; include both ent
 
 One Profile, no personas.
 
-- **`cv.yaml`, the Master CV:** JSON Resume layout (basics, work, projects, skills, education). Every entry has a stable ID so Tailored CVs can select it. Converted once, by hand, from the owner's PDF in a Claude Code session. joule has no import feature.
+- **`cv.yaml`, the Master CV:** JSON Resume layout (basics, work, projects, skills, education). Every entry has a stable ID so Tailored CVs can select it. Initially converted by hand from the owner's PDF. Settings can Open the complete YAML as an untailored PDF and Replace it with validated YAML, retaining one previous file as `cv.yaml.bak`; it does not import PDF CVs.
 - **`preferences.yaml`:**
   - `roles` (target titles) and `seniority`
   - `work_types`: full-time / contract / freelance

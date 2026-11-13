@@ -16,8 +16,8 @@ def load(data_dir):
     return yaml.safe_load(path.read_text()) if path.is_file() else None
 
 
-def prepare(data_dir):
-    cv = load(data_dir)
+def prepare(data_dir, *, document=None):
+    cv = load(data_dir) if document is None else document
     if not isinstance(cv, dict) or not any(
         entry.get("id") for key in ("work", "projects") for entry in cv.get(key, [])
     ):
@@ -81,13 +81,59 @@ def resolve(cv, result):
     return document
 
 
+def master_document(document):
+    if not isinstance(document, dict):
+        raise TypeError("Master CV must be a YAML mapping.")
+    basics = document.get("basics", {})
+    if not isinstance(basics, dict):
+        raise TypeError("basics must be a mapping.")
+    arrays = ("work", "projects", "skills", "education", "awards", "certificates")
+    for key in arrays:
+        if not isinstance(document.get(key, []), list) or any(
+            not isinstance(e, dict) for e in document.get(key, [])
+        ):
+            raise ValueError(f"{key} must be a list of mappings.")
+
+    def highlights(entry):
+        values = entry.get("highlights", entry.get("bullets", []))
+        if not isinstance(values, list) or any(
+            not isinstance(v, str)
+            and not (isinstance(v, dict) and isinstance(v.get("text"), str))
+            for v in values
+        ):
+            raise ValueError(
+                "highlights must contain text strings or mappings with text."
+            )
+        return [v if isinstance(v, str) else v["text"] for v in values]
+
+    result = {key: document.get(key, []) for key in arrays}
+    result |= {"basics": basics, "summary": document.get("summary", "")}
+    result["work"] = [e | {"bullets": highlights(e)} for e in result["work"]]
+    result["projects"] = [
+        e
+        | {
+            "text": "\n".join(
+                filter(
+                    None,
+                    [
+                        e.get("text", e.get("description", e.get("summary", ""))),
+                        *highlights(e),
+                    ],
+                )
+            )
+        }
+        for e in result["projects"]
+    ]
+    return result
+
+
 def render(document, name="cv.typ"):
     template = Path(__file__).with_name(name)
     return typst.compile(
         str(template),
         root=str(template.parent),
         ignore_system_fonts=True,
-        sys_inputs={"document": json.dumps(document)},
+        sys_inputs={"document": json.dumps(document, default=str)},
     )
 
 

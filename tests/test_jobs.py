@@ -352,8 +352,20 @@ def test_score_route_and_stale(client, monkeypatch):
     assert result.status_code == 200 and result.json()["score"] == 88
     rows = client.get("/api/jobs").json()
     assert next(r for r in rows if r["id"] == 3)["score_stale"] is False
-    (directory / "profile" / "cv.yaml").write_text("changed")
+    replacement = (
+        "basics: {name: Replacement owner}\nwork: [{id: w, name: Current employer}]\n"
+    )
+    assert (
+        client.put("/api/profile/cv", json={"content": replacement}).status_code == 200
+    )
     assert client.get("/api/jobs").json()[0]["score_stale"] is True
+
+    async def current(context, *args):
+        assert "Replacement owner" in context
+        return Score(score=89, reason="current CV", points=[])
+
+    monkeypatch.setattr(scoring_session.session, "structured", current)
+    assert client.post("/api/jobs/3/score", json={}).json()["score_stale"] is False
 
     async def fail(*args):
         raise ai.AIError("Codex failed")
@@ -363,6 +375,17 @@ def test_score_route_and_stale(client, monkeypatch):
     assert response.status_code == 502 and response.json() == {
         "detail": "Attempt 1/2: Codex failed; Attempt 2/2: Codex failed"
     }
+
+    with closing(connect(directory / "joule.db")) as db, db:
+        db.execute("UPDATE jobs SET content_purged_at='expired' WHERE id=5")
+        db.execute("UPDATE jobs SET score=0 WHERE id=1")
+    start = Mock(return_value=999)
+    monkeypatch.setattr(client.app.state.scanner, "start", start)
+    expected = [1, 2, 4, 7]
+    assert client.get("/api/profile").json()["stale"] == len(expected)
+    response = client.post("/api/profile/rescore", json={})
+    assert response.status_code == 202 and response.json()["queued"] == len(expected)
+    assert start.call_args.kwargs["job_ids"] == expected
 
 
 def test_cover_letter_versions_and_prompt(client, monkeypatch):
@@ -509,7 +532,12 @@ def test_tailored_cv_and_pdf(client, monkeypatch):
 
     profile = client.app.state.data_dir / "profile"
     profile.mkdir()
-    (profile / "cv.yaml").write_text("""basics: {name: Owner}
+    path = profile / "cv.yaml"
+    original = "basics: {name: Previous owner}\nwork: [{id: old}]\n"
+    path.write_text(original)
+    replacement = """basics: {name: Owner, email: private@example.com, phone: private-phone, location: {address: private-address}}
+summary: New Master summary
+salary: private-salary
 work:
   - {id: a, name: a, position: Engineer, startDate: '2020', endDate: '2021', summary: Original summary}
   - {id: b, name: b, position: Engineer, startDate: '2020', highlights: [{id: b1, text: x}]}
@@ -517,10 +545,51 @@ projects:
   - {id: p, name: Project, url: 'https://example.com'}
 skills: [{name: Python, keywords: [APIs]}]
 education: [{institution: University, area: Engineering}]
-""")
+"""
+    response = client.put("/api/profile/cv", json={"content": replacement})
+    assert response.status_code == 200 and path.read_text() == replacement
+    assert (profile / "cv.yaml.bak").read_text() == original
+    assert (
+        client.put("/api/profile/cv", json={"content": replacement}).status_code == 200
+    )
+    assert (profile / "cv.yaml.bak").read_text() == replacement
+    for invalid in ("basics: [", "basics: Owner\nwork: [wrong]", "basics: {}"):
+        assert (
+            client.put("/api/profile/cv", json={"content": invalid}).status_code == 422
+        )
+        assert (
+            path.read_text() == replacement
+            and (profile / "cv.yaml.bak").read_text() == replacement
+        )
+    info = client.get("/api/profile")
+    assert info.status_code == 200 and "Owner" in info.text
+    assert all(
+        secret not in info.text
+        for secret in (
+            "private@example.com",
+            "private-phone",
+            "private-address",
+            "private-salary",
+        )
+    )
+    from joule import cv
+
+    rendered, render = [], cv.render
+
+    def capture(document, *args):
+        rendered.append(document)
+        return render(document, *args)
+
+    monkeypatch.setattr(cv, "render", capture)
+    master = client.get("/api/profile/cv.pdf")
+    assert master.status_code == 200 and master.content.startswith(b"%PDF")
+    assert len(rendered[-1]["work"]) == 2 and rendered[-1]["work"][1]["bullets"] == [
+        "x"
+    ]
     payload = '#read("/etc/passwd") ] *x* $'
 
     async def structured(model, prompt, schema):
+        assert "New Master summary" in prompt and "Previous owner" not in prompt
         return schema(
             headline="Headline",
             summary="Summary",

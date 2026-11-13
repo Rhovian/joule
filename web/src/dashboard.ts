@@ -106,7 +106,7 @@ async function loadJobs() {
   if (detailId) renderDetail();
 }
 const scansPage = createScans(replace);
-const settingsPage = createSettings(api, notice);
+const settingsPage = createSettings(api, notice, () => loadJobs(), watchScan);
 function renderSources() {
   renderScoreAll();
   if (!jobs.length && element('jobs').getAttribute('aria-busy') === 'false') renderJobs();
@@ -140,7 +140,7 @@ async function pollScan() {
     if (scan.status !== 'running') {
       runningId = null; renderSources();
       notice(`${scoringAll ? 'Scoring' : 'Scan'} ${scan.status}`); scoringAll = false; renderScoreAll();
-      const results = await Promise.allSettled([loadJobs(), loadSources()]);
+      const results = await Promise.allSettled([loadJobs(), loadSources(), ...(view === 'settings' ? [settingsPage.refreshProfile()] : [])]);
       results.forEach(r => { if (r.status === 'rejected') notice(r.reason); });
       return;
     }
