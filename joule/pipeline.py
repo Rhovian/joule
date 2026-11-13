@@ -13,13 +13,16 @@ from joule.db import connect
 router = APIRouter(prefix="/api/pipeline")
 CURRENT = (
     " FROM pipeline p JOIN pipeline_moves m ON m.id=p.move_id "
-    "JOIN jobs j ON j.id=p.job_id WHERE j.state='applied' AND j.primary_id IS NULL"
+    "JOIN pipeline_moves a ON a.id=p.first_move_id JOIN jobs j ON j.id=p.job_id WHERE j.state='applied' AND j.primary_id IS NULL"
 )
 
 
 def entry(db, job_id):
     row = db.execute(
-        "SELECT m.*,p.first_move_id" + CURRENT + " AND p.job_id=?", (job_id,)
+        "SELECT m.*,p.first_move_id,a.created_at AS applied_at"
+        + CURRENT
+        + " AND p.job_id=?",
+        (job_id,),
     ).fetchone()
     if row is None:
         raise HTTPException(404, "Job not in Pipeline")
@@ -40,7 +43,7 @@ def list_entries(request: Request):
         return [
             dict(row)
             for row in db.execute(
-                "SELECT m.*, j.title, j.company, j.source, j.link, p.first_move_id"
+                "SELECT m.*, j.title, j.company, j.source, j.link, j.score, p.first_move_id, a.created_at AS applied_at"
                 + CURRENT
                 + " ORDER BY p.first_move_id",
             )
