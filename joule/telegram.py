@@ -9,7 +9,7 @@ from fastapi import HTTPException
 
 from joule import answers, drafts, score
 from joule.config import load_settings
-from joule.db import connect, sync_pipeline
+from joule.db import connect, enter_pipeline
 from joule.sources import upwork
 from joule.upwork_auth import UpworkNotConnected
 
@@ -261,14 +261,13 @@ class Telegram:
             restore = "UPDATE jobs SET state=? WHERE id=? AND state='applied'"
             with db:
                 db.execute(restore, (state, job_id))
-                sync_pipeline(db, job_id)
             return await self.send(
                 "Upwork not connected — reconnect in the dashboard"
                 if isinstance(error, UpworkNotConnected)
                 else f"Upwork rejected: {error}"
             )
         with db:
-            sync_pipeline(db, job_id)
+            enter_pipeline(db, job_id)
         text = f"Submitted — proposal {result['newProposalId']} ({result['status']})"
         await self.send(text)
         await self.card(db)

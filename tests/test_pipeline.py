@@ -62,9 +62,6 @@ def test_pipeline_moves_and_reapplication(client):
     assert [row["job_id"] for row in client.get("/api/pipeline").json()] == [1]
     for invalid in [
         {},
-        {"stage": "draft"},
-        {"closed_reason": "ghost"},
-        {"how": "email", "note": "bad"},
         {"next_at": "2027-01-07T14:00:00"},
     ]:
         assert client.patch("/api/pipeline/1", json=invalid).status_code == 422

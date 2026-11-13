@@ -78,20 +78,19 @@ PIPELINE_SCHEMA = (
         move_id INTEGER NOT NULL REFERENCES pipeline_moves(id)
     )""",
     "CREATE INDEX IF NOT EXISTS pipeline_moves_job ON pipeline_moves(job_id, id)",
+    """CREATE TRIGGER IF NOT EXISTS pipeline_remove_on_unmark
+        AFTER UPDATE OF state ON jobs WHEN NEW.state != 'applied'
+        BEGIN DELETE FROM pipeline WHERE job_id=NEW.id; END""",
 )
 
 
-def sync_pipeline(db, job_id, how="manual"):
-    row = db.execute(
-        "SELECT j.state, p.job_id FROM jobs j LEFT JOIN pipeline p ON p.job_id=j.id "
-        "WHERE j.id=? AND j.primary_id IS NULL",
+def enter_pipeline(db, job_id, how="manual"):
+    missing = db.execute(
+        "SELECT 1 FROM jobs WHERE id=? AND state='applied' AND primary_id IS NULL "
+        "AND NOT EXISTS (SELECT 1 FROM pipeline WHERE job_id=jobs.id)",
         (job_id,),
     ).fetchone()
-    if row is None:
-        return
-    if row["state"] != "applied":
-        db.execute("DELETE FROM pipeline WHERE job_id=?", (job_id,))
-    elif row["job_id"] is None:
+    if missing:
         move_id = db.execute(
             "INSERT INTO pipeline_moves (job_id,stage,created_at,how) VALUES (?,'applied',?,?)",
             (job_id, datetime.now(UTC).isoformat(), how),
@@ -140,7 +139,7 @@ def init_db(path: Path) -> None:
                 "SELECT id FROM jobs WHERE state='applied' AND primary_id IS NULL "
                 "AND NOT EXISTS (SELECT 1 FROM pipeline WHERE job_id=jobs.id)"
             ).fetchall():
-                sync_pipeline(connection, row["id"], "auto")
+                enter_pipeline(connection, row["id"], "auto")
             connection.execute(
                 "UPDATE scans SET status='interrupted', finished_at=? "
                 "WHERE status='running'",

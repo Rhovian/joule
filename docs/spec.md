@@ -99,7 +99,7 @@ One Profile, no personas.
 
 ### Pipeline ([#135](https://github.com/Rhovian/joule/issues/135))
 
-`jobs.state = applied` is Pipeline membership. `pipeline` stores a Job's first/current Move IDs; `pipeline_moves` stores immutable snapshots with Stage, optional Closed reason, next date/label, UTC date, manual/auto provenance and optional note. Current-entry reads include closed Jobs. Unmarking deletes the current pointer, retains history, and hides it; re-applying starts a new Applied history. Existing applied Primaries are backfilled idempotently, dated at migration time because the old schema has no applied timestamp. See [ADR-0002](adr/0002-pipeline-history.md).
+Membership, Move snapshots, unmark/re-apply and idempotent backfill are defined in [ADR-0002](adr/0002-pipeline-history.md).
 
 `GET /api/pipeline` lists snapshots plus Job title/company/Source/link, ordered by application entry. `GET /api/pipeline/{job_id}` adds chronological history for the current application. Snapshot `id` is the Move ID; `job_id` identifies the Job. `PATCH /api/pipeline/{job_id}` takes optional `stage` (`applied`, `screen`, `interview`, `offer`, `accepted`), `closed_reason` (`rejected`, `no_reply`, `withdrawn` or null), `how` (`manual` default, `auto`), `note`, `next_at` (timezone-aware ISO date or null), and `next_label`. Dates normalise to UTC. Selecting a Stage reopens unless a Closed reason is explicitly supplied; closing retains Stage. Repeating unchanged values without a note adds no history. Setting a note records it; clearing `next_at` clears its label. At least one change/note field is required, and inactive/missing Jobs return 404. No screen, auto-close or email suggestion behaviour is introduced here.
 

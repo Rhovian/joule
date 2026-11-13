@@ -770,6 +770,25 @@ def test_queue_and_start_telegram(client, monkeypatch):
         db.execute("UPDATE jobs SET source='upwork', state='seen', score=10 WHERE id=1")
     job = client.post("/api/jobs/1/queue", json={}).json()
     assert (job["queued"], job["state"], write.await_count) == (1, "new", 1)
+    client.patch("/api/jobs/1", json={"state": "applied"})
+    previous = client.patch(
+        "/api/pipeline/1",
+        json={
+            "stage": "interview",
+            "next_at": "2027-01-07T14:00:00Z",
+            "next_label": "Technical",
+        },
+    ).json()
+    assert client.post("/api/jobs/1/queue", json={}).status_code == 200
+    assert client.get("/api/pipeline/1").status_code == 404
+    client.patch("/api/jobs/1", json={"state": "applied"})
+    again = client.get("/api/pipeline/1").json()
+    assert (
+        again["stage"] == "applied"
+        and again["next_at"] is None
+        and again["next_label"] is None
+    )
+    assert len(again["history"]) == 1 and again["first_move_id"] > previous["id"]
     assert client.post("/api/telegram/start", json={}).status_code == 409
     assert client.get("/api/connections").json()["telegram"] == {
         "configured": False,
