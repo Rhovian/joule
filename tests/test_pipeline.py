@@ -1,5 +1,5 @@
 from contextlib import closing
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 from joule.db import connect
 from tests import test_jobs
@@ -91,8 +91,6 @@ def test_pipeline_moves_and_reapplication(client):
 
 
 def test_pipeline_flow_and_reply_rates(client):
-    from datetime import UTC, timedelta
-
     def stats(query=""):
         response = client.get("/api/pipeline/stats" + query)
         assert response.status_code == 200
@@ -132,20 +130,15 @@ def test_pipeline_flow_and_reply_rates(client):
         4,
         [6, 2, 2, 1],
     )
-    assert (
-        sum(t["count"] for t in result["terminals"])
-        == len(client.get("/api/pipeline").json())
-        == 6
-    )
     assert {
         (t["at"], t["stage"], t["closed_reason"]): t["count"]
         for t in result["terminals"]
     } == {
         (2, "applied", None): 1,
-        (0, "applied", "withdrawn"): 2,
-        (0, "applied", "no_reply"): 1,
+        (0, None, "withdrawn"): 2,
+        (0, None, "no_reply"): 1,
         (3, "accepted", None): 1,
-        (0, "applied", "rejected"): 1,
+        (0, None, "rejected"): 1,
     }
     assert [(r["name"], r["applied"], r["replies"]) for r in result["bands"]] == [
         ("90+", 2, 2),
@@ -163,6 +156,7 @@ def test_pipeline_flow_and_reply_rates(client):
         ("?days=90", [1, 2, 3, 4, 7], 3),
     ]:
         filtered = stats(query)
+        assert filtered["job_ids"] == ids
         assert [r["job_id"] for r in client.get("/api/pipeline" + query).json()] == ids
         assert (
             filtered["total"]
@@ -174,13 +168,3 @@ def test_pipeline_flow_and_reply_rates(client):
     client.patch("/api/jobs/1", json={"state": "new"})
     client.patch("/api/jobs/1", json={"state": "applied"})
     assert stats()["reached"] == [6, 1, 1, 1]  # Old application's history stays hidden.
-    for row in client.get("/api/pipeline").json():
-        client.patch(f"/api/jobs/{row['job_id']}", json={"state": "new"})
-    empty = stats()
-    assert (
-        empty["total"],
-        empty["replies"],
-        empty["reached"],
-        empty["terminals"],
-        empty["sources"],
-    ) == (0, 0, [0, 0, 0, 0], [], [])

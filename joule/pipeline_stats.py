@@ -28,21 +28,19 @@ def summarize(db, rows):
         for index in range(min(furthest, 3) + 1):
             reached[index] += 1
         # A backward Move preserves reach, but its blue exit names the current Stage.
-        terminals[min(furthest, 3), row["stage"], row["closed_reason"]] += 1
+        stage = None if row["closed_reason"] else row["stage"]
+        terminals[min(furthest, 3), stage, row["closed_reason"]] += 1
         score = row["score"]
-        band = (
-            "Unscored"
-            if score is None
-            else BANDS[
-                0 if score >= 90 else 1 if score >= 80 else 2 if score >= 70 else 3
-            ]
-        )
+        band = BANDS[
+            4 if score is None else sum(score < floor for floor in (90, 80, 70))
+        ]
         source = sources.setdefault(row["source"], {"applied": 0, "replies": 0})
         for group in (bands[band], source):
             group["applied"] += 1
             group["replies"] += replied
     return {
         "total": len(rows),
+        "job_ids": list(histories),
         "replies": replies,
         "reached": reached,
         "terminals": [
