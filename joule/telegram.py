@@ -5,6 +5,8 @@ import re
 from contextlib import closing, suppress
 from datetime import UTC, datetime
 
+from fastapi import HTTPException
+
 from joule import answers, drafts, score
 from joule.config import load_settings
 from joule.db import connect
@@ -174,14 +176,17 @@ class Telegram:
                     )
                 # Filled answers grow the answer bank that later drafts adapt.
                 filled = json.loads(text).get("answers", [])
-                answers.append(
-                    self.data_dir,
-                    [
-                        {"question": pair["question"], "answer": answer}
-                        for pair, answer in zip(pairs, filled)
-                        if blanks(pair["answer"])
-                    ],
-                )
+                try:
+                    answers.append(
+                        self.data_dir,
+                        [
+                            {"question": pair["question"], "answer": answer}
+                            for pair, answer in zip(pairs, filled)
+                            if blanks(pair["answer"])
+                        ],
+                    )
+                except (HTTPException, OSError) as error:
+                    logger.warning("Skipping answer bank update: %s", error)
                 self.awaiting = None
                 return await self.card(db, job)
             if action == "rework":

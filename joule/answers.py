@@ -59,18 +59,43 @@ def update(directory, change):
         text = yaml.safe_dump(entries, allow_unicode=True, sort_keys=False, width=1e9)
         if len(text.encode("utf-8")) > LIMIT:
             raise HTTPException(413, "Answer bank exceeds 200 KB")
-        # #132 requires atomic edits; supersedes ADR-0001's append-only write mechanism.
+        # #132 ruling: only explicit Settings edits re-serialize the owner's formatting.
         atomic_write(path, text)
 
 
 def append(directory, entries, *, from_fill=False):
-    update(
-        directory,
-        lambda rows: rows.extend(
-            {**entry, **({"saved_from_fill": True} if from_fill else {})}
-            for entry in entries
-        ),
-    )
+    if not entries:
+        return
+    path = directory / "profile" / "answers.yaml"
+    added = [
+        {**entry, **({"saved_from_fill": True} if from_fill else {})}
+        for entry in entries
+    ]
+    text = yaml.safe_dump(added, allow_unicode=True, sort_keys=False, width=1e9)
+    with lock:
+        size = path.stat().st_size if path.exists() else 0
+        if size > LIMIT:
+            raise HTTPException(413, "Answer bank exceeds 200 KB")
+        before = read(directory)
+        original = path.read_text() if path.exists() else ""
+        addition = ("\n" if original and not original.endswith("\n") else "") + text
+        if size + len(addition.encode("utf-8")) > LIMIT:
+            raise HTTPException(413, "Answer bank exceeds 200 KB")
+        # PyYAML does not extend a flow sequence or a closed document by appending a block.
+        # Validate before writing, rather than corrupting or reformatting hand-maintained YAML.
+        try:
+            valid = yaml.safe_load(original + addition) == before + added
+        except yaml.YAMLError:
+            valid = False
+        if not valid:
+            raise HTTPException(
+                409,
+                "Cannot append to this YAML layout. Use a block list in answers.yaml; an empty bank may be a blank file.",
+            )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch(mode=0o600, exist_ok=True)
+        with path.open("a", encoding="utf-8") as bank:
+            bank.write(addition)
 
 
 @router.get("")

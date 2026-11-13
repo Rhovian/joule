@@ -366,9 +366,13 @@ def test_save_append_replays_without_state_changes(client):
         {"question": "Favorite language", "answer": value}
         for value in ["Old", "Python"]
     ]
+    path = directory / "profile" / "answers.yaml"
+    path.write_text("# Hand-maintained notes (no final newline)")
     for entry in entries:
+        before_append = path.read_bytes()
         response = client.post("/api/fill/answers", json=entry)
         assert response.status_code == 200 and response.json() == {}
+        assert path.read_bytes().startswith(before_append)
     assert yaml.safe_load((directory / "profile" / "answers.yaml").read_text()) == [
         e | {"saved_from_fill": True} for e in entries
     ]
@@ -399,7 +403,11 @@ def test_save_append_replays_without_state_changes(client):
 
 @pytest.mark.parametrize(
     "before,status",
-    [(b"#" + b" " * (200 * 1024) + b"\n", 413), (b"- question: [", 409)],
+    [
+        (b"#" + b" " * (200 * 1024) + b"\n", 413),
+        (b"- question: [", 409),
+        (b"[]\n", 409),
+    ],
 )
 def test_unsaveable_bank_is_untouched(client, before, status):
     path = client.app.state.data_dir / "profile" / "answers.yaml"
