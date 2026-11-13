@@ -72,6 +72,8 @@ def imap_server(directory, implicit=True):
                     self.secure = True
                     continue
                 elif command == "LOGIN":
+                    if server.drop_on_login:
+                        return
                     if (
                         not self.secure
                         or not server.allow_login
@@ -94,7 +96,8 @@ def imap_server(directory, implicit=True):
 
     with socketserver.ThreadingTCPServer(("127.0.0.1", 0), Handler) as server:
         server.daemon_threads = True
-        server.allow_login, server.commands, server.folders = True, [], []
+        server.allow_login, server.drop_on_login = True, False
+        server.commands, server.folders = [], []
         server.certificate = certificate
         thread = Thread(target=server.serve_forever, daemon=True)
         thread.start()
