@@ -15,6 +15,8 @@ from joule.answers import router as answers_router
 from joule.config import data_dir as default_data_dir
 from joule.config import load_env, load_settings
 from joule.db import connect, init_db
+from joule.email import EmailConnection
+from joule.email import router as email_router
 from joule.fill import router as fill_router
 from joule.jobs import router as jobs_router
 from joule.manual import router as manual_router
@@ -93,6 +95,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
 
     app.add_exception_handler(UpworkNotConnected, upwork_not_connected)
     app.state.data_dir = directory
+    app.state.email = EmailConnection(directory)
     app.include_router(router)
     app.include_router(scan_router)
     app.include_router(jobs_router)
@@ -100,6 +103,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     app.include_router(fill_router)
     app.include_router(traces_router)
     app.include_router(settings_router)
+    app.include_router(email_router)
     app.include_router(answers_router)
     app.include_router(profile_router)
     app.include_router(pipeline_router)

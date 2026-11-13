@@ -1,0 +1,13 @@
+# ADR-0003: IMAP connection without mail processing
+
+Accepted: 2026-11-12. Issue #139, following the lead's operator-delegated ruling.
+
+The first inbox connection uses stdlib imaplib. Gmail is an IMAP app-password preset; generic IMAP exposes host/port and direct TLS or STARTTLS. Both paths require certificate-verified TLS before LOGIN, then EXAMINE the chosen folder read-only. Outlook/Microsoft 365 is unavailable until a separate OAuth integration. This slice never searches, fetches, stores, sends or changes mail and never changes a Job.
+
+Credentials and connection preferences live in the configured data directory's email.json (normally ~/.joule/email.json), published through the shared atomic_write helper's private 0600 temporary file. Passwords are excluded from all responses; validation and remote errors use fixed messages to avoid echoing credentials. Manage receives connection fields and an empty password control. An omitted password reuses the saved one only for the same connection identity. Invalid login/folder validation leaves the file unchanged; disconnect deletes it.
+
+A process-local connection service serializes validation/writes/disconnect. It exposes saved/not-connected status and the most recent authentication failure in that server process. GET does not contact the inbox. A failed login marks the configured connection sign-in expired until a successful login; failures before a connection exists leave it not connected. Transport/folder errors are distinct from authentication errors. Restarting loads the saved, previously validated configuration; subsequent validation/checks can discover expiration. No polling is introduced here.
+
+The pipeline scope selects INBOX; folder scope selects the named folder (modified UTF-7 on the wire). check_minutes stores a positive minute interval, default 15, or null for the design's “With each Scan”; #140 will implement checking. Auto-move is disabled/off and is not persisted. Every future suggested Move requires confirmation, including rejections.
+
+For #140, retain only matched email's sender name/address, subject, first non-quoted body line capped at 140 characters, date, Message-ID, folder/UID and matched Job. Do not store full bodies, attachments or unmatched mail. No email-record table or processing is added by #139.
