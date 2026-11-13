@@ -4,7 +4,7 @@ import hashlib
 import json
 import logging
 import re
-from contextlib import closing
+from contextlib import closing, suppress
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
@@ -103,12 +103,10 @@ async def create_job(request: Request, body: PageJob):
             ),
         ).lastrowid
     if reason is None:
-        try:
+        with suppress(ScanInProgress):
             request.app.state.scanner.start(
                 ["manual"], "manual", settings, None, job_ids=[job_id]
             )
-        except ScanInProgress:
-            pass
     return {
         "id": job_id,
         "title": body.title,
