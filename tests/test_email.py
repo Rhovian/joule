@@ -65,7 +65,10 @@ def test_email_connect_validate_private_and_disconnect(tmp_path, monkeypatch):
         responses.append(response)
         assert response.status_code == 400 and path.read_bytes() == original
         server.drop_on_login = True
-        assert client.put("/api/email", json=config | {"password": None}).status_code == 502
+        assert (
+            client.put("/api/email", json=config | {"password": None}).status_code
+            == 502
+        )
         assert client.get("/api/email").json()["state"] == "connected"
         server.drop_on_login = False
         server.allow_login = False
