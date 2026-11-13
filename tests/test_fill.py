@@ -369,24 +369,43 @@ def test_save_append_replays_without_state_changes(client):
     for entry in entries:
         response = client.post("/api/fill/answers", json=entry)
         assert response.status_code == 200 and response.json() == {}
-    assert (
-        yaml.safe_load((directory / "profile" / "answers.yaml").read_text()) == entries
+    assert yaml.safe_load((directory / "profile" / "answers.yaml").read_text()) == [
+        e | {"saved_from_fill": True} for e in entries
+    ]
+    fields = [{"ref": [0, 0], "label": "Favorite language"}]
+    assert post(client, fields).json()["actions"] == [
+        {"ref": [0, 0], "action": "set", "value": "Python"}
+    ]
+    listed = client.get("/api/answers").json()
+    assert listed == [{"id": 1, **entries[-1], "saved_from_fill": True}]
+    # Even an editor opened before the duplicate Save edits the last effective answer.
+    revised = 'Rust: "safe"\nGo too'
+    edited = client.put(
+        "/api/answers/0", json={"question": "Favorite language", "answer": revised}
     )
-    assert post(client, [{"ref": [0, 0], "label": "Favorite language"}]).json()[
-        "actions"
-    ] == [{"ref": [0, 0], "action": "set", "value": "Python"}]
+    assert edited.status_code == 200 and edited.json()[0]["saved_from_fill"] is True
+    assert post(client, fields).json()["actions"][0]["value"] == revised
+    added = client.post(
+        "/api/answers", json={"question": "Availability?", "answer": "Two weeks"}
+    )
+    assert added.status_code == 200 and added.json()[-1]["saved_from_fill"] is False
+    bank = yaml.safe_load((directory / "profile" / "answers.yaml").read_text())
+    assert bank[-2]["answer"] == revised and bank[-1]["answer"] == "Two weeks"
     with closing(connect(directory / "joule.db")) as db:
         assert [
             tuple(row) for row in db.execute("SELECT * FROM jobs ORDER BY id")
         ] == before
 
 
-def test_save_oversized_bank_is_untouched(client):
+@pytest.mark.parametrize(
+    "before,status",
+    [(b"#" + b" " * (200 * 1024) + b"\n", 413), (b"- question: [", 409)],
+)
+def test_unsaveable_bank_is_untouched(client, before, status):
     path = client.app.state.data_dir / "profile" / "answers.yaml"
-    before = b"#" + b" " * (200 * 1024) + b"\n"
     path.write_bytes(before)
     response = client.post("/api/fill/answers", json={"question": "Q", "answer": "A"})
-    assert response.status_code == 413
+    assert response.status_code == status
     assert path.read_bytes() == before
 
 

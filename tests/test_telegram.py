@@ -113,7 +113,7 @@ def test_unicode_placeholder_card_send_guard_and_fill(bot, monkeypatch, field):
     assert bank == (
         [{"question": "Availability?", "answer": filled["answers"][0]}]
         if field == "answers"
-        else None
+        else []
     )
 
 

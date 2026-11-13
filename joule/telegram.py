@@ -5,9 +5,7 @@ import re
 from contextlib import closing, suppress
 from datetime import UTC, datetime
 
-import yaml
-
-from joule import drafts, score
+from joule import answers, drafts, score
 from joule.config import load_settings
 from joule.db import connect
 from joule.sources import upwork
@@ -176,11 +174,14 @@ class Telegram:
                     )
                 # Filled answers grow the answer bank that later drafts adapt.
                 filled = json.loads(text).get("answers", [])
-                with (self.data_dir / "profile" / "answers.yaml").open("a") as bank:
-                    for pair, answer in zip(pairs, filled):
-                        if blanks(pair["answer"]):
-                            entry = {"question": pair["question"], "answer": answer}
-                            yaml.safe_dump([entry], bank, allow_unicode=True, width=1e9)
+                answers.append(
+                    self.data_dir,
+                    [
+                        {"question": pair["question"], "answer": answer}
+                        for pair, answer in zip(pairs, filled)
+                        if blanks(pair["answer"])
+                    ],
+                )
                 self.awaiting = None
                 return await self.card(db, job)
             if action == "rework":
