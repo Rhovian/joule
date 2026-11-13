@@ -3,14 +3,17 @@ import { age, escape } from './format';
 import { createSourceFilter } from './sources';
 import { createViews } from './views';
 import { createScans } from './scans';
+import { createPipeline } from './pipeline';
+import { createUndo } from './undo';
 import { createSettings } from './settings';
 import { createMobile } from './mobile';
 import { createTriageActions } from './triage-actions';
 import { sourceStatus } from './source-status';
 import { external, score, dismiss, applied, pay } from './job';
-import { renderDrawer, draftSelection, draftKind, type DrawerEdits, type Asked } from './drawer';
+import { renderDrawer, drawerSections, draftSelection, draftKind, type DrawerEdits, type Asked } from './drawer';
 const root = document.querySelector<HTMLElement>('#dashboard')!;
 const element = (id: string) => document.getElementById(id)!;
+const undo = createUndo();
 async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch(`/api/${path}`, method === 'GET' ? {} : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const data = await response.json().catch(() => null);
@@ -107,6 +110,7 @@ async function loadJobs() {
 }
 const scansPage = createScans(replace);
 const settingsPage = createSettings(api, notice, () => loadJobs(), watchScan);
+const pipeline = createPipeline(api, undo, { open: id => openJob(id), changed: renderDetail, error: notice, active: () => view === 'pipeline', drawer: () => detailId, replace });
 function renderSources() {
   renderScoreAll();
   if (!jobs.length && element('jobs').getAttribute('aria-busy') === 'false') renderJobs();
@@ -140,7 +144,7 @@ async function pollScan() {
     if (scan.status !== 'running') {
       runningId = null; renderSources();
       notice(`${scoringAll ? 'Scoring' : 'Scan'} ${scan.status}`); scoringAll = false; renderScoreAll();
-      const results = await Promise.allSettled([loadJobs(), loadSources(), ...(view === 'settings' ? [settingsPage.refreshProfile(), settingsPage.refreshRules()] : [])]);
+      const results = await Promise.allSettled([loadJobs(), loadSources(), pipeline.load(), ...(view === 'settings' ? [settingsPage.refreshProfile(), settingsPage.refreshRules()] : [])]);
       results.forEach(r => { if (r.status === 'rejected') notice(r.reason); });
       return;
     }
@@ -168,8 +172,8 @@ async function queueJob(id: number) {
   pendingQueue.add(id); renderDetail();
   try {
     const next = await api<Job>(`jobs/${id}/queue`, 'POST', {});
-    updateDetail(next);
-    await loadJobs();
+    undo.forget(); pipeline.invalidate(id); updateDetail(next);
+    await Promise.all([loadJobs(), pipeline.load()]);
   } finally { pendingQueue.delete(id); renderDetail(); }
 }
 async function writeDraft(id: number, kind: DraftKind) {
@@ -211,19 +215,22 @@ function renderDetail() {
   if (root.classList.contains('split') !== split) (element('triage-filters') as HTMLDetailsElement).open = !split;
   root.classList.toggle('split', split);
   if (!split) { element('detail').innerHTML = ''; return; }
-  replace('detail', renderDrawer({ job: detail && { ...detail, rank: jobs.find(j => j.id === detailId)?.rank }, id: detailId, index: jobs.findIndex(j => j.id === detailId), total: jobs.length,
-    section: activeSection, edits: editing(detailId), pendingDrafts, pendingScores, pendingQueue,
+  if (activeSection === 'pipeline' && detail?.state !== 'applied') activeSection = 'fit';
+  const ids = view === 'pipeline' ? pipeline.visible().map(row => row.job_id) : jobs.map(row => row.id);
+  replace('detail', renderDrawer({ job: detail && { ...detail, rank: jobs.find(j => j.id === detailId)?.rank }, id: detailId, index: ids.indexOf(detailId), total: ids.length,
+    section: activeSection, pipeline: detail?.state === 'applied' ? pipeline.section(detailId) : '', edits: editing(detailId), pendingDrafts, pendingScores, pendingQueue,
     asks: asks.get(detailId) ?? [], unscored: unscoredVisible().length, scoreAllDisabled: !!runningId || starting || !unscoredVisible().length }));
   renderScoreAll(); triage.render();
 }
 async function openJob(id: number, focus = !detailId) {
   if (id === detailId && detail) return;
   const version = ++detailVersion;
-  selected = id; detailId = id; detail = null; activeSection = 'fit'; renderJobs(); renderDetail();
+  if (view === 'triage') selected = id; detailId = id; detail = null; activeSection = 'fit'; renderJobs(); renderDetail();
   if (focus) element('detail').querySelector<HTMLElement>('.drawer')?.focus({ preventScroll: true });
   const j = await api<Job>(`jobs/${id}`);
   if (detailId !== id || version !== detailVersion) return;
   detail = j; renderDetail();
+  if (j.state === 'applied') await pipeline.loadEntry(id);
   if (j.state === 'new' && !j.queued) {
     await api(`jobs/${id}`, 'PATCH', { state: 'seen' });
     const row = jobs.find(job => job.id === id); if (row?.state === 'new') row.state = 'seen';
@@ -236,8 +243,10 @@ function closeDetail() {
   const id = jobs.some(j => j.id === detailId) ? detailId : selected; detailId = 0; detail = null; detailVersion++; renderDetail(); renderJobs();
   Array.from(root.querySelectorAll<HTMLElement>(`[data-action="open"][data-id="${id}"]`)).find(button => button.getClientRects().length)?.focus({ preventScroll: true });
   if (view === 'triage') mobile.revealCursor(id);
+  if (view === 'pipeline') pipeline.focus();
 }
 function moveJob(step: number) {
+  if (view === 'pipeline') { pipeline.move(step); return; }
   const index = jobs.findIndex(j => j.id === (detailId || selected));
   const nextIndex = index < 0 ? jobs.findIndex(j => j.id === selected) : index + step;
   const next = jobs[Math.max(0, Math.min(jobs.length - 1, nextIndex))];
@@ -267,17 +276,20 @@ async function scoreJob(id: number) {
   try {
     const next = await api<Job>(`jobs/${id}/score`, 'POST', {});
     updateDetail(next);
-    await loadJobs();
+    await Promise.all([loadJobs(), pipeline.load()]);
   } finally { pendingScores.delete(id); renderJobs(); renderDetail(); }
 }
-const triage = createTriageActions({
+const triage = createTriageActions(undo, {
+  view: () => view,
   jobs: () => jobs, cursor: () => selected, select: id => { selected = id; }, detail: () => detail,
   patch: async (id, state) => { await api(`jobs/${id}`, 'PATCH', { state }); },
   update(id, state) {
+    pipeline.invalidate(id);
     const row = jobs.find(j => j.id === id); if (row) row.state = state;
     if (detail?.id === id) { detailVersion++; detail.state = state; renderDetail(); }
   }, refresh: async () => {
-    await loadJobs();
+    await Promise.all([loadJobs(), pipeline.load()]);
+    if (detail?.state === 'applied') await pipeline.loadEntry(detail.id);
     const row = root.querySelector<HTMLElement>(`[data-job="${selected}"]`);
     if (row?.getClientRects().length) row.scrollIntoView({ block: 'nearest' });
   }, render: renderJobs, confirm: notice, error: notice,
@@ -285,11 +297,13 @@ const triage = createTriageActions({
 const mobile = createMobile({ state: changeState, error: notice, refresh: () => void loadSources().catch(notice) });
 function showView(next: string, focus = false) {
   sourceFilter.close();
-  view = ['scans', 'settings'].includes(next) ? next : 'triage';
+  view = ['scans', 'settings', 'pipeline'].includes(next) ? next : 'triage';
   closeDetail();
   element('triage').hidden = view !== 'triage';
   element('job-search-box').hidden = view !== 'triage';
   if (view !== 'triage') triage.clear();
+  element('a-pipeline').hidden = view !== 'pipeline';
+  if (view === 'pipeline' && focus) void pipeline.load().then(pipeline.focus);
   element('a-scans').hidden = view !== 'scans';
   element('a-settings').hidden = view !== 'settings';
   if (view === 'settings') settingsPage.open();
@@ -297,7 +311,7 @@ function showView(next: string, focus = false) {
     if (tab.dataset.view === view) tab.setAttribute('aria-current', 'page');
     else tab.removeAttribute('aria-current');
   });
-  document.title = `joule · ${view === 'triage' ? 'Triage' : view === 'scans' ? 'Scans' : 'Settings'}`;
+  document.title = `joule · ${view === 'triage' ? 'Triage' : view === 'scans' ? 'Scans' : view === 'pipeline' ? 'Pipeline' : 'Settings'}`;
   if ((element('mobile-filters') as HTMLDialogElement).open) (element('mobile-filters') as HTMLDialogElement).close();
   if (focus) element(view === 'triage' ? 'triage' : `a-${view}`).focus();
 }
@@ -329,7 +343,8 @@ root.addEventListener('click', event => {
     const kind = target.dataset.kind as DraftKind;
     editing(detailId).versions[kind] = id; renderDetail(); element(`draft-versions-${kind}`).focus({ preventScroll: true });
   }
-  if (target.dataset.action === 'undo') void triage.undo().catch(notice);
+  if (target.dataset.action === 'undo') void undo.run().catch(notice);
+  if (target.dataset.action === 'open-pipeline') { closeDetail(); pipeline.reveal(id); location.hash = 'pipeline'; }
   if (target.dataset.action === 'clear-selection') triage.clear();
   if (target.dataset.action === 'bulk-state') void triage.state(triage.ids(), target.dataset.state!).catch(notice);
   if (target.dataset.action === 'bulk-score') void scoreAll(triage.ids(), true).catch(notice);
@@ -374,7 +389,7 @@ root.addEventListener('input', event => {
   if (target.id === 'ask-question') editing(detailId).question = target.value;
 });
 document.addEventListener('keydown', event => {
-  if ((element('mobile-filters') as HTMLDialogElement).open || shortcuts.open || (element('fill-dialog') as HTMLDialogElement).open) return;
+  if ((element('mobile-filters') as HTMLDialogElement).open || shortcuts.open || (element('fill-dialog') as HTMLDialogElement).open || (element('pipeline-dialog') as HTMLDialogElement).open) return;
   const versions = root.querySelector<HTMLElement>('.draft-version-menu:popover-open');
   if (event.key === 'Escape' && versions) {
     event.preventDefault(); versions.hidePopover(); element(versions.id.replace('draft-version-menu-', 'draft-versions-')).focus({ preventScroll: true }); return;
@@ -386,16 +401,21 @@ document.addEventListener('keydown', event => {
   if (event.key === '/' && view === 'triage') { event.preventDefault(); if (mobile.phone) closeDetail(); (element('job-search') as HTMLInputElement).focus(); return; }
   if (event.key === 'z' && view === 'triage') { event.preventDefault(); void triage.undo().catch(notice); return; }
   if (event.key === ',') { event.preventDefault(); location.hash = 'settings'; return; }
+  if (event.key === 'p') { event.preventDefault(); closeDetail(); location.hash = 'pipeline'; return; }
   if (event.key === 's') { event.preventDefault(); location.hash = 'scans'; return; }
   if (event.key === 'Escape' && view !== 'triage') { location.hash = 'triage'; return; }
+  if (detail && ['1', '2', '3', '4', '5'].includes(event.key)) { event.preventDefault(); const section = drawerSections(detail)[Number(event.key) - 1]; if (section) jumpSection(section[0]); return; }
+  if (detailId && event.key === 'c') { event.preventDefault(); void copyDraft(-1).catch(notice); return; }
+  if (view === 'pipeline') {
+    if (detail && ['a','d'].includes(event.key) && !event.repeat) { event.preventDefault(); void triage.key(event.key as 'a' | 'd').catch(notice); return; }
+    pipeline.key(event); return;
+  }
   if (view !== 'triage' || (!jobs.length && !detailId)) return;
   if (event.repeat && ['a', 'd', 'x'].includes(event.key)) { event.preventDefault(); return; }
   if (event.key === 'x' && selected) { event.preventDefault(); triage.toggle(selected); return; }
   if (['a', 'd'].includes(event.key)) { event.preventDefault(); if (!detailId || detail) void triage.key(event.key as 'a' | 'd').catch(notice); return; }
-  if (detailId && ['1', '2', '3', '4'].includes(event.key)) { event.preventDefault(); jumpSection(['fit', 'draft', 'cv', 'ask'][Number(event.key) - 1]); return; }
-  if (detailId && event.key === 'c') { event.preventDefault(); void copyDraft(-1).catch(notice); return; }
   if (['j', 'k', 'o'].includes(event.key)) event.preventDefault();
   if (event.key === 'j' || event.key === 'k') moveJob(event.key === 'j' ? 1 : -1);
   if (event.key === 'o' && selected) void openJob(selected).catch(notice);
 });
-void Promise.allSettled([loadJobs(), loadSources(), settingsPage.init()]).then(results => results.forEach(r => { if (r.status === 'rejected') notice(r.reason); }));
+void Promise.allSettled([loadJobs(), loadSources(), settingsPage.init(), pipeline.load()]).then(results => results.forEach(r => { if (r.status === 'rejected') notice(r.reason); }));
