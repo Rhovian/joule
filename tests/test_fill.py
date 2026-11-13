@@ -8,7 +8,6 @@ from fastapi.testclient import TestClient
 
 from joule import ai
 from joule.app import create_app
-from joule.config import load_settings
 from joule.db import connect
 
 URL = "/api/fill/jobs/1/match"
@@ -689,7 +688,7 @@ def test_bank_semantic_batch_and_guards(client, monkeypatch, mode):
     assert calls == []  # Exact matches, optional and sensitive fields cost no call.
 
 
-def test_create_page_job_deduplicates_filters_and_uses_scoring_queue(
+def test_create_page_job_deduplicates_filters_and_scores_best_effort(
     client, monkeypatch
 ):
     directory = client.app.state.data_dir
@@ -713,6 +712,15 @@ def test_create_page_job_deduplicates_filters_and_uses_scoring_queue(
         "kind": "posting",
         "url": "https://jobs.lever.co/new/123/apply?utm_source=page",
     }
+    assert not any(
+        row["name"] == "manual" for row in client.get("/api/sources").json()["sources"]
+    )
+    assert (
+        client.post(
+            "/api/fill/jobs", json=body | {"url": "javascript:alert(1)"}
+        ).status_code
+        == 422
+    )
     response = client.post("/api/fill/jobs", json=body)
     assert response.status_code == 201
     job_id = response.json()["id"]
@@ -735,11 +743,26 @@ def test_create_page_job_deduplicates_filters_and_uses_scoring_queue(
         and job["score"] is None
         and job["extra"]["kind"] == "posting"
     )
+    assert {
+        row["name"]: row["new_jobs"]
+        for row in client.get("/api/sources").json()["sources"]
+    }["manual"] == 1
+    assert [row["id"] for row in client.get("/api/jobs?source=manual").json()] == [
+        job_id
+    ]
     scanner.busy = False
-    client.portal.call(scanner.score_manual, load_settings(directory))
-    client.portal.call(lambda: scanner.task)
+    assert client.post(f"/api/jobs/{job_id}/score", json={}).status_code == 200
     assert (
         scored == [job_id] and client.get(f"/api/jobs/{job_id}").json()["score"] == 91
+    )
+    free = client.post(
+        "/api/fill/jobs",
+        json=body | {"url": "https://jobs.lever.co/new/free", "company": ""},
+    ).json()
+    client.portal.call(lambda: scanner.task)
+    assert (
+        scored == [job_id, free["id"]]
+        and client.get(f"/api/jobs/{free['id']}").json()["company"] is None
     )
     blocked = client.post(
         "/api/fill/jobs",
@@ -752,7 +775,7 @@ def test_create_page_job_deduplicates_filters_and_uses_scoring_queue(
     with closing(connect(directory / "joule.db")) as db:
         assert (
             db.execute("SELECT count(*) FROM jobs WHERE source='manual'").fetchone()[0]
-            == 2
+            == 3
         )
     with closing(connect(directory / "joule.db")) as db, db:
         db.execute(
@@ -760,4 +783,4 @@ def test_create_page_job_deduplicates_filters_and_uses_scoring_queue(
             (body["url"],),
         )
     assert client.post("/api/fill/jobs", json=body).status_code == 409
-    assert scored == [job_id]
+    assert scored == [job_id, free["id"]]

@@ -148,7 +148,7 @@ main { display:flex; flex-direction:column; gap:12px; padding:14px; min-width:0;
 .after #change { grid-row:1; }
 .after #cv-card { display:none; }
 .after #fill-controls,.nomatch #fill-controls,.offline #fill-controls { position:fixed; inset:auto 0 0; padding:10px 14px 14px; background:var(--paper); border-top:1px solid var(--line); z-index:2; }
-.after #fill-controls { display:flex; gap:12px; align-items:center; }
+.after #fill-controls { display:flex; gap:8px; align-items:center; }
 .after #fill { order: 1; background: var(--paper); color: var(--ink); border-color: var(--control-border); width:auto; min-height:32px; font-size:12.5px; margin-left:0; }
 .after .review { margin:0; text-align:left; font-size:11.5px; flex:1; order:-1; }
 .connection { padding:14px; display:flex; flex-direction:column; gap:8px; }
@@ -163,8 +163,6 @@ main { display:flex; flex-direction:column; gap:12px; padding:14px; min-width:0;
 #create-form { display: grid; gap: 8px; margin-top: 12px; }
 #create-form label { display: grid; gap: 4px; font-size: 12px; }
 #create-form select { font: inherit; color: var(--ink); background: var(--paper); border: 1px solid var(--control-border); border-radius: 6px; padding: 8px; }
-.after #mark-applied, .after #undo-applied { min-height: 32px; font-size: 12.5px; }
-.after #fill-controls { gap: 8px; }
 
-.after #mark-applied { order: 2; }
-.after #undo-applied { order: 3; }
+.after #mark-applied { order: 2; min-height: 32px; font-size: 12.5px; }
+.after #undo-applied { order: 3; min-height: 32px; font-size: 12.5px; }

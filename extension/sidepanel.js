@@ -1,4 +1,5 @@
 const element = id => document.getElementById(id);
+const review = document.querySelector('.review');
 const text = (tag, value, className = '') => Object.assign(document.createElement(tag), {textContent: value ?? '', className});
 let jobs = [], busy = false, active = null, refreshPending = false, choosing = false, connected = null, origin = '';
 let resumeDraft = null, displayedPage = null, lastResult = null, theme = 'system', themeVersion = 0, pageDraft = null, canUndo = false;
@@ -68,7 +69,7 @@ function showActive(job) {
 }
 function clearResult() {
   lastResult = null; canUndo = false;
-  document.querySelector('.review').textContent = 'Joule never submits. Review every value, then submit yourself.';
+  review.textContent = 'Joule never submits. Review every value, then submit yourself.';
   document.body.classList.remove('after');
   for (const id of ['result', 'remaining', 'optional', 'filled', 'resume-download']) element(id).hidden = true;
   for (const id of ['need-rows', 'optional-rows', 'filled-rows']) element(id).replaceChildren();
@@ -207,7 +208,7 @@ element('fill').addEventListener('click', () => run(async () => {
   }
   document.body.classList.add('after');
   element('mark-applied').hidden = false;
-  document.querySelector('.review').textContent = 'Submitted it yourself? Applied moves the Job to Pipeline.';
+  review.textContent = 'Submitted it yourself? Applied moves the Job to Pipeline.';
   status(`${result.filled} filled. Review the form.`);
 }));
 element('create-form').addEventListener('submit', event => {
@@ -218,11 +219,13 @@ element('create-form').addEventListener('submit', event => {
     pageDraft = null; choosing = false; showActive(job); await refreshDrafts(); status('Job created or matched. Scoring runs in Joule.');
   });
 });
-for (const type of ['mark-applied', 'undo-applied']) element(type).addEventListener('click', () => run(async () => {
+function appliedAction(type) { return run(async () => {
   const result = await send({type, jobId: lastResult.job.id});
   canUndo = result.canUndo; showActive({...active, state: result.job.state});
   status(type === 'mark-applied' ? result.canUndo ? 'Applied · in Pipeline. Undo restores the previous state.' : 'Already applied · in Pipeline.' : 'Previous state restored.');
-}));
+}); }
+element('mark-applied').addEventListener('click', () => appliedAction('mark-applied'));
+element('undo-applied').addEventListener('click', () => appliedAction('undo-applied'));
 element('job-search').addEventListener('input', picker);
 element('change').addEventListener('click', () => { choosing = true; element('job-search').value = ''; picker(); showActive(active); element('job-search').focus(); });
 element('cancel-pick').addEventListener('click', () => { choosing = false; showActive(active); });

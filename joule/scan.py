@@ -120,7 +120,6 @@ class Scanner:
                 "AND first_seen_at < ?",
                 (now.isoformat(), cutoff.isoformat()),
             )
-        self.score_manual(settings)
         minutes = settings.schedule.upwork_minutes
         if (
             minutes is not None
@@ -136,21 +135,6 @@ class Scanner:
             except ScanInProgress:
                 return
             self.next_upwork = time.monotonic() + minutes * 60
-
-    def score_manual(self, settings):
-        if self.busy:
-            return
-        with closing(connect(self.path)) as db:
-            ids = [
-                row[0]
-                for row in db.execute(
-                    "SELECT id FROM jobs WHERE source='manual' AND primary_id IS NULL "
-                    "AND score IS NULL AND filtered_reason IS NULL ORDER BY id LIMIT ?",
-                    (settings.max_scored_per_scan,),
-                )
-            ]
-        if ids:
-            self.start(["manual"], "manual", settings, None, job_ids=ids)
 
     async def run_schedule(self):
         while True:

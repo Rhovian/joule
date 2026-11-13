@@ -20,7 +20,11 @@ function createBackground(chrome, fetcher = fetch) {
     const response = await fetcher(`${origin}${path}`, body === undefined ? {} : {
       method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
     });
-    if (!response.ok) { const error = Error(`joule HTTP ${response.status}`); error.status = response.status; throw error; }
+    if (!response.ok) {
+      let detail; try { detail = (await response.json()).detail; } catch { /* Non-JSON errors keep their status. */ }
+      if (Array.isArray(detail)) detail = detail.map(item => `${item.loc?.slice(1).join('.') || 'Input'}: ${item.msg}`).join('; ');
+      const error = Error(`joule HTTP ${response.status}${typeof detail === 'string' ? `: ${detail}` : ''}`); error.status = response.status; throw error;
+    }
     if (!pdf) return response.json();
     // Chrome messages use JSON, not structured clone; binary PDFs need base64:
     // https://developer.chrome.com/docs/extensions/develop/concepts/messaging#serialization

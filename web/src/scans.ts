@@ -44,7 +44,7 @@ export function createScans(replace: (id: string, html: string) => void) {
     }
   });
   return { update(next: State) {
-    state = next;
+    state = { ...next, sources: next.sources.filter(source => source.name !== 'manual') };
     const { sources, scan, running, starting, scoring, scheduled, connected } = state;
     const latest = sources.map(s => sourceStatus(s).stamp).filter((stamp): stamp is string => !!stamp).sort().at(-1);
     document.getElementById('scans-summary')!.textContent = `${sources.length} Source${sources.length === 1 ? '' : 's'}${latest ? ` · last completed Scan ${dateTime(latest)}` : ''}`;

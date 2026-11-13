@@ -16,9 +16,11 @@ test('Ask routes to the selected frame, clips text, maps select values and prote
   const chrome = {runtime: {id: 'extension', getURL: path => `chrome-extension://extension/${path}`},
     storage: {local: storage({origin: 'http://localhost:8000'}), session: storage(session)}, tabs: {get: async () => tab,
       sendMessage: async (id, message, target) => { sent.push(target); return worker.apply(message.actions, message.expected); }}};
-  let value = 'Known answer';
+  let value = 'Known answer', state = 'dismissed';
   const background = createBackground(chrome, async (url, options) => {
-    calls.push({url, options}); return {ok: true, json: async () => ({value, reason: value === null ? 'not answerable from Profile' : undefined})};
+    calls.push({url, options});
+    if (url.endsWith('/api/jobs/1')) { if (options?.method === 'PATCH') state = JSON.parse(options.body).state; return {ok:true,json:async()=>({id:1,state})}; }
+    return {ok: true, json: async () => ({value, reason: value === null ? 'not answerable from Profile' : undefined})};
   });
   const ask = field => background.handle({type: 'ask', jobId: 1, tabId: 4, field}, ui);
   assert.equal((await ask(fields[0])).filled, 1);
@@ -29,6 +31,7 @@ test('Ask routes to the selected frame, clips text, maps select values and prote
   assert.equal(document.getElementById('q').value, 'Show');
   assert.equal(document.getElementById('s').value, '');
   assert.equal(calls.length, before, 'Fill field reuses the shown answer without an AI request');
+  for (const change of [{pageURL:'https://jobs.lever.co/other'}, {jobId:2}]) await assert.rejects(background.handle({type:'fill-field',tabId:4,jobId:1,field:fields[0],value:'shown',...change},ui), /changed/i);
   assert.equal((await ask(fields[0])).filled, 0);
   value = 'outside';
   assert.equal((await ask(fields[1])).filled, 0);
@@ -43,6 +46,14 @@ test('Ask routes to the selected frame, clips text, maps select values and prote
   assert.equal(calls[0].url, 'http://localhost:8000/api/fill/jobs/1/ask');
   assert.deepEqual(JSON.parse(calls[0].options.body), {question: 'Why us?', options: []});
   assert.equal(document.querySelector('input').checked, false);
+  const stateAction = (type, jobId=1) => background.handle({type,jobId},ui);
+  await assert.rejects(stateAction('mark-applied',2), /changed/i);
+  await stateAction('mark-applied'); assert.equal(state,'applied');
+  session.appliedUndo.id=2; await assert.rejects(stateAction('undo-applied'), /Undo/); session.appliedUndo.id=1;
+  state='seen'; await assert.rejects(stateAction('undo-applied'), /Undo/); state='applied';
+  await stateAction('undo-applied'); assert.equal(state,'dismissed');
+  state='applied'; assert.equal((await stateAction('mark-applied')).canUndo,false);
+  session.active.source='upwork'; await assert.rejects(stateAction('mark-applied'), /changed/i);
 });
 test('radio replay sets only the matching option and preserves operator selection', () => {
   const document = new JSDOM('<fieldset><legend>Authorized?</legend><label>Yes<input type="radio" name="auth" value="yes"></label><label>No<input type="radio" name="auth" value="no"></label></fieldset>').window.document;
@@ -54,4 +65,6 @@ test('radio replay sets only the matching option and preserves operator selectio
   assert.equal(document.querySelector('input').checked, true);
   assert.deepEqual(events, ['input', 'change']);
   assert.equal(worker.apply([{ref: 0, action: 'set', value: 'no'}]).filled, 0);
+  assert.equal(worker.apply([{ref:0,action:'set',value:'no',overwrite:true}]).filled,1);
+  assert.equal(document.querySelectorAll('input')[1].checked,true);
 });

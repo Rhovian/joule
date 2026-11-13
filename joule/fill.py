@@ -17,6 +17,7 @@ from joule.config import StrictModel, load_preferences, load_settings
 from joule.db import connect
 from joule.jobs import primary
 from joule.manual import PostingRequest
+from joule.scan import ScanInProgress
 from joule.sources import Candidate
 
 router = APIRouter(prefix="/api/fill")
@@ -78,7 +79,7 @@ async def create_job(request: Request, body: PageJob):
             source_id=hashlib.sha256(json.dumps(key).encode()).hexdigest(),
             link=body.url,
             title=body.title,
-            company=body.company,
+            company=body.company or None,
             description=body.description,
             extra={"kind": body.kind},
         )
@@ -88,23 +89,30 @@ async def create_job(request: Request, body: PageJob):
             raise HTTPException(422, str(error)) from error
         job_id = db.execute(
             "INSERT INTO jobs(source,source_id,link,title,company,description,extra,first_seen_at,filtered_reason,location_unclear) "
-            "VALUES ('manual',?,?,?,?,?,?,?,?,1)",
+            "VALUES ('manual',?,?,?,?,?,?,?,?,?)",
             (
                 candidate.source_id,
                 body.url,
                 body.title,
-                body.company,
+                candidate.company,
                 body.description,
                 json.dumps(candidate.extra),
                 datetime.now(UTC).isoformat(),
                 reason,
+                int(filters.location_unclear(candidate)),
             ),
         ).lastrowid
-    request.app.state.scanner.score_manual(settings)
+    if reason is None:
+        try:
+            request.app.state.scanner.start(
+                ["manual"], "manual", settings, None, job_ids=[job_id]
+            )
+        except ScanInProgress:
+            pass
     return {
         "id": job_id,
         "title": body.title,
-        "company": body.company,
+        "company": candidate.company,
         "source": "manual",
     }
 
