@@ -21,8 +21,8 @@ export function createPipeline(api: <T>(path: string, method?: string, body?: un
   root.append(dialog);
   let all: Card[] = [], rows: Card[] = [], selected = 0, col = 0, busy = false, error = '', version = 0;
   const metrics = createMetrics(load, actions.error, actions.replace);
-  let followUps = new Set<number>(), thresholds = '';
-  function statistics(stats: Statistics) { followUps = new Set(stats.follow_up_ids); thresholds = `Follow up after ${stats.follow_up_days}d · Closes as No reply after ${stats.no_reply_days}d`; metrics.render(stats); }
+  let followUps: Record<number, number> = {}, thresholds = '', followUpError = '';
+  function statistics(stats: Statistics) { followUps = stats.follow_up_ages; followUpError = stats.follow_up_error || ''; thresholds = followUpError ? '' : `Follow up after ${stats.follow_up_days}d · Closes as No reply after ${stats.no_reply_days}d`; metrics.render(stats); }
   const details = new Map<number, Entry | string>();
   const visible = () => col === 4 ? reasons.flatMap(reason => rows.filter(r => r.closed_reason === reason)) : rows.filter(r => column(r) === columns[col]);
   const current = () => rows.find(r => r.job_id === selected);
@@ -33,11 +33,11 @@ export function createPipeline(api: <T>(path: string, method?: string, body?: un
   }
   function card(row: Card) {
     const chosen = selected === row.job_id;
-    return `<article id="pipeline-card-${row.job_id}" class="pipeline-card${chosen ? ' selected' : ''}${row.closed_reason ? ' closed' : ''}" tabindex="${chosen ? 0 : -1}" aria-label="${escape(row.title)}" ${chosen ? 'aria-current="true"' : ''}><button id="pipeline-select-${row.job_id}" class="pipeline-card-main" data-pipeline-select="${row.job_id}">${row.closed_reason ? '' : score(row)}<span><strong>${escape(row.title)}</strong><span class="pipeline-meta">${escape(row.company || row.source)} · ${age(row.applied_at)}</span></span></button>${followUps.has(row.job_id) ? '<span class="tag filtered">follow up</span>' : ''}${row.stage === 'accepted' ? '<span class="tag applied">Accepted</span>' : ''}${row.closed_reason ? `<p class="pipeline-meta">at ${label(row.stage)}</p>` : ''}${row.next_at ? `<p class="pipeline-next"><b>Next</b> ${escape(row.next_label || '')} · ${escape(dateTime(row.next_at))}</p>` : ''}${chosen ? controls(row, 'board') : ''}</article>`;
+    return `<article id="pipeline-card-${row.job_id}" class="pipeline-card${chosen ? ' selected' : ''}${row.closed_reason ? ' closed' : ''}" tabindex="${chosen ? 0 : -1}" aria-label="${escape(row.title)}" ${chosen ? 'aria-current="true"' : ''}><button id="pipeline-select-${row.job_id}" class="pipeline-card-main" data-pipeline-select="${row.job_id}">${row.closed_reason ? '' : score(row)}<span><strong>${escape(row.title)}</strong><span class="pipeline-meta">${escape(row.company || row.source)} · ${age(row.applied_at)}</span></span></button>${row.job_id in followUps ? '<span class="tag filtered">follow up</span>' : ''}${row.stage === 'accepted' ? '<span class="tag applied">Accepted</span>' : ''}${row.closed_reason ? `<p class="pipeline-meta">at ${label(row.stage)}</p>` : ''}${row.next_at ? `<p class="pipeline-next"><b>Next</b> ${escape(row.next_label || '')} · ${escape(dateTime(row.next_at))}</p>` : ''}${chosen ? controls(row, 'board') : ''}</article>`;
   }
   function render() {
-    const waiting = rows.filter(row => followUps.has(row.job_id));
-    actions.replace('pipeline-followup', `<h3>Follow up <span class="tag filtered">${waiting.length}</span></h3>${waiting.map(row => `<div class="followup-job"><div><b title="${escape(row.title)}">${escape(row.title)}</b><p class="muted">${Math.floor((Date.now() - Date.parse(row.applied_at)) / 86400000)}d without a reply</p></div><button class="btn small" data-action="follow-up" data-id="${row.job_id}">Draft follow-up</button></div>`).join('') || '<p class="muted">No Jobs need a follow-up.</p>'}<p class="muted">${thresholds}</p>`);
+    const waiting = rows.filter(row => row.job_id in followUps);
+    actions.replace('pipeline-followup', `<h3>Follow up <span class="tag filtered">${followUpError ? '—' : waiting.length}</span></h3>${waiting.map(row => `<div class="followup-job"><div><b title="${escape(row.title)}">${escape(row.title)}</b><p class="muted">${followUps[row.job_id]}d without a reply</p></div><button class="btn small" data-action="follow-up" data-id="${row.job_id}">Draft follow-up</button></div>`).join('') || `<p class="muted">${escape(followUpError ? 'Follow-up checks unavailable. Check settings.yaml or server logs.' : 'No Jobs need a follow-up.')}</p>`}<p class="muted">${thresholds}</p>`);
     const active = rows.filter(r => !r.closed_reason).length;
     document.querySelectorAll('[data-pipeline-count]').forEach(node => { node.textContent = String(all.filter(r => !r.closed_reason).length); });
     const summary = document.getElementById('pipeline-summary')!;
@@ -62,7 +62,6 @@ export function createPipeline(api: <T>(path: string, method?: string, body?: un
   }
   async function update(id: number, payload: unknown) {
     const next = await api<Entry>(`pipeline/${id}`, 'PATCH', payload), request = ++version;
-    if (next.closed_reason || next.history.some(move => move.stage !== 'applied' || move.closed_reason === 'rejected')) followUps.delete(id);
     all = all.map(row => row.job_id === id ? {...row, ...next} : row); rows = rows.map(row => row.job_id === id ? {...row, ...next} : row); error = ''; details.set(id, next); if (selected === id) select(id, true); else render(); actions.changed();
     void api<Statistics>(`pipeline/stats${metrics.query()}`).then(stats => { if (request === version) { const ids = new Set(stats.job_ids); rows = all.filter(row => ids.has(row.job_id)); statistics(stats); render(); } }).catch(e => { if (request === version) { metrics.failed(); actions.error(e); } });
     return next;

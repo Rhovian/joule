@@ -2,7 +2,7 @@ import { escape } from './format';
 import './pipeline-stats.css';
 type Rate = { name: string; applied: number; replies: number };
 type Terminal = { at: number; stage: string | null; closed_reason: string | null; count: number };
-export type Statistics = { follow_up_ids: number[]; follow_up_days: number; no_reply_days: number; total: number; job_ids: number[]; replies: number; reached: number[]; terminals: Terminal[]; bands: Rate[]; sources: Rate[] };
+export type Statistics = { follow_up_ids: number[]; follow_up_ages: Record<number, number>; follow_up_error: string | null; follow_up_days: number | null; no_reply_days: number | null; total: number; job_ids: number[]; replies: number; reached: number[]; terminals: Terminal[]; bands: Rate[]; sources: Rate[] };
 const stages = ['Applied', 'Screen', 'Interview', 'Offer', 'Accepted'];
 const names: Record<string, string> = { applied:'Waiting', screen:'In screen', interview:'Interviewing', offer:'Deciding', accepted:'Accepted', stage:'Still in stage', no_reply:'No reply', rejected:'Rejected', withdrawn:'Withdrawn' };
 const percent = (n: number, total: number) => total ? `${Math.round(100 * n / total)}%` : '—';

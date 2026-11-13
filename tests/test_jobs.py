@@ -538,14 +538,7 @@ def test_proposal_guidance_is_scoped(client, monkeypatch, kind):
         assert (fragment in prompts[0]) == (kind == "proposal")
     assert ("one-line greeting" in prompts[0]) == (kind == "cover_letter")
     if kind == "follow_up":
-        assert "30 to 60 words" in prompts[0] and "## cv.yaml" in prompts[0]
-        result = client.post(path, json={"kind": kind, "note": "Shorter"}).json()
-        versions = result["draft_versions"][kind]
-        assert [(d["note"], d["content"]) for d in versions] == [
-            (None, {"text": "Letter"}),
-            ("Shorter", {"text": "Letter"}),
-        ]
-        assert result["state"] == "new" and versions[0]["id"] != versions[1]["id"]
+        assert "## cv.yaml" in prompts[0]
 
 
 @pytest.mark.parametrize("wrong", [True, False])

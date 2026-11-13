@@ -105,8 +105,11 @@ class Scanner:
     def tick(self):
         settings = load_settings(self.data_dir)
         now = datetime.now(UTC)
-        with closing(connect(self.path)) as db, db:
-            evaluate(db, settings, now)
+        try:
+            with closing(connect(self.path)) as db, db:
+                evaluate(db, settings, now)
+        except Exception:
+            logger.exception("Pipeline evaluation failed; continuing Scan/purge tick")
         cutoff = now - timedelta(hours=settings.upwork.retention_hours)
         with closing(connect(self.path)) as db, db:
             db.execute(

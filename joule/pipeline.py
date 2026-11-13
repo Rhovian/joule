@@ -1,5 +1,6 @@
 """Current Pipeline entries point into append-only Move history."""
 
+import logging
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from typing import Literal
@@ -19,20 +20,24 @@ CURRENT = (
 
 
 def evaluate(db, settings, now=None):
-    """Evaluate in the caller's transaction, keeping subsequent reads under the lock."""
-    now = now or datetime.now(UTC)
-    follow_up = set()
-    db.execute("BEGIN IMMEDIATE")
-    for row in db.execute(
-        "SELECT m.*,a.created_at AS applied_at"
+    """Read first; acquire the write lock only for due closures, then recheck."""
+    limits = settings.pipeline
+    stamp = (now or datetime.now(UTC)).isoformat()
+    query = (
+        "SELECT m.*,julianday(?)-julianday(a.created_at) AS days"
         + CURRENT
-        + " AND m.stage='applied' AND m.closed_reason IS NULL AND NOT EXISTS "
+        + " AND m.stage='applied' AND m.closed_reason IS NULL "
+        "AND (m.next_at IS NULL OR julianday(m.next_at)<=julianday(?)) AND NOT EXISTS "
         "(SELECT 1 FROM pipeline_moves h WHERE h.job_id=p.job_id AND h.id>=p.first_move_id "
-        "AND (h.stage!='applied' OR h.closed_reason='rejected' "
-        "OR (h.closed_reason='no_reply' AND h.how='auto')))"
-    ).fetchall():
-        days = (now - datetime.fromisoformat(row["applied_at"])).total_seconds() / 86400
-        if days >= settings.pipeline.no_reply_days:
+        "AND (h.stage!='applied' OR h.closed_reason IS NOT NULL))"
+    )
+    rows = db.execute(query, (stamp, stamp)).fetchall()
+    if any(row["days"] >= limits.no_reply_days for row in rows):
+        db.execute("BEGIN IMMEDIATE")
+        rows = db.execute(query, (stamp, stamp)).fetchall()
+        for row in rows:
+            if row["days"] < limits.no_reply_days:
+                continue
             move = db.execute(
                 "INSERT INTO pipeline_moves(job_id,stage,closed_reason,next_at,next_label,created_at,how,note) "
                 "VALUES (?,'applied','no_reply',?,?,?,'auto',?)",
@@ -40,17 +45,32 @@ def evaluate(db, settings, now=None):
                     row["job_id"],
                     row["next_at"],
                     row["next_label"],
-                    now.isoformat(),
-                    f"No reply after {settings.pipeline.no_reply_days} days",
+                    stamp,
+                    f"No reply after {limits.no_reply_days} days",
                 ),
             ).lastrowid
             db.execute(
-                "UPDATE pipeline SET move_id=? WHERE job_id=?",
-                (move, row["job_id"]),
+                "UPDATE pipeline SET move_id=? WHERE job_id=?", (move, row["job_id"])
             )
-        elif days >= settings.pipeline.follow_up_days:
-            follow_up.add(row["job_id"])
-    return follow_up
+    return {
+        row["job_id"]: int(row["days"])
+        for row in rows
+        if limits.follow_up_days <= row["days"] < limits.no_reply_days
+    }
+
+
+def refresh(db, directory):
+    try:
+        settings = load_settings(directory)
+        with db:
+            follow_up = evaluate(db, settings)
+        return follow_up, settings.pipeline, None
+    except Exception as error:
+        db.rollback()
+        logging.getLogger(__name__).exception(
+            "Pipeline evaluation failed; returning current entries"
+        )
+        return {}, None, str(error)
 
 
 def entry(db, job_id):
@@ -91,30 +111,34 @@ def cohort(db, days):
 @router.get("")
 def list_entries(request: Request, days: Literal["30", "90"] | None = None):
     with closing(connect(request.app.state.data_dir / "joule.db")) as db, db:
-        settings = load_settings(request.app.state.data_dir)
-        evaluate(db, settings)
+        refresh(db, request.app.state.data_dir)
         return cohort(db, days)
 
 
 @router.get("/stats")
 def statistics(request: Request, days: Literal["30", "90"] | None = None):
     with closing(connect(request.app.state.data_dir / "joule.db")) as db, db:
-        settings = load_settings(request.app.state.data_dir)
-        follow_up = evaluate(db, settings)
+        follow_up, settings, error = refresh(db, request.app.state.data_dir)
+        db.execute("BEGIN")  # Read snapshot; no write lock when nothing is due.
         rows = cohort(db, days)
+        follow_up = {
+            row["job_id"]: follow_up[row["job_id"]]
+            for row in rows
+            if row["job_id"] in follow_up
+        }
         return summarize(db, rows) | {
-            "follow_up_ids": [
-                row["job_id"] for row in rows if row["job_id"] in follow_up
-            ],
-            "follow_up_days": settings.pipeline.follow_up_days,
-            "no_reply_days": settings.pipeline.no_reply_days,
+            "follow_up_ids": list(follow_up),
+            "follow_up_ages": follow_up,
+            "follow_up_days": settings.follow_up_days if settings else None,
+            "no_reply_days": settings.no_reply_days if settings else None,
+            "follow_up_error": error,
         }
 
 
 @router.get("/{job_id}")
 def get_entry(request: Request, job_id: int):
     with closing(connect(request.app.state.data_dir / "joule.db")) as db, db:
-        evaluate(db, load_settings(request.app.state.data_dir))
+        refresh(db, request.app.state.data_dir)
         return entry(db, job_id)
 
 

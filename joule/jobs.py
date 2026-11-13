@@ -66,7 +66,7 @@ async def list_jobs(
     with closing(connect(directory / "joule.db")) as db:
         rows = db.execute(
             f"SELECT jobs.*, {score.RANK} AS rank, drafted.job_id IS NOT NULL AS has_drafts "
-            "FROM jobs LEFT JOIN (SELECT DISTINCT job_id FROM drafts) drafted "
+            "FROM jobs LEFT JOIN (SELECT DISTINCT job_id FROM drafts WHERE kind!='follow_up') drafted "
             "ON drafted.job_id=jobs.id WHERE primary_id IS NULL "
             f"AND {SHOW_CATEGORY} IN (SELECT value FROM json_each(?)) "
             f"AND {SOURCE_FILTER} "
