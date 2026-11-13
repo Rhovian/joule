@@ -1,6 +1,6 @@
 body:has(#fill-dialog[open]) { overflow: hidden; }
-#fill-dialog { width: min(1080px, calc(100vw - 40px)); max-width: none; max-height: calc(100dvh - 96px); margin: 64px auto 32px; padding: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); color: var(--ink); box-shadow: 0 24px 80px #0003; }
 #fill-dialog::backdrop { background: rgb(28 43 34 / .38); }
+#fill-dialog { width: min(1080px, calc(100vw - 40px)); max-width: none; max-height: calc(100dvh - 96px); margin: 64px auto 32px; padding: 0; box-shadow: 0 24px 80px #0003; }
 #fill-dialog[open] { display: flex; flex-direction: column; }
 #fill-dialog [hidden] { display: none; }
 .fill-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 22px; border-bottom: 1px solid var(--line); gap: 16px; }

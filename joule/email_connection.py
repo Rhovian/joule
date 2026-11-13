@@ -6,7 +6,6 @@ import json
 import re
 import ssl
 from pathlib import Path
-from threading import RLock
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Body, HTTPException, Request
@@ -55,7 +54,6 @@ class EmailConnection:
     def __init__(self, directory: Path):
         self.path = directory / "email.json"
         self.auth_failed = False
-        self.lock = RLock()
 
     def load(self):
         try:
@@ -68,20 +66,19 @@ class EmailConnection:
             ) from None
 
     def status(self):
-        with self.lock:
-            saved = self.load()
-            return {
-                "state": "not_connected"
-                if saved is None
-                else "expired"
-                if self.auth_failed
-                else "connected",
-                "config": saved.model_dump(mode="json", exclude={"password"})
-                if saved
-                else None,
-            }
+        saved = self.load()
+        return {
+            "state": "not_connected"
+            if saved is None
+            else "expired"
+            if self.auth_failed
+            else "connected",
+            "config": saved.model_dump(mode="json", exclude={"password"})
+            if saved
+            else None,
+        }
 
-    def validate(self, config):
+    def validate(self, config, *, saved_password=False):
         context = ssl.create_default_context()
         try:
             client = (
@@ -101,18 +98,22 @@ class EmailConnection:
                         client._quote(config.username),
                         config.password.get_secret_value(),
                     )
+                except imaplib.IMAP4.abort:
+                    raise
                 except imaplib.IMAP4.error:
-                    self.auth_failed = True
+                    if saved_password:
+                        self.auth_failed = True
                     raise HTTPException(
                         401, "Sign-in failed. Check your username and app password."
                     ) from None
-                self.auth_failed = False
                 try:
                     result, _ = client.select(
                         client._quote(mailbox_name(config.folder)), readonly=True
                     )
                     if result != "OK":
                         raise imaplib.IMAP4.error()
+                except imaplib.IMAP4.abort:
+                    raise
                 except (imaplib.IMAP4.error, UnicodeError):
                     raise HTTPException(
                         400, "Could not open that folder. Check its name and access."
@@ -124,38 +125,37 @@ class EmailConnection:
             ) from None
 
     def save(self, body):
-        with self.lock:
-            config = body.model_copy(
-                update={
-                    **(
-                        {"host": "imap.gmail.com", "port": 993, "tls": True}
-                        if body.inbox == "gmail"
-                        else {}
-                    ),
-                    "folder": "INBOX" if body.scope == "pipeline" else body.folder,
-                }
-            )
-            if config.password is None or not config.password.get_secret_value():
-                saved = self.load()
-                if saved is None or any(
-                    getattr(saved, key) != getattr(config, key)
-                    for key in ("inbox", "host", "port", "tls", "username")
-                ):
-                    raise HTTPException(
-                        400, "Enter an app password for this connection."
-                    )
-                config.password = saved.password
-            if config.password is None or any(
-                c in config.password.get_secret_value() for c in "\r\n\x00"
-            ):
-                raise HTTPException(400, "Enter a valid app password.")
-            self.validate(config)
-            document = config.model_dump(mode="json", exclude={"password"}) | {
-                "password": config.password.get_secret_value()
+        config = body.model_copy(
+            update={
+                **(
+                    {"host": "imap.gmail.com", "port": 993, "tls": True}
+                    if body.inbox == "gmail"
+                    else {}
+                ),
+                "folder": "INBOX" if body.scope == "pipeline" else body.folder,
             }
-            # atomic_write uses tempfile's private (0600) file before atomic replacement.
-            atomic_write(self.path, json.dumps(document) + "\n")
-            return self.status()
+        )
+        reused = config.password is None or not config.password.get_secret_value()
+        if reused:
+            saved = self.load()
+            if saved is None or any(
+                getattr(saved, key) != getattr(config, key)
+                for key in ("inbox", "host", "port", "tls", "username")
+            ):
+                raise HTTPException(400, "Enter an app password for this connection.")
+            config.password = saved.password
+        if config.password is None or any(
+            c in config.password.get_secret_value() for c in "\r\n\x00"
+        ):
+            raise HTTPException(400, "Enter a valid app password.")
+        self.validate(config, saved_password=reused)
+        document = config.model_dump(mode="json", exclude={"password"}) | {
+            "password": config.password.get_secret_value()
+        }
+        # atomic_write uses tempfile's private (0600) file before atomic replacement.
+        atomic_write(self.path, json.dumps(document) + "\n")
+        self.auth_failed = False
+        return self.status()
 
 
 @router.get("")
@@ -178,7 +178,6 @@ def connect(request: Request, body: Annotated[Any, Body()]):
 @router.delete("")
 def disconnect(request: Request):
     connection = request.app.state.email
-    with connection.lock:
-        connection.path.unlink(missing_ok=True)
-        connection.auth_failed = False
-        return connection.status()
+    connection.path.unlink(missing_ok=True)
+    connection.auth_failed = False
+    return connection.status()

@@ -15,8 +15,8 @@ from joule.answers import router as answers_router
 from joule.config import data_dir as default_data_dir
 from joule.config import load_env, load_settings
 from joule.db import connect, init_db
-from joule.email import EmailConnection
-from joule.email import router as email_router
+from joule.email_connection import EmailConnection
+from joule.email_connection import router as email_router
 from joule.fill import router as fill_router
 from joule.jobs import router as jobs_router
 from joule.manual import router as manual_router

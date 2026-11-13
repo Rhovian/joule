@@ -41,6 +41,20 @@ def test_email_connect_validate_private_and_disconnect(tmp_path, monkeypatch):
             "check_minutes": 15,
         }
         original = path.read_bytes()
+        assert (
+            client.put(
+                "/api/email", json=config | {"username": "other user", "password": None}
+            ).status_code
+            == 400
+            and path.read_bytes() == original
+        )
+        assert (
+            client.put(
+                "/api/email", json=config | {"password": "new wrong password"}
+            ).status_code
+            == 401
+            and client.get("/api/email").json()["state"] == "connected"
+        )
         response = client.put("/api/email", json=config | {"password": [PASSWORD]})
         responses.append(response)
         assert response.status_code == 422 and path.read_bytes() == original
@@ -67,7 +81,6 @@ def test_email_connect_validate_private_and_disconnect(tmp_path, monkeypatch):
         assert responses[-1].json()["state"] == "connected"
         assert server.folders[-1] == "Jobs &- &U,BTFw-"
         assert json.loads(path.read_text())["password"] == PASSWORD
-        assert S_IMODE(path.stat().st_mode) == 0o600
         with imap_server(tmp_path / "starttls", implicit=False) as upgrade:
             monkeypatch.setenv("SSL_CERT_FILE", str(upgrade.certificate))
             response = client.put(

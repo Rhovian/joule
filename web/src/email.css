@@ -1,8 +1,7 @@
 #email-rail header { display: flex; align-items: center; gap: 8px; }
 #email-rail h3 { margin: 0; }
 #email-rail > button { margin-top: 12px; }
-#email-dialog { width: min(640px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); color: var(--ink); }
-#email-dialog::backdrop { background: #0006; }
+#email-dialog { --dialog-width: 640px; --dialog-gutter: 24px; max-height: calc(100dvh - 32px); padding: 0; }
 #email-dialog form { display: flex; flex-direction: column; max-height: calc(100dvh - 34px); }
 #email-dialog header, #email-dialog footer { display: flex; align-items: center; gap: 10px; padding: 14px 20px; flex-shrink: 0; }
 #email-dialog header { border-bottom: 1px solid var(--soft-line); align-items: flex-start; }

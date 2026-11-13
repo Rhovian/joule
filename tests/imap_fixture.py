@@ -1,11 +1,14 @@
-"""Local TLS IMAP fixture shared by the connection test and browser gate."""
+"""Local TLS IMAP fixture for the email connection test."""
 
 import shlex
+import shutil
 import socketserver
 import ssl
 import subprocess
 from contextlib import contextmanager
 from threading import Thread
+
+import pytest
 
 PASSWORD = "fixture-app-password-139"
 USERNAME = "local operator"
@@ -13,6 +16,8 @@ USERNAME = "local operator"
 
 @contextmanager
 def imap_server(directory, implicit=True):
+    if not shutil.which("openssl"):
+        pytest.skip("openssl is required for the local TLS fixture")
     directory.mkdir(parents=True, exist_ok=True)
     certificate, key = directory / "cert.pem", directory / "key.pem"
     subprocess.run(
