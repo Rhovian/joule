@@ -1,6 +1,7 @@
 import json
 import re
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Annotated, Literal
 
 import typst
@@ -16,8 +17,8 @@ def load(data_dir):
     return yaml.safe_load(path.read_text()) if path.is_file() else None
 
 
-def prepare(data_dir):
-    cv = load(data_dir)
+def prepare(data_dir, *, document=None):
+    cv = load(data_dir) if document is None else document
     if not isinstance(cv, dict) or not any(
         entry.get("id") for key in ("work", "projects") for entry in cv.get(key, [])
     ):
@@ -81,13 +82,42 @@ def resolve(cv, result):
     return document
 
 
+def master_document(document):
+    result = SimpleNamespace(
+        headline=document.get("basics", {}).get("label", ""),
+        summary=document.get("summary", ""),
+    )
+    for key in ("work", "projects"):
+        entries, items = [], []
+        for i, entry in enumerate(document.get(key, [])):
+            # Temporary IDs keep legacy entries without IDs in the untailored PDF.
+            entry = entry | {"id": entry.get("id") or (i,)}
+            values = entry.get("highlights", entry.get("bullets", []))
+            if not isinstance(values, list):
+                raise TypeError("highlights/bullets must be a list.")
+            bullets = [v if isinstance(v, str) else v["text"] for v in values]
+            if key == "work" and "bullets" in entry:
+                entry = entry | {"highlights": values}
+            item = SimpleNamespace(id=entry["id"], bullets=bullets)
+            if key == "projects":
+                text = entry.get(
+                    "text", entry.get("description", entry.get("summary", ""))
+                )
+                item.text = "\n".join(filter(None, [text, *bullets]))
+            entries.append(entry)
+            items.append(item)
+        document = document | {key: entries}
+        setattr(result, key, items)
+    return resolve(document, result)
+
+
 def render(document, name="cv.typ"):
     template = Path(__file__).with_name(name)
     return typst.compile(
         str(template),
         root=str(template.parent),
         ignore_system_fonts=True,
-        sys_inputs={"document": json.dumps(document)},
+        sys_inputs={"document": json.dumps(document, default=str)},
     )
 
 

@@ -42,7 +42,7 @@
   :root[data-density=comfortable] .triage-table tr { padding-top: 18px; padding-bottom: 18px; }
 }
 
-.answer-bank { grid-row: span 2; }
+.settings-column { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .answers-heading { display: flex; gap: 10px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--soft-line); flex-wrap: wrap; }
 .answers-heading h2 { font-size: 16px; margin-right: auto; }
 #answers-count { font: 12px var(--font-mono); color: var(--muted); margin-left: 8px; }
@@ -65,4 +65,25 @@
   .answer-row { flex-wrap: wrap; }
   .answer-row > div { flex-basis: calc(100% - 60px); }
   .answer-row .tag { order: 1; }
+}
+
+.master-profile > header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--soft-line); }
+.master-profile h2 { font-size: 16px; }
+.master-profile header span { margin-left: auto; font-size: 12px; color: var(--muted); }
+.master-file { display: flex; align-items: center; gap: 10px; padding: 12px 16px; }
+.master-file > div { flex: 1; }
+.master-file strong { font: 500 13px var(--font-mono); }
+#master-open[aria-disabled=true] { pointer-events: none; opacity: .45; }
+#master-stale { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--caution-fill); color: var(--caution); }
+#master-stale p { color: inherit; flex: 1; }
+#master-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; margin: 0; padding: 6px 16px 12px; }
+#master-fields > div { display: flex; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--soft-line); min-width: 0; font-size: 12.5px; }
+#master-fields dt { color: var(--muted); min-width: 80px; overflow-wrap: anywhere; }
+#master-fields dd { margin: 0; overflow-wrap: anywhere; }
+#master-status:not(:empty) { padding: 10px 16px; border-top: 1px solid var(--soft-line); }
+@media (max-width: 740px) {
+  .master-profile > header { flex-wrap: wrap; }
+  .master-profile header span { margin-left: 0; }
+  #master-fields { grid-template-columns: 1fr; }
+  #master-stale { flex-wrap: wrap; }
 }
