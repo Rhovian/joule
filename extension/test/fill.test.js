@@ -69,7 +69,7 @@ test('label precedence and visibility are checked again at apply time', () => {
   assert.equal(worker.apply(fields.map(field => ({ref: field.ref, action: 'set', value: 'abcdef'}))).filled, 1);
   assert.equal(document.getElementById('d').value, 'abc');
 });
-test('manifest confines static access and grep finds no page submit/click/state mutation', () => {
+test('manifest confines static access and grep finds no page submit/click', () => {
   const manifest = JSON.parse(fs.readFileSync(`${__dirname}/../manifest.json`));
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.content_scripts[0].all_frames, true);
@@ -79,7 +79,7 @@ test('manifest confines static access and grep finds no page submit/click/state 
   for (const pattern of manifest.content_scripts[0].matches) assert.ok(allowed(pattern.replace('*', 'form')));
   for (const filename of ['background.js', 'content.js', 'options.js', 'sidepanel.js']) {
     const source = fs.readFileSync(`${__dirname}/../${filename}`, 'utf8');
-    assert.doesNotMatch(source, /\.(?:submit|requestSubmit|click)\s*\(|(?:Event|dispatchEvent)\s*\(\s*['"]submit|method:\s*['"]PATCH/);
+    assert.doesNotMatch(source, /\.(?:submit|requestSubmit|click)\s*\(|(?:Event|dispatchEvent)\s*\(\s*['"]submit/);
   }
 });
 test('denylist covers apex, subdomain and trailing dot without denying lookalikes', () => {

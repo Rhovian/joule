@@ -18,7 +18,7 @@ async function replay(url, origin = 'http://localhost:8000', headed = false) {
     const manifest = JSON.parse(await fs.readFile(path.join(__dirname, 'manifest.json'), 'utf8'));
     // Only this disposable copy has broad host access, to inject into employer embeds.
     manifest.host_permissions = ['http://*/*', 'https://*/*'];
-    for (const file of ['background.js', 'content.js', 'options.js', 'options.html', 'sidepanel.js', 'sidepanel.html', 'sidepanel.css']) {
+    for (const file of ['background.js', 'content.js', 'fill-paste.js', 'options.js', 'options.html', 'sidepanel.js', 'sidepanel.html', 'sidepanel.css']) {
       await fs.copyFile(path.join(__dirname, file), path.join(extension, file));
     }
     await fs.writeFile(path.join(extension, 'manifest.json'), JSON.stringify(manifest));

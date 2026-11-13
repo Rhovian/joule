@@ -1,19 +1,23 @@
 """Extension matching, Ask and answer-bank saves; page descriptors are data."""
 
+import hashlib
 import json
 import logging
 import re
 from contextlib import closing
+from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import Field, create_model
 
-from joule import ai, answers, cv, drafts
+from joule import ai, answers, cv, drafts, filters, job_urls
 from joule.answers import normalize
-from joule.config import StrictModel, load_settings
+from joule.config import StrictModel, load_preferences, load_settings
 from joule.db import connect
 from joule.jobs import primary
+from joule.manual import PostingRequest
+from joule.sources import Candidate
 
 router = APIRouter(prefix="/api/fill")
 Text = Annotated[str, Field(max_length=2000)]
@@ -47,6 +51,62 @@ class MatchRequest(StrictModel):
 class AskRequest(StrictModel):
     question: str = Field(min_length=1, max_length=2000)
     options: list[Option] = Field(default_factory=list, max_length=100)
+
+
+class PageJob(PostingRequest):
+    url: str = Field(max_length=8192)
+    kind: Literal["posting", "upwork", "questions"] = "posting"
+
+
+@router.post("/jobs", status_code=201)
+async def create_job(request: Request, body: PageJob):
+    key = job_urls.url_key(body.url)
+    if key is None:
+        raise HTTPException(422, "Use an http or https page URL")
+    directory = request.app.state.data_dir
+    settings = load_settings(directory)
+    with closing(connect(directory / "joule.db")) as db, db:
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            existing = job_urls.resolve(db, body.url, strict=True)
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from error
+        if existing:
+            return existing
+        candidate = Candidate(
+            source="manual",
+            source_id=hashlib.sha256(json.dumps(key).encode()).hexdigest(),
+            link=body.url,
+            title=body.title,
+            company=body.company,
+            description=body.description,
+            extra={"kind": body.kind},
+        )
+        try:
+            reason = filters.filter_reason(candidate, load_preferences(directory))
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+        job_id = db.execute(
+            "INSERT INTO jobs(source,source_id,link,title,company,description,extra,first_seen_at,filtered_reason,location_unclear) "
+            "VALUES ('manual',?,?,?,?,?,?,?,?,1)",
+            (
+                candidate.source_id,
+                body.url,
+                body.title,
+                body.company,
+                body.description,
+                json.dumps(candidate.extra),
+                datetime.now(UTC).isoformat(),
+                reason,
+            ),
+        ).lastrowid
+    request.app.state.scanner.score_manual(settings)
+    return {
+        "id": job_id,
+        "title": body.title,
+        "company": body.company,
+        "source": "manual",
+    }
 
 
 @router.post("/answers")
@@ -311,7 +371,7 @@ async def match(request: Request, job_id: int, body: MatchRequest):
     values = identity(cv.load(directory) or {})
     bank = answer_bank(directory)
     return {
-        "job": {key: job[key] for key in ("id", "title", "company", "source")},
+        "job": {key: job[key] for key in ("id", "title", "company", "source", "state")},
         "actions": await match_actions(
             body.fields, values, bank, directory, cover_letter
         ),

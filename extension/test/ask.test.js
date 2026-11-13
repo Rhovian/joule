@@ -23,6 +23,12 @@ test('Ask routes to the selected frame, clips text, maps select values and prote
   const ask = field => background.handle({type: 'ask', jobId: 1, tabId: 4, field}, ui);
   assert.equal((await ask(fields[0])).filled, 1);
   assert.equal(document.getElementById('q').value, 'Know');
+  document.getElementById('q').value = 'edit';
+  const before = calls.length;
+  assert.equal((await background.handle({type: 'fill-field', tabId: 4, jobId: 1, field: fields[0], value: 'Shown answer'}, ui)).filled, 1);
+  assert.equal(document.getElementById('q').value, 'Show');
+  assert.equal(document.getElementById('s').value, '');
+  assert.equal(calls.length, before, 'Fill field reuses the shown answer without an AI request');
   assert.equal((await ask(fields[0])).filled, 0);
   value = 'outside';
   assert.equal((await ask(fields[1])).filled, 0);

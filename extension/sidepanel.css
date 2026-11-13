@@ -149,7 +149,7 @@ main { display:flex; flex-direction:column; gap:12px; padding:14px; min-width:0;
 .after #cv-card { display:none; }
 .after #fill-controls,.nomatch #fill-controls,.offline #fill-controls { position:fixed; inset:auto 0 0; padding:10px 14px 14px; background:var(--paper); border-top:1px solid var(--line); z-index:2; }
 .after #fill-controls { display:flex; gap:12px; align-items:center; }
-.after #fill { width:auto; min-height:32px; font-size:12.5px; margin-left:auto; }
+.after #fill { order: 1; background: var(--paper); color: var(--ink); border-color: var(--control-border); width:auto; min-height:32px; font-size:12.5px; margin-left:0; }
 .after .review { margin:0; text-align:left; font-size:11.5px; flex:1; order:-1; }
 .connection { padding:14px; display:flex; flex-direction:column; gap:8px; }
 .offline .connection { border-color:var(--error-border); }
@@ -157,3 +157,14 @@ main { display:flex; flex-direction:column; gap:12px; padding:14px; min-width:0;
 .error { padding:10px 12px; border:1px solid var(--error-border); border-radius:8px; color:var(--error); background:var(--error-fill); font-size:12px; white-space:pre-wrap; }
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
 .offline #picker, .offline #matched, .offline #cv-card { display:none; }
+
+#create-job { padding: 12px; margin-top: 12px; }
+#create-job summary { font-weight: 600; cursor: pointer; }
+#create-form { display: grid; gap: 8px; margin-top: 12px; }
+#create-form label { display: grid; gap: 4px; font-size: 12px; }
+#create-form select { font: inherit; color: var(--ink); background: var(--paper); border: 1px solid var(--control-border); border-radius: 6px; padding: 8px; }
+.after #mark-applied, .after #undo-applied { min-height: 32px; font-size: 12.5px; }
+.after #fill-controls { gap: 8px; }
+
+.after #mark-applied { order: 2; }
+.after #undo-applied { order: 3; }

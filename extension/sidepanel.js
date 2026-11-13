@@ -1,7 +1,7 @@
 const element = id => document.getElementById(id);
 const text = (tag, value, className = '') => Object.assign(document.createElement(tag), {textContent: value ?? '', className});
 let jobs = [], busy = false, active = null, refreshPending = false, choosing = false, connected = null, origin = '';
-let resumeDraft = null, displayedPage = null, lastResult = null, theme = 'system', themeVersion = 0;
+let resumeDraft = null, displayedPage = null, lastResult = null, theme = 'system', themeVersion = 0, pageDraft = null, canUndo = false;
 const systemTheme = matchMedia('(prefers-color-scheme: dark)');
 function applyTheme() {
   document.documentElement.classList.toggle('dark', theme === 'dark' || theme === 'system' && systemTheme.matches);
@@ -61,9 +61,14 @@ function showActive(job) {
   element('fill').disabled = busy || !active || choosing || connected === false;
   element('fill').textContent = busy ? 'Working…' : connected === false ? 'Fill form' : !active || choosing ? 'Pick a Job to Fill' : lastResult ? 'Fill again' : 'Fill form';
   element('attach').disabled = busy || !active;
+  element('mark-applied').hidden = !lastResult; element('undo-applied').hidden = !lastResult || !canUndo;
+  element('mark-applied').textContent = active?.state === 'applied' ? 'Applied' : 'Mark applied';
+  element('mark-applied').disabled = busy || active?.state === 'applied';
+  element('create-job').hidden = !!active || !pageDraft || connected === false;
 }
 function clearResult() {
-  lastResult = null;
+  lastResult = null; canUndo = false;
+  document.querySelector('.review').textContent = 'Joule never submits. Review every value, then submit yourself.';
   document.body.classList.remove('after');
   for (const id of ['result', 'remaining', 'optional', 'filled', 'resume-download']) element(id).hidden = true;
   for (const id of ['need-rows', 'optional-rows', 'filled-rows']) element(id).replaceChildren();
@@ -74,7 +79,7 @@ async function refreshDrafts() {
   const result = active ? await send({type: 'resume'}) : {};
   resumeDraft = result.resume_draft;
   element('resume').textContent = resumeDraft ? `v${resumeDraft.version} · ${new Date(resumeDraft.created_at).toLocaleString()}` : 'Generated during Fill if attached';
-  showActive(active);
+  showActive(result.job || active);
 }
 function picker() {
   const query = element('job-search').value.trim().toLowerCase();
@@ -97,8 +102,8 @@ function picker() {
 async function run(work) {
   if (busy) return;
   busy = true;
-  const focused = document.activeElement, disabled = new Set(document.querySelectorAll('button:disabled,input:disabled'));
-  document.querySelectorAll('button,input').forEach(node => { node.disabled = true; });
+  const focused = document.activeElement, disabled = new Set(document.querySelectorAll('button:disabled,input:disabled,select:disabled'));
+  document.querySelectorAll('button,input,select').forEach(node => { node.disabled = true; });
   showActive(active); status('Working…');
   try { await work(); }
   catch (error) {
@@ -107,14 +112,14 @@ async function run(work) {
     try { showActive(await send({type: 'active'})); } catch { showActive(null); }
   } finally {
     busy = false;
-    document.querySelectorAll('button,input').forEach(node => { node.disabled = disabled.has(node); });
+    document.querySelectorAll('button,input,select').forEach(node => { node.disabled = disabled.has(node); });
     showActive(active);
     if (document.activeElement === document.body && focused.isConnected) focused.focus({preventScroll: true});
     if (refreshPending) { refreshPending = false; void run(refresh); }
   }
 }
 async function refresh(updateTheme = false) {
-  clearResult();
+  clearResult(); pageDraft = null;
   let detection;
   try {
     const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
@@ -130,6 +135,14 @@ async function refresh(updateTheme = false) {
   online(true); if (reconnecting) connectionOptions(false);
   if (checkTheme) void refreshTheme();
   await refreshDrafts(); picker();
+  if (!active && displayedPage?.url && /^https?:/.test(displayedPage.url)) {
+    try {
+      pageDraft = await send({type: 'page', tabId: displayedPage.id});
+      const data = readPaste(pageDraft.text), form = element('create-form');
+      for (const name of ['title', 'company', 'kind', 'url']) form.elements.namedItem(name).value = name === 'url' ? pageDraft.url : name === 'title' ? pageDraft.title || data.title : data[name];
+      showActive(active);
+    } catch { /* Read access can be granted by Fill with Joule; manual selection stays available. */ }
+  }
   status(detection, detection.startsWith('Auto-detect failed:'));
 }
 function fieldRow(action, field, result, tabId) {
@@ -141,22 +154,23 @@ function fieldRow(action, field, result, tabId) {
   if (action.action !== 'ask') return row;
   const answer = text('p', '', 'field-answer'), response = text('p', '', 'field-reason'), buttons = text('div', '', 'actions');
   answer.hidden = response.hidden = true;
-  const ask = text('button', 'Ask'), copy = text('button', 'Copy'), save = text('button', 'Save to bank');
-  copy.hidden = true; save.title = 'Save the current answer from the form';
+  const fill = text('button', 'Fill field', 'primary'), ask = text('button', 'Ask'), copy = text('button', 'Copy'), save = text('button', 'Save to bank');
+  fill.hidden = copy.hidden = true; save.title = 'Save the current answer from the form';
   ask.addEventListener('click', () => run(async () => {
     const resultAnswer = await send({type: 'ask', tabId, jobId: result.job.id, field});
     answer.textContent = resultAnswer.value ?? ''; answer.hidden = resultAnswer.value === null;
-    copy.hidden = !resultAnswer.value; response.hidden = false;
+    fill.hidden = copy.hidden = !resultAnswer.value; response.hidden = false;
     response.textContent = resultAnswer.value === null ? resultAnswer.reason || 'No answer available from Profile.' : resultAnswer.filled ? 'Answer filled. Review and edit the form before saving.' : 'The form was kept unchanged. Copy the answer if needed.';
-    row.classList.toggle('answered', resultAnswer.value !== null); ask.textContent = 'Ask again';
+    row.classList.toggle('answered', resultAnswer.value !== null); ask.textContent = 'Ask again'; buttons.append(ask);
     status(response.textContent);
   }));
+  fill.addEventListener('click', () => run(async () => { await send({type: 'fill-field', tabId, jobId: result.job.id, field, pageURL: result.trace?.url || displayedPage?.url, value: answer.textContent}); response.hidden = false; response.textContent = 'Field filled. Review the form.'; status(response.textContent); }));
   copy.addEventListener('click', () => run(async () => { await navigator.clipboard.writeText(answer.textContent); status('Answer copied.'); }));
   save.addEventListener('click', () => run(async () => {
     await send({type: 'save', tabId, jobId: result.job.id, field});
     save.textContent = 'Saved'; status('Saved to bank. Next Fill replays this answer.');
   }));
-  buttons.append(ask, copy, save); row.append(answer, buttons, response);
+  buttons.append(fill, ask, copy, save); row.append(answer, buttons, response);
   return row;
 }
 element('fill').addEventListener('click', () => run(async () => {
@@ -192,7 +206,22 @@ element('fill').addEventListener('click', () => run(async () => {
     link.download = result.resumeDownload.name; link.hidden = false;
   }
   document.body.classList.add('after');
+  element('mark-applied').hidden = false;
+  document.querySelector('.review').textContent = 'Submitted it yourself? Applied moves the Job to Pipeline.';
   status(`${result.filled} filled. Review the form.`);
+}));
+element('create-form').addEventListener('submit', event => {
+  event.preventDefault(); if (busy || !pageDraft) return;
+  const values = Object.fromEntries(new FormData(element('create-form'))), draft = pageDraft, tabId = displayedPage.id;
+  void run(async () => {
+    const job = await send({type: 'create', tabId, pageURL: draft.url, data: {...values, description: draft.text}});
+    pageDraft = null; choosing = false; showActive(job); await refreshDrafts(); status('Job created or matched. Scoring runs in Joule.');
+  });
+});
+for (const type of ['mark-applied', 'undo-applied']) element(type).addEventListener('click', () => run(async () => {
+  const result = await send({type, jobId: lastResult.job.id});
+  canUndo = result.canUndo; showActive({...active, state: result.job.state});
+  status(type === 'mark-applied' ? result.canUndo ? 'Applied · in Pipeline. Undo restores the previous state.' : 'Already applied · in Pipeline.' : 'Previous state restored.');
 }));
 element('job-search').addEventListener('input', picker);
 element('change').addEventListener('click', () => { choosing = true; element('job-search').value = ''; picker(); showActive(active); element('job-search').focus(); });

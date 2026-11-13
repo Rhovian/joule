@@ -37,7 +37,7 @@ for (const filled of [1, 0]) test(`set rows have no actions; Ask filled=${filled
   const settings = element('settings'); settings.disabled = true;
   buttons()[0].click(); await settle();
   assert.equal(settings.disabled, true, 'actions preserve unrelated disabled controls');
-  assert.deepEqual(buttons().map(button => button.textContent), ['Ask again', 'Copy', 'Save to bank']);
+  assert.deepEqual(buttons().map(button => button.textContent), ['Fill field', 'Copy', 'Save to bank', 'Ask again']);
   assert.equal(askRow.querySelector('.field-answer').textContent, 'Profile answer <b>as text</b>');
   assert.equal(askRow.querySelector('b'), null);
   buttons().find(button => button.textContent === 'Copy').click(); await settle();
@@ -53,13 +53,16 @@ for (const filled of [1, 0]) test(`set rows have no actions; Ask filled=${filled
 
 test('Fill offers the PDF download and clears it on the next Fill or Job change', async () => {
   const job = {id: 1, source: 'hotfix'};
+  const changes = [];
   let download = {name: 'JB_CV_Acme.pdf', base64: 'JVBERg=='};
   const panel = new JSDOM(fs.readFileSync(`${__dirname}/../sidepanel.html`, 'utf8'), {runScripts: 'outside-only'});
   panel.window.chrome = {
-    runtime: {sendMessage: async message => ({value: {
+    runtime: {sendMessage: async message => {
+      if (['mark-applied','undo-applied'].includes(message.type)) { changes.push(message); return {value:{job:{...job,state:message.type==='mark-applied'?'applied':'new'},canUndo:message.type==='mark-applied'}}; }
+      return {value: {
       detect: job, select: {...job, id: 2}, jobs: [job, {...job, id: 2}], resume: {},
       fill: {job, fields: [], actions: [], filled: 0, resumeDownload: download},
-    }[message.type]})},
+    }[message.type]}; }},
     tabs: {query: async () => [{id: 4}], onActivated: {addListener() {}}, onUpdated: {addListener() {}}},
   };
   panel.window.matchMedia = () => ({matches: false, addEventListener() {}});
@@ -72,6 +75,12 @@ test('Fill offers the PDF download and clears it on the next Fill or Job change'
   assert.equal(link.textContent, 'Download Tailored CV');
   assert.equal(link.download, download.name);
   assert.equal(link.href, `data:application/pdf;base64,${download.base64}`);
+  assert.equal(changes.length, 0, 'Fill never marks applied automatically');
+  element('mark-applied').click(); await settle();
+  assert.equal(element('undo-applied').hidden, false);
+  element('undo-applied').click(); await settle();
+  assert.deepEqual(changes.map(message => [message.type,message.jobId]), [['mark-applied',1],['undo-applied',1]]);
+  assert.equal(element('undo-applied').hidden, true);
   download = undefined;
   element('fill').click(); await settle();
   assert.equal(link.hidden, true);

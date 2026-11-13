@@ -10,7 +10,7 @@ test('panel detects on open, tab switch and navigation; unmatched pages allow ma
   const values = {origin: 'http://localhost:8000'}, calls = [], listeners = {};
   const storage = {get: async key => ({[key]: values[key]}), set: async data => Object.assign(values, data)};
   let tab = {id: 4, active: true, url: 'https://jobs.lever.co/acme/1/apply?utm_source=feed'};
-  let listed = true, resolveFails = false, theme = 'dark', themeFails = false;
+  let createdBody, listed = true, resolveFails = false, theme = 'dark', themeFails = false;
   let releaseTheme;
   let themeGate = new Promise(resolve => { releaseTheme = resolve; });
   const ui = {id: 'extension', url: 'chrome-extension://extension/sidepanel.html'};
@@ -18,11 +18,12 @@ test('panel detects on open, tab switch and navigation; unmatched pages allow ma
     storage: {local: storage, session: storage}, tabs: {
       // Static content-script matches and joule's host grant do not expose ATS tab URLs.
       get: async () => manifest.permissions.includes('tabs') ? tab : {id: tab.id, active: tab.active},
-      query: async () => [{id: tab.id, active: tab.active}],
+      query: async () => [{...tab}],
       onActivated: {addListener: fn => { listeners.activate = fn; }},
       onUpdated: {addListener: fn => { listeners.update = fn; }},
     }};
-  const background = createBackground(chrome, async url => {
+  chrome.tabs.sendMessage = async () => ({text: 'Title: New role\nCompany: Newco', title: 'New role'});
+  const background = createBackground(chrome, async (url, options) => {
     calls.push(url);
     const path = new URL(url);
     let value = {};
@@ -34,7 +35,8 @@ test('panel detects on open, tab switch and navigation; unmatched pages allow ma
       if (resolveFails) return {ok: false, status: 403};
       assert.equal(path.searchParams.get('url'), tab.url);
       value = tab.url.includes('/acme/1/') ? job : null;
-    } else if (path.pathname === '/api/jobs') value = listed ? [job] : [];
+    } else if (path.pathname === '/api/fill/jobs') { createdBody = JSON.parse(options.body); value = {id:6,title:createdBody.title,source:'manual'}; }
+    else if (path.pathname === '/api/jobs') value = listed ? [job] : [];
     else if (path.pathname === '/api/jobs/1') value = job;
     return {ok: true, json: async () => value};
   });
@@ -49,6 +51,7 @@ test('panel detects on open, tab switch and navigation; unmatched pages allow ma
   panel.window.eval(fs.readFileSync(`${__dirname}/../options.js`, 'utf8'));
   const media = {matches: false, addEventListener(type, fn) { this.changed = fn; }};
   panel.window.matchMedia = () => media;
+  panel.window.eval(fs.readFileSync(`${__dirname}/../fill-paste.js`, 'utf8'));
   panel.window.eval(fs.readFileSync(`${__dirname}/../sidepanel.js`, 'utf8'));
   const settle = () => new Promise(resolve => setImmediate(resolve));
   const element = id => panel.window.document.getElementById(id);
@@ -120,5 +123,10 @@ test('panel detects on open, tab switch and navigation; unmatched pages allow ma
   }
   media.matches = false; media.changed();
   assert.equal(panel.window.document.documentElement.classList.contains('dark'), false, 'System follows OS changes');
+  tab.url = 'https://jobs.lever.co/new/6'; listeners.activate(); await settle();
+  element('create-form').elements.namedItem('title').value = 'Reviewed role';
+  element('create-form').dispatchEvent(new panel.window.Event('submit', {cancelable:true})); await settle();
+  assert.deepEqual(createdBody, {title:'Reviewed role',company:'Newco',kind:'posting',url:tab.url,description:'Title: New role\nCompany: Newco'}, 'Create captures reviewed values before busy disables controls');
+  assert.equal(element('active').textContent, 'Reviewed role');
   panel.window.close();
 });

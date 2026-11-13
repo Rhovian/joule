@@ -14,11 +14,11 @@ function createBackground(chrome, fetcher = fetch) {
   // Fragment changes do not navigate to another document (Chrome tabs URL events include them).
   // https://developer.chrome.com/docs/extensions/reference/api/tabs#event-onUpdated
   const pageURL = url => { const page = new URL(url); page.hash = ''; return page.href; };
-  async function api(path, body, pdf = false) {
+  async function api(path, body, pdf = false, method = 'POST') {
     const {origin} = await chrome.storage.local.get('origin');
     if (!origin) throw Error('Configure the joule URL in Options first');
     const response = await fetcher(`${origin}${path}`, body === undefined ? {} : {
-      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+      method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
     });
     if (!response.ok) { const error = Error(`joule HTTP ${response.status}`); error.status = response.status; throw error; }
     if (!pdf) return response.json();
@@ -73,7 +73,35 @@ function createBackground(chrome, fetcher = fetch) {
       await chrome.storage.session.set({active});
       return active;
     }
-    if (!['fill', 'replay', 'resume', 'ask', 'save'].includes(message.type)) throw Error('Unknown request');
+    if (message.type === 'page' || message.type === 'create') {
+      const tab = await chrome.tabs.get(integer(message.tabId));
+      if (!/^https?:/.test(tab.url) || !allowed(tab.url)) throw Error('This host is refused');
+      if (message.type === 'page') {
+        let page;
+        try { page = await chrome.tabs.sendMessage(tab.id, {type: 'page'}, {frameId: 0}); }
+        catch { await chrome.scripting.executeScript({target: {tabId: tab.id}, files: ['content.js']}); page = await chrome.tabs.sendMessage(tab.id, {type: 'page'}, {frameId: 0}); }
+        if (pageURL((await chrome.tabs.get(tab.id)).url) !== pageURL(tab.url)) throw Error('Page changed; try again');
+        return {...page, url: tab.url};
+      }
+      if (pageURL(tab.url) !== pageURL(message.pageURL)) throw Error('Page changed; read it again before creating a Job');
+      const active = await api('/api/fill/jobs', message.data);
+      if (pageURL((await chrome.tabs.get(tab.id)).url) !== pageURL(tab.url)) throw Error('Job saved, but the page changed; pick it manually');
+      await chrome.storage.session.set({active});
+      return active;
+    }
+    if (message.type === 'mark-applied' || message.type === 'undo-applied') {
+      const {active} = await chrome.storage.session.get('active');
+      const {appliedUndo} = await chrome.storage.session.get('appliedUndo');
+      if (active?.id !== message.jobId || active.source === 'upwork') throw Error('Active Job changed; run Fill again');
+      const previous = await api(`/api/jobs/${integer(active.id)}`);
+      if (message.type === 'undo-applied' && (appliedUndo?.id !== active.id || previous.state !== 'applied')) throw Error('Job state changed; Undo is unavailable');
+      const state = message.type === 'mark-applied' ? 'applied' : appliedUndo.state;
+      const job = await api(`/api/jobs/${active.id}`, {state}, false, 'PATCH');
+      const undo = message.type === 'mark-applied' && previous.state !== 'applied' ? {id: active.id, state: previous.state} : null;
+      await chrome.storage.session.set({active: {...active, state: job.state}, appliedUndo: undo});
+      return {job, canUndo: !!undo};
+    }
+    if (!['fill', 'replay', 'resume', 'ask', 'save', 'fill-field'].includes(message.type)) throw Error('Unknown request');
     if (message.type === 'save') {
       if (!validRef(message.field)) throw Error('Save refused: invalid frame/field reference; run Fill again.');
       if (!Number.isSafeInteger(message.tabId) || message.tabId <= 0) throw Error('Save refused: invalid tab id.');
@@ -103,6 +131,16 @@ function createBackground(chrome, fetcher = fetch) {
     if (message.type === 'resume') return match([]);
     const tab = await chrome.tabs.get(integer(message.tabId));
     if (!allowed(tab.url)) throw Error('This host is refused');
+    if (message.type === 'fill-field') {
+      if (message.pageURL && pageURL(message.pageURL) !== pageURL(tab.url)) throw Error('Page changed; run Fill again');
+      if (message.jobId !== active.id || !validRef(message.field) || typeof message.value !== 'string' || message.value.length > 30000) throw Error('Field changed; run Fill again');
+      const field = message.field;
+      const result = await chrome.tabs.sendMessage(tab.id, {type: 'apply', expected: {...field, ref: field.ref[1]},
+        actions: [{ref: field.ref[1], action: 'set', value: message.value, overwrite: true}]}, {frameId: field.ref[0]});
+      if (result.error) throw Error(result.error);
+      if (!result.filled) throw Error('Field could not be filled; review the form or run Fill again');
+      return result;
+    }
     if (message.type === 'ask') {
       const field = message.field;
       if (message.jobId !== active.id) throw Error('Ask refused: active Job changed since Fill; run Fill again.');
