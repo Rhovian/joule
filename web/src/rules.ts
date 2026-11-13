@@ -16,10 +16,10 @@ export function createRulesCard(column: Element, api: <T>(path: string) => Promi
   }
   async function load() {
     try {
-      const value = await api<{path: string; rules: Rule[]; total: number}>('rules');
+      const value = await api<{path: string; rules: Rule[]; total: number; error: string | null}>('rules');
       card.querySelector('#rules-count')!.textContent = `${value.total} Filtered Jobs`;
-      card.querySelector('#rules-rows')!.innerHTML = value.rules.map(row => `<div class="rule-row" data-rule="${escape(row.key)}"><div><h3>${escape(row.label)}</h3><p>${escape(row.scope)}</p><p class="rule-values">${escape(describe(row.values))}</p></div><span class="tag filtered">${row.count} Filtered</span></div>`).join('');
-      card.querySelector('#rules-hint')!.textContent = `Edit in ${value.path}. Re-read on every Scan. Values include defaults; counts reflect stored reasons across all Sources and states.`;
+      card.querySelector('#rules-rows')!.innerHTML = value.rules.map(row => `<div class="rule-row" data-rule="${escape(row.key)}"><div><h3>${escape(row.label)}</h3><p>${escape(row.scope)}</p><p class="rule-values">${escape(value.error && row.values == null ? 'unavailable' : describe(row.values))}</p></div><span class="tag filtered">${row.count} Filtered</span></div>`).join('');
+      card.querySelector('#rules-hint')!.textContent = `${value.error ? `${value.error}. ` : ''}Edit in ${value.path}. Re-read on every Scan. Values include defaults when available; counts reflect stored reasons across all Sources and states.`;
     } catch (error) { card.querySelector('#rules-rows')!.textContent = 'Could not load rules. Check preferences.yaml and Refresh to retry.'; card.querySelector('#rules-count')!.textContent = ''; notice(error); }
   }
   return {load};

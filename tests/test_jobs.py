@@ -214,8 +214,6 @@ def test_list_has_drafts(client):
 
 
 def test_filtered_rules(client):
-    from joule.config import Preferences
-
     path = client.app.state.data_dir / "profile" / "preferences.yaml"
     assert all(
         row["values"] is None for row in client.get("/api/rules").json()["rules"]
@@ -229,16 +227,10 @@ def test_filtered_rules(client):
         "locations": {"exclude": ["London"]},
         "upwork_client": {"min_spend": 2000},
     }
-    content = json.dumps(preferences)
-    path.write_text(content)
-    fields = {
-        "deal_breaker": "deal_breakers",
-        "work_type": "work_types",
-        "pay": "pay",
-        "location": "locations",
-        "upwork_client": "upwork_client",
-    }
-    reasons = [f"{key}: example" for key in (*fields, "pay", "legacy")]
+    path.write_text(json.dumps(preferences))
+    keys = ["deal_breaker", "work_type", "pay", "location", "upwork_client"]
+    # Fixture id 6 is a Duplicate: its extra pay reason must not be counted.
+    reasons = [f"{key}: example" for key in (*keys, "pay", "legacy")]
     with closing(connect(client.app.state.data_dir / "joule.db")) as db, db:
         db.executemany(
             "UPDATE jobs SET filtered_reason=? WHERE id=?",
@@ -250,14 +242,21 @@ def test_filtered_rules(client):
     rows = {row["key"]: row for row in body["rules"]}
     assert body["total"] == 6 and {
         key: row["count"] for key, row in rows.items()
-    } == dict.fromkeys([*fields, "other"], 1)
-    expected = Preferences.model_validate(preferences).model_dump(mode="json")
-    for key, field in fields.items():
-        assert rows[key]["values"] == expected[field]
-        assert rows[key]["scope"] == (
-            "Upwork only" if key in {"work_type", "upwork_client"} else "all Sources"
-        )
-    assert body["path"] == str(path) and path.read_text() == content
+    } == dict.fromkeys([*keys, "other"], 1)
+    assert rows["deal_breaker"]["values"]["keywords"] == ["Manager"]
+    assert rows["pay"]["values"]["salary_floor"] == 120000
+    assert rows["pay"]["scope"] == "all Sources"
+    assert rows["upwork_client"]["scope"] == "Upwork only"
+    assert body["path"] == str(path)
+    for invalid in ("roles: [", "{}"):
+        path.write_text(invalid)
+        response = client.get("/api/rules")
+        assert response.status_code == 200
+        broken = response.json()
+        assert broken["error"] and broken["total"] == body["total"]
+        assert [row["count"] for row in broken["rules"]] == [
+            row["count"] for row in body["rules"]
+        ]
     path.write_text('{"roles": [], "work_types": ["freelance"]}')
     assert client.get("/api/rules").json()["rules"][1]["values"] == ["freelance"]
 

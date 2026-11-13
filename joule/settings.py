@@ -6,7 +6,7 @@ from contextlib import closing
 from typing import Literal
 
 import yaml
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 
 from joule.config import StrictModel, load_preferences
 from joule.db import connect
@@ -70,12 +70,14 @@ def connections(request: Request):
 def filtered_rules(request: Request):
     directory = request.app.state.data_dir
     path = directory / "profile" / "preferences.yaml"
+    error = None
     try:
         values = load_preferences(directory).model_dump(mode="json")
     except FileNotFoundError:
         values = {}
-    except (OSError, ValueError, yaml.YAMLError) as error:
-        raise HTTPException(422, "Cannot read profile/preferences.yaml") from error
+    except (OSError, ValueError, yaml.YAMLError):
+        values = {}
+        error = "Cannot read profile/preferences.yaml; rule values are unavailable"
     rules = [
         {
             "key": key,
@@ -111,6 +113,7 @@ def filtered_rules(request: Request):
         rules.append(other)
     return {
         "path": str(path.resolve()),
+        "error": error,
         "rules": rules,
         "total": sum(row["count"] for row in rules),
     }
