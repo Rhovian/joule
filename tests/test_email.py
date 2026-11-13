@@ -127,7 +127,7 @@ def test_email_connect_validate_private_and_disconnect(tmp_path, monkeypatch):
 def test_email_suggestions_require_confirmation_and_remember_exclusions(
     tmp_path, monkeypatch
 ):
-    def message(subject, sender="Acme Talent <talent@acme.com>", old=False):
+    def message(subject, sender="Acme Talent <talent@acme.com>", old=False, body=None):
         mail = EmailMessage()
         mail["From"], mail["Subject"], mail["Message-ID"] = (
             sender,
@@ -136,9 +136,11 @@ def test_email_suggestions_require_confirmation_and_remember_exclusions(
         )
         mail["Date"] = datetime(2000, 1, 1, tzinfo=UTC) if old else datetime.now(UTC)
         mail.set_content(
-            "Intro call on Friday. "
+            body
+            or "Intro call on Friday. "
             + "x" * 200
-            + "\n> quoted old message\nPRIVATE BODY TAIL"
+            + "\n> quoted old message\nPRIVATE BODY TAIL",
+            subtype="html" if body else "plain",
         )
         return mail.as_bytes()
 
@@ -146,6 +148,13 @@ def test_email_suggestions_require_confirmation_and_remember_exclusions(
 
     async def classify(model, prompt, schema):
         calls.append(prompt)
+        if "Retry" in prompt and sum("Retry" in p for p in calls) == 1:
+            raise ai.AIError("Provider unavailable")
+        if "Invalid" in prompt:
+            try:
+                schema(action="invalid")
+            except ValueError as error:
+                raise ai.AIError("Invalid output") from error
         action = (
             "reject"
             if "Update" in prompt
@@ -178,6 +187,7 @@ def test_email_suggestions_require_confirmation_and_remember_exclusions(
                     (name + str(db.total_changes), name, datetime.now(UTC).isoformat()),
                 ).lastrowid
                 enter_pipeline(db, job_id)
+            db.execute("UPDATE jobs SET link='https://remoteok.com/role' WHERE id=4")
         assert (
             client.put(
                 "/api/email",
@@ -192,12 +202,18 @@ def test_email_suggestions_require_confirmation_and_remember_exclusions(
             == 200
         )
         server.messages = {
-            1: message("Next steps"),
+            1: message("Next steps", "Acme <noreply@acme.com>"),
             2: message("Update Pinterest", "Recruiting <jobs@greenhouse.io>"),
-            3: message("Technical", "Phantom <jobs@phantom.com>"),
+            3: message(
+                "Technical",
+                "Phantom <no-reply@careers.phantom.com>",
+                body="<style>" + "x" * 4500 + "</style><p>Real reply.</p>",
+            ),
             4: message("Unmatched", "Other <other@elsewhere.com>"),
             5: message("Ambiguous", "Other <jobs@ambiguous.com>"),
             6: message("Too old", old=True),
+            7: message("Newsletter", "jobs@remoteok.com"),
+            8: message("Account", "accounts@accounts.acme.com"),
         }
         check()
         requests = len(server.uid_requests)
@@ -219,6 +235,7 @@ def test_email_suggestions_require_confirmation_and_remember_exclusions(
         } == {1: 1, 2: 1, 3: 1, 4: 0, 5: 0}
         by_subject = {row["subject"]: row for row in suggestions}
         assert len(by_subject["Next steps"]["quote"]) == 140
+        assert by_subject["Technical"]["quote"] == "Real reply."
         for subject, action in [
             ("Next steps", "exclude"),
             ("Update Pinterest", "confirm"),
@@ -238,15 +255,23 @@ def test_email_suggestions_require_confirmation_and_remember_exclusions(
         assert "Phantom" in dated["history"][-1]["note"]
         # Reset UIDVALIDITY and redeliver the excluded Message-ID: durable exclusion wins.
         server.validity = "2"
-        server.messages[7] = server.messages[1]
+        server.messages[9] = server.messages[1]
         check()
         assert (
             len(calls) == 3
             and not client.get("/api/email/suggestions").json()["suggestions"]
         )
-        server.messages[8] = message("Another next step")
+        server.messages[10] = message("Invalid", "noreply@phantom.com")
+        server.messages[11] = message("Retry", "noreply@phantom.com")
+        server.messages[12] = message("Another next step")
         check()
         pending = client.get("/api/email/suggestions").json()["suggestions"][0]
+        with closing(connect(db_path)) as db:
+            assert [
+                tuple(row)[1:] for row in db.execute("SELECT * FROM email_dedup")
+            ] == [("<Invalid@fixture>", 2, "failed")]
+        check()
+        assert len(calls) == 7
         client.patch("/api/pipeline/1", json={"stage": "offer"})
         assert (
             client.post(f"/api/email/suggestions/{pending['id']}/confirm").status_code
@@ -256,7 +281,7 @@ def test_email_suggestions_require_confirmation_and_remember_exclusions(
             client.post(f"/api/email/suggestions/{pending['id']}/ignore").status_code
             == 200
         )
-        assert not client.get("/api/email/suggestions").json()["suggestions"]
+        assert len(client.get("/api/email/suggestions").json()["suggestions"]) == 1
         with closing(connect(db_path)) as db:
             stored = " ".join(
                 str(tuple(row)) for row in db.execute("SELECT * FROM email_suggestions")
@@ -271,7 +296,7 @@ def test_email_suggestions_require_confirmation_and_remember_exclusions(
             for args in server.uid_requests
             if args[0] == "FETCH"
         )
-        assert server.uid_requests[-2] == ["SEARCH", "UID", "8:*"]
+        assert ["SEARCH", "UID", "11:*"] in server.uid_requests
         server.drop_on_login = True
         check()
         transport_state = client.get("/api/email").json()["state"]
@@ -281,10 +306,9 @@ def test_email_suggestions_require_confirmation_and_remember_exclusions(
             "connected",
             "expired",
         )
-        with closing(connect(db_path)) as db, db:
-            db.execute(
-                "INSERT INTO email_dedup VALUES ('account','message',1,'ignored')"
-            )
+        requests = len(server.commands)
+        check()
+        assert len(server.commands) == requests
         client.delete("/api/email")
         with closing(connect(db_path)) as db:
             assert all(

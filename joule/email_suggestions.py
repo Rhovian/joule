@@ -15,7 +15,7 @@ from typing import Literal, get_args
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import AwareDatetime, Field, model_validator
+from pydantic import AwareDatetime, Field, ValidationError, model_validator
 
 from joule import ai
 from joule.config import Source, StrictModel, load_settings
@@ -53,14 +53,7 @@ def match(jobs, address, subject, quote):
     if (
         any(within(domain, host) for host in source_hosts)
         or not ats
-        and (
-            domain.startswith(("accounts.", "notifications.", "security.", "billing."))
-            or re.fullmatch(
-                r"(?:no.?reply|do.?not.?reply|newsletter|digest|alerts)",
-                address.partition("@")[0],
-                re.IGNORECASE,
-            )
-        )
+        and domain.startswith(("accounts.", "notifications.", "security.", "billing."))
     ):
         return None
     text = " ".join((subject + " " + quote).casefold().split())
@@ -193,16 +186,17 @@ class EmailSuggestions:
     def fetch(self, config, cursor):
         with self.connection.session(config, saved_password=True) as client:
             validity = (client.response("UIDVALIDITY")[1] or [b""])[0].decode()
-            last_uid = cursor["uid"] if cursor and cursor["validity"] == validity else 0
+            resuming = cursor is not None and cursor["validity"] == validity
+            last_uid = cursor["uid"] if resuming else 0
             since = (datetime.now(UTC) - timedelta(days=14)).strftime("%d-%b-%Y")
             # IMAP UIDs are mailbox/UIDVALIDITY scoped, not sequence numbers. Partial PEEK
             # bounds in-memory message data and never sets Seen: RFC 3501 §§6.4.5, 6.4.8.
-            criteria = f"UID {last_uid + 1}:*" if last_uid else f"SINCE {since}"
+            criteria = f"UID {last_uid + 1}:*" if resuming else f"SINCE {since}"
             result, data = client.uid("SEARCH", None, criteria)
             if result != "OK":
                 raise RuntimeError("Email search failed")
             messages = []
-            for uid in map(int, data[0].split()):
+            for uid in sorted(map(int, data[0].split())):
                 if uid <= last_uid:
                     continue
                 result, parts = client.uid("FETCH", str(uid), "(BODY.PEEK[]<0.16384>)")
@@ -220,12 +214,11 @@ class EmailSuggestions:
         async with self.lock:
             try:
                 await self._check(scan=scan)
-            except Exception:
+            except Exception:  # noqa: BLE001 - keep the loop alive without logging private exception text.
                 self.error = True
                 # Remote errors can contain mail or credentials; omit exception text.
-                logger.exception(
-                    "Email check failed; keeping current suggestions and cursor",
-                    exc_info=False,
+                logger.error(
+                    "Email check failed; keeping current suggestions and cursor"
                 )
 
     async def _check(self, *, scan):
@@ -321,8 +314,14 @@ class EmailSuggestions:
                     proposal.stage
                 ) <= STAGES.index(job["stage"]):
                     payload = {}
-            except (ai.AIError, ValueError):
+            except (ai.AIError, ValidationError) as error:
                 self.error = True
+                # structured() chains schema ValidationError; provider failures are retryable.
+                if isinstance(error, ai.AIError) and not isinstance(
+                    error.__cause__, ValidationError
+                ):
+                    uid = min(uid, message_uid - 1)
+                    continue
                 outcome = "failed"
                 payload = {}
             if config != self.connection.load():
@@ -354,6 +353,8 @@ class EmailSuggestions:
                         "pending",
                     ),
                 )
+        if config != self.connection.load():
+            return
         with closing(connect(self.path)) as db, db:
             db.execute(
                 "INSERT INTO email_checks VALUES (?,?,?,?,?) ON CONFLICT(account,folder) DO UPDATE SET validity=excluded.validity,uid=excluded.uid,checked_at=excluded.checked_at",
