@@ -1,9 +1,15 @@
 import json
+from contextlib import closing
+from datetime import UTC, datetime
+from email.message import EmailMessage
+from functools import partial
 from stat import S_IMODE
 
 from fastapi.testclient import TestClient
 
+from joule import ai
 from joule.app import create_app
+from joule.db import connect, enter_pipeline
 from tests.imap_fixture import PASSWORD, USERNAME, imap_server
 
 
@@ -121,22 +127,14 @@ def test_email_connect_validate_private_and_disconnect(tmp_path, monkeypatch):
 def test_email_suggestions_require_confirmation_and_remember_exclusions(
     tmp_path, monkeypatch
 ):
-    from contextlib import closing
-    from datetime import UTC, datetime, timedelta
-    from email.message import EmailMessage
-    from functools import partial
-
-    from joule import ai
-    from joule.db import connect, enter_pipeline
-
-    def message(subject, sender="Acme Talent <talent@acme.com>", days=0):
+    def message(subject, sender="Acme Talent <talent@acme.com>", old=False):
         mail = EmailMessage()
         mail["From"], mail["Subject"], mail["Message-ID"] = (
             sender,
             subject,
             f"<{subject.replace(' ', '-')}@fixture>",
         )
-        mail["Date"] = datetime.now(UTC) - timedelta(days=days)
+        mail["Date"] = datetime(2000, 1, 1, tzinfo=UTC) if old else datetime.now(UTC)
         mail.set_content(
             "Intro call on Friday. "
             + "x" * 200
@@ -171,7 +169,7 @@ def test_email_suggestions_require_confirmation_and_remember_exclusions(
     ):
         monkeypatch.setenv("SSL_CERT_FILE", str(server.certificate))
         service = client.app.state.email_suggestions
-        check = lambda: client.portal.call(partial(service.check, force=True))
+        check = lambda: client.portal.call(partial(service.check, scan=True))
         db_path = tmp_path / "joule" / "joule.db"
         with closing(connect(db_path)) as db, db:
             for name in ["Acme", "Phantom", "Pinterest", "Ambiguous", "Ambiguous"]:
@@ -199,9 +197,17 @@ def test_email_suggestions_require_confirmation_and_remember_exclusions(
             3: message("Technical", "Phantom <jobs@phantom.com>"),
             4: message("Unmatched", "Other <other@elsewhere.com>"),
             5: message("Ambiguous", "Other <jobs@ambiguous.com>"),
-            6: message("Too old", days=15),
+            6: message("Too old", old=True),
         }
         check()
+        requests = len(server.uid_requests)
+        client.portal.call(service.check)
+        assert len(server.uid_requests) == requests
+        client.put(
+            "/api/email",
+            json=client.get("/api/email").json()["config"]
+            | {"password": None, "check_minutes": None},
+        )
         suggestions = client.get("/api/email/suggestions").json()["suggestions"]
         assert len(suggestions) == len(calls) == 3
         assert all(
@@ -233,10 +239,6 @@ def test_email_suggestions_require_confirmation_and_remember_exclusions(
         # Reset UIDVALIDITY and redeliver the excluded Message-ID: durable exclusion wins.
         server.validity = "2"
         server.messages[7] = server.messages[1]
-        client.app.state.email_suggestions = type(service)(
-            service.directory, service.connection
-        )
-        service = client.app.state.email_suggestions
         check()
         assert (
             len(calls) == 3
@@ -245,6 +247,11 @@ def test_email_suggestions_require_confirmation_and_remember_exclusions(
         server.messages[8] = message("Another next step")
         check()
         pending = client.get("/api/email/suggestions").json()["suggestions"][0]
+        client.patch("/api/pipeline/1", json={"stage": "offer"})
+        assert (
+            client.post(f"/api/email/suggestions/{pending['id']}/confirm").status_code
+            == 409
+        )
         assert (
             client.post(f"/api/email/suggestions/{pending['id']}/ignore").status_code
             == 200
@@ -265,4 +272,22 @@ def test_email_suggestions_require_confirmation_and_remember_exclusions(
             if args[0] == "FETCH"
         )
         assert server.uid_requests[-2] == ["SEARCH", "UID", "8:*"]
-        assert client.get("/api/pipeline/1").json()["stage"] == "applied"
+        server.drop_on_login = True
+        check()
+        transport_state = client.get("/api/email").json()["state"]
+        server.drop_on_login, server.allow_login = False, False
+        check()
+        assert (transport_state, client.get("/api/email").json()["state"]) == (
+            "connected",
+            "expired",
+        )
+        with closing(connect(db_path)) as db, db:
+            db.execute(
+                "INSERT INTO email_dedup VALUES ('account','message',1,'ignored')"
+            )
+        client.delete("/api/email")
+        with closing(connect(db_path)) as db:
+            assert all(
+                db.execute(f"SELECT count(*) FROM {table}").fetchone()[0] == 0
+                for table in ("email_suggestions", "email_dedup", "email_checks")
+            )

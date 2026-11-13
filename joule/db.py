@@ -69,6 +69,12 @@ EMAIL_SCHEMA = (
         proposal TEXT NOT NULL, state TEXT NOT NULL CHECK (state IN ('pending','confirmed','ignored','excluded')),
         UNIQUE(account,message_id,job_id)
     )""",
+    """CREATE TABLE IF NOT EXISTS email_dedup (
+        account TEXT NOT NULL, message_id TEXT NOT NULL, job_id INTEGER NOT NULL REFERENCES jobs(id),
+        outcome TEXT NOT NULL, PRIMARY KEY(account,message_id,job_id)
+    )""",
+    "INSERT OR IGNORE INTO email_dedup SELECT account,message_id,job_id,'ignored' FROM email_suggestions WHERE proposal='{}'",
+    "DELETE FROM email_suggestions WHERE proposal='{}'",
     "CREATE INDEX IF NOT EXISTS email_suggestions_job ON email_suggestions(job_id)",
     """CREATE TABLE IF NOT EXISTS email_checks (
         account TEXT NOT NULL, folder TEXT NOT NULL, validity TEXT NOT NULL,

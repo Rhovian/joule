@@ -273,13 +273,13 @@ class Scanner:
                             scan_id,
                         ),
                     )
-                if self.email:
-                    await self.email.check(scan=True)
                 await scan_alerts.scheduled_upwork(
                     self.data_dir, self.telegram, ctx.trigger, status, progress
                 )
             finally:
                 self.busy = False
+                if self.email and status != "interrupted":
+                    self.email.wake.set()
 
     async def _scan_source(self, db, source, settings, ctx, counts):
         days = settings.source_max_age_days.get(source, settings.max_age_days)

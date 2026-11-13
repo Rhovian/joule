@@ -1,11 +1,10 @@
 import './pipeline.css';
 import { createMetrics, periodSelect, type Statistics } from './pipeline-stats';
-import { age, dateTime, escape } from './format';
+import { age, dateTime, escape, label } from './format';
 import { score } from './job';
 import type { Undo } from './undo';
 const stages = ['applied', 'screen', 'interview', 'offer', 'accepted'];
 const columns = ['applied', 'screen', 'interview', 'offer', 'closed'], reasons = ['no_reply', 'rejected', 'withdrawn'];
-const label = (value: string) => value.replaceAll('_', ' ').replace(/^./, c => c.toUpperCase());
 type Move = { id: number; job_id: number; stage: string; closed_reason: string | null; next_at: string | null; next_label: string | null; created_at: string; how: string; note: string | null };
 type Entry = Move & { first_move_id: number; applied_at: string; history: Move[] };
 type Card = Omit<Entry, 'history'> & { title: string; company: string | null; source: string; score: number | null; email_count: number };

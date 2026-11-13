@@ -83,5 +83,5 @@ The owner's validated IMAP account and read-only folder configuration for Pipeli
 _Avoid_: Mail sync (not implemented by connecting)
 
 **Email suggestion**:
-A matched email's proposed Pipeline Move or Next date, awaiting the owner's confirmation. Ignore dismisses it; Not this Job excludes that Message-ID/Job pair permanently. Fetching/classifying never makes a Move.
+A matched email's proposed Pipeline Move or Next date, awaiting the owner's confirmation. Ignore dismisses it; Not this Job excludes that Message-ID/Job pair until the inbox is disconnected. Fetching/classifying never makes a Move.
 _Avoid_: Automatic move, email action (nothing is sent)

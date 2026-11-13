@@ -6,10 +6,6 @@ import socketserver
 import ssl
 import subprocess
 from contextlib import contextmanager
-from datetime import UTC, datetime
-from email import policy
-from email.parser import BytesParser
-from email.utils import parsedate_to_datetime
 from threading import Thread
 
 import pytest
@@ -93,22 +89,11 @@ def imap_server(directory, implicit=True):
                                 uid for uid in ids if uid >= int(args[2].split(":")[0])
                             ]
                         else:
-                            cutoff = (
-                                datetime.strptime(args[2], "%d-%b-%Y")
-                                .replace(tzinfo=UTC)
-                                .date()
-                            )
+                            # Old fixture messages use one fixed Date; retain UID filtering above.
                             ids = [
                                 uid
                                 for uid in ids
-                                if parsedate_to_datetime(
-                                    str(
-                                        BytesParser(policy=policy.default).parsebytes(
-                                            server.messages[uid]
-                                        )["Date"]
-                                    )
-                                ).date()
-                                >= cutoff
+                                if b"Date: Sat, 01 Jan 2000" not in server.messages[uid]
                             ]
                         self.wfile.write(
                             ("* SEARCH " + " ".join(map(str, ids)) + "\r\n").encode()

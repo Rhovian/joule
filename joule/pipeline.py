@@ -100,7 +100,7 @@ def cohort(db, days):
     return [
         dict(row)
         for row in db.execute(
-            "SELECT m.*, j.title, j.company, j.source, j.link, j.score, (SELECT count(*) FROM email_suggestions e WHERE e.job_id=j.id AND e.state!='excluded') AS email_count, p.first_move_id, a.created_at AS applied_at"
+            "SELECT m.*, j.title, j.company, j.source, j.link, j.score, (SELECT count(*) FROM email_suggestions e WHERE e.job_id=j.id AND e.first_move_id=p.first_move_id AND e.state!='excluded') AS email_count, p.first_move_id, a.created_at AS applied_at"
             + CURRENT
             + " AND (? IS NULL OR julianday(a.created_at)>=julianday(?)) ORDER BY p.first_move_id",
             (cutoff, cutoff),

@@ -5,7 +5,7 @@ import imaplib
 import json
 import re
 import ssl
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -13,6 +13,7 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from pydantic import Field, SecretStr
 
 from joule.config import StrictModel
+from joule.db import connect
 from joule.files import atomic_write
 
 router = APIRouter(prefix="/api/email")
@@ -168,7 +169,7 @@ def status(request: Request):
 
 
 @router.put("")
-def connect(request: Request, body: Annotated[Any, Body()]):
+def save_connection(request: Request, body: Annotated[Any, Body()]):
     # FastAPI's default validation errors include raw input, which may be a password.
     try:
         config = EmailConfig.model_validate(body)
@@ -180,8 +181,11 @@ def connect(request: Request, body: Annotated[Any, Body()]):
 
 
 @router.delete("")
-def disconnect(request: Request):
+async def disconnect(request: Request):
     connection = request.app.state.email
     connection.path.unlink(missing_ok=True)
+    with closing(connect(request.app.state.data_dir / "joule.db")) as db, db:
+        for table in ("email_suggestions", "email_dedup", "email_checks"):
+            db.execute(f"DELETE FROM {table}")
     connection.auth_failed = False
     return connection.status()
