@@ -29,6 +29,40 @@ def stale_jobs(directory):
         ).fetchall()
 
 
+def describe(key, value, *, basics=False):
+    # Unknown keys may themselves contain private text; do not echo them as labels.
+    public = {"name", "firstName", "lastName", "label"} if basics else set()
+    sections = (
+        {"work", "projects", "skills", "education", "awards", "certificates"}
+        if not basics
+        else set()
+    )
+    known = (
+        public
+        | sections
+        | {
+            "email",
+            "phone",
+            "location",
+            "address",
+            "url",
+            "profiles",
+            "summary",
+            "salary",
+        }
+    )
+    shown = (
+        "not set"
+        if value is None or value == "" or value == [] or value == {}
+        else "set · hidden"
+    )
+    if key in public and isinstance(value, str):
+        shown = value
+    elif key in sections and isinstance(value, list):
+        shown = f"{len(value)} {'entry' if len(value) == 1 else 'entries'}"
+    return {"label": key if key in known else "Other private field", "value": shown}
+
+
 @router.get("")
 def profile(request: Request):
     directory = request.app.state.data_dir
@@ -37,57 +71,21 @@ def profile(request: Request):
     try:
         document = cv.load(directory)
         if path.is_file():
-            cv.master_document(document)
-            basics = document.get("basics", {})
-            # Public allowlist: contact, location, links, pay, notes and unknown fields stay private.
-            for key, value in basics.items():
-                present = (
-                    value is not None and value != "" and value != [] and value != {}
-                )
-                public = key in {
-                    "name",
-                    "firstName",
-                    "lastName",
-                    "label",
-                } and isinstance(value, str)
-                fields.append(
-                    {
-                        "label": str(key),
-                        "value": value
-                        if public
-                        else "set · hidden"
-                        if present
-                        else "not set",
-                    }
-                )
-            for key, value in document.items():
-                if key == "basics":
-                    continue
-                fields.append(
-                    {
-                        "label": str(key),
-                        "value": f"{len(value)} {'entry' if len(value) == 1 else 'entries'}"
-                        if key
-                        in {
-                            "work",
-                            "projects",
-                            "skills",
-                            "education",
-                            "awards",
-                            "certificates",
-                        }
-                        and isinstance(value, list)
-                        else "set · hidden"
-                        if value is not None and value != ""
-                        else "not set",
-                    }
-                )
+            fields = [
+                describe(key, value, basics=True)
+                for key, value in document.get("basics", {}).items()
+            ]
+            fields += [
+                describe(key, value)
+                for key, value in document.items()
+                if key != "basics"
+            ]
         for name in ("preferences.yaml", "portfolio.yaml", "answers.yaml"):
             if (directory / "profile" / name).is_file():
                 fields.append(
                     {"label": name.removesuffix(".yaml"), "value": "set · hidden"}
                 )
-    except (OSError, ValueError, TypeError, yaml.YAMLError):
+    except (OSError, ValueError, TypeError, AttributeError, yaml.YAMLError):
         error = "Cannot read the Master CV. Replace it with a valid cv.yaml."
     return {
         "exists": path.is_file(),

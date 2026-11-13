@@ -1,6 +1,7 @@
 import json
 import re
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Annotated, Literal
 
 import typst
@@ -82,49 +83,32 @@ def resolve(cv, result):
 
 
 def master_document(document):
-    if not isinstance(document, dict):
-        raise TypeError("Master CV must be a YAML mapping.")
-    basics = document.get("basics", {})
-    if not isinstance(basics, dict):
-        raise TypeError("basics must be a mapping.")
-    arrays = ("work", "projects", "skills", "education", "awards", "certificates")
-    for key in arrays:
-        if not isinstance(document.get(key, []), list) or any(
-            not isinstance(e, dict) for e in document.get(key, [])
-        ):
-            raise ValueError(f"{key} must be a list of mappings.")
-
-    def highlights(entry):
-        values = entry.get("highlights", entry.get("bullets", []))
-        if not isinstance(values, list) or any(
-            not isinstance(v, str)
-            and not (isinstance(v, dict) and isinstance(v.get("text"), str))
-            for v in values
-        ):
-            raise ValueError(
-                "highlights must contain text strings or mappings with text."
-            )
-        return [v if isinstance(v, str) else v["text"] for v in values]
-
-    result = {key: document.get(key, []) for key in arrays}
-    result |= {"basics": basics, "summary": document.get("summary", "")}
-    result["work"] = [e | {"bullets": highlights(e)} for e in result["work"]]
-    result["projects"] = [
-        e
-        | {
-            "text": "\n".join(
-                filter(
-                    None,
-                    [
-                        e.get("text", e.get("description", e.get("summary", ""))),
-                        *highlights(e),
-                    ],
+    result = SimpleNamespace(
+        headline=document.get("basics", {}).get("label", ""),
+        summary=document.get("summary", ""),
+    )
+    for key in ("work", "projects"):
+        entries, items = [], []
+        for i, entry in enumerate(document.get(key, [])):
+            # Temporary IDs keep legacy entries without IDs in the untailored PDF.
+            entry = entry | {"id": entry.get("id") or (i,)}
+            values = entry.get("highlights", entry.get("bullets", []))
+            if not isinstance(values, list):
+                raise TypeError("highlights/bullets must be a list.")
+            bullets = [v if isinstance(v, str) else v["text"] for v in values]
+            if key == "work" and "bullets" in entry:
+                entry = entry | {"highlights": values}
+            item = SimpleNamespace(id=entry["id"], bullets=bullets)
+            if key == "projects":
+                text = entry.get(
+                    "text", entry.get("description", entry.get("summary", ""))
                 )
-            )
-        }
-        for e in result["projects"]
-    ]
-    return result
+                item.text = "\n".join(filter(None, [text, *bullets]))
+            entries.append(entry)
+            items.append(item)
+        document = document | {key: entries}
+        setattr(result, key, items)
+    return resolve(document, result)
 
 
 def render(document, name="cv.typ"):

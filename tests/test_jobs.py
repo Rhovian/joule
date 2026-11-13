@@ -535,7 +535,7 @@ def test_tailored_cv_and_pdf(client, monkeypatch):
     path = profile / "cv.yaml"
     original = "basics: {name: Previous owner}\nwork: [{id: old}]\n"
     path.write_text(original)
-    replacement = """basics: {name: Owner, email: private@example.com, phone: private-phone, location: {address: private-address}}
+    replacement = """basics: {name: Owner, email: private@example.com, phone: private-phone, location: {address: private-address}, private-key: private-value}
 summary: New Master summary
 salary: private-salary
 work:
@@ -553,7 +553,12 @@ education: [{institution: University, area: Engineering}]
         client.put("/api/profile/cv", json={"content": replacement}).status_code == 200
     )
     assert (profile / "cv.yaml.bak").read_text() == replacement
-    for invalid in ("basics: [", "basics: Owner\nwork: [wrong]", "basics: {}"):
+    for invalid in (
+        "basics: [",
+        "basics: Owner\nwork: [wrong]",
+        "basics: {}",
+        "work: [{id: w, highlights: some text}]",
+    ):
         assert (
             client.put("/api/profile/cv", json={"content": invalid}).status_code == 422
         )
@@ -570,6 +575,7 @@ education: [{institution: University, area: Engineering}]
             "private-phone",
             "private-address",
             "private-salary",
+            "private-key",
         )
     )
     from joule import cv
@@ -583,7 +589,7 @@ education: [{institution: University, area: Engineering}]
     monkeypatch.setattr(cv, "render", capture)
     master = client.get("/api/profile/cv.pdf")
     assert master.status_code == 200 and master.content.startswith(b"%PDF")
-    assert len(rendered[-1]["work"]) == 2 and rendered[-1]["work"][1]["bullets"] == [
+    assert len(rendered[-1]["work"]) == 2 and rendered[-1]["work"][0]["bullets"] == [
         "x"
     ]
     payload = '#read("/etc/passwd") ] *x* $'
