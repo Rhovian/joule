@@ -67,8 +67,17 @@ def test_blanks_preserves_unicode_ranges_and_order():
     assert blanks(content) == names
 
 
-@pytest.mark.parametrize("field", ["cover", "answers"])
-def test_unicode_placeholder_card_send_guard_and_fill(bot, monkeypatch, field):
+@pytest.mark.parametrize(
+    "field,before",
+    [
+        ("cover", None),
+        ("answers", None),
+        ("answers", "- question: ["),
+    ],
+)
+def test_unicode_placeholder_card_send_guard_and_fill(
+    bot, monkeypatch, field, before, caplog
+):
     telegram, db, sent = bot
     seed(db, extra=json.dumps({"screening_questions": ["Availability?"]}))
     name = "AVAILABILITY OVER NEXT 4–8 WEEKS"
@@ -92,6 +101,9 @@ def test_unicode_placeholder_card_send_guard_and_fill(bot, monkeypatch, field):
     asyncio.run(telegram.handle(callback("fill:1")))
     assert sent[-1]["text"] == f"Reply one line per blank, in order: {name}"
     (telegram.data_dir / "profile").mkdir()
+    path = telegram.data_dir / "profile" / "answers.yaml"
+    if before is not None:
+        path.write_text(before)
     value = 'no planned leave for 4–8 weeks ("confirmed")'
     asyncio.run(
         telegram.handle(
@@ -109,12 +121,16 @@ def test_unicode_placeholder_card_send_guard_and_fill(bot, monkeypatch, field):
     }
     assert blanks(filled) == []
     assert sent[-1]["reply_markup"]["inline_keyboard"][0][0]["text"] == "Apply"
-    bank = yaml.safe_load((telegram.data_dir / "profile" / "answers.yaml").read_text())
-    assert bank == (
-        [{"question": "Availability?", "answer": filled["answers"][0]}]
-        if field == "answers"
-        else None
-    )
+    assert telegram.awaiting is None
+    if before is not None:
+        assert path.read_text() == before
+        assert "Skipping answer bank update" in caplog.text
+    elif field == "answers":
+        assert yaml.safe_load(path.read_text()) == [
+            {"question": "Availability?", "answer": filled["answers"][0]}
+        ]
+    else:
+        assert not path.exists()
 
 
 def test_queue_rule_and_order(bot):
