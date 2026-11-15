@@ -4,14 +4,17 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 
-def atomic_write(path: Path, text: str):
+def atomic_write(path: Path, text: str | bytes):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     # tempfile supplies unique writers; Path.replace atomically publishes the file.
     # https://docs.python.org/3.13/library/tempfile.html#tempfile.NamedTemporaryFile
     try:
         with NamedTemporaryFile(
-            mode="w", encoding="utf-8", dir=path.parent, delete=False
+            mode="wb" if isinstance(text, bytes) else "w",
+            encoding=None if isinstance(text, bytes) else "utf-8",
+            dir=path.parent,
+            delete=False,
         ) as file:
             temporary = Path(file.name)
             file.write(text)

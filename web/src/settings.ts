@@ -1,13 +1,18 @@
 import './settings.css';
 import { createAnswerBank } from './answers';
+import { createProfileCard } from './profile';
 import { dateTime } from './format';
 
 type Appearance = { theme: 'system' | 'light' | 'dark'; density: 'compact' | 'comfortable' };
 type Connections = { telegram: { configured: boolean; awaiting_reply: boolean }; extension: { last_fill_at: string | null } };
-export function createSettings(api: <T>(path: string, method?: string, body?: unknown) => Promise<T>, notice: (error: unknown) => void) {
+export function createSettings(api: <T>(path: string, method?: string, body?: unknown) => Promise<T>, notice: (error: unknown) => void, changed: () => Promise<void>, scoring: (id: number) => void) {
   const page = document.getElementById('a-settings')!;
   page.innerHTML = `<header class="settings-heading"><h1>Settings</h1><p>How Joule looks, and what it is connected to.</p><button id="settings-refresh">Refresh</button></header><div class="settings-grid"><section class="settings-card" aria-labelledby="connections-title"><h2 id="connections-title">Connections</h2><div class="connection-row"><span id="upwork-dot" class="connection-dot" aria-hidden="true"></span><div><h3>Upwork</h3><p id="settings-upwork-status">Not checked yet</p></div><button id="settings-upwork-action" data-action="connect">Connect</button></div><div class="connection-row"><span id="telegram-dot" class="connection-dot" aria-hidden="true"></span><div><h3>Telegram</h3><p id="settings-telegram-status">Not checked yet</p></div><button id="settings-telegram-action" data-action="telegram" hidden>Start queue</button><details id="telegram-setup" hidden><summary>Set up</summary><p>Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in Joule’s .env file, then restart Joule.</p></details></div><div class="connection-row"><span class="connection-dot" aria-hidden="true"></span><div><h3>Joule Fill extension</h3><p id="settings-extension-status">Not checked yet</p><span id="settings-joule-url"></span></div><button id="settings-copy-url">Copy URL</button></div></section><section class="settings-card" aria-labelledby="appearance-title"><h2 id="appearance-title">Appearance</h2><fieldset id="appearance-controls" disabled><legend class="sr-only">Appearance</legend>${[['theme', 'Theme', 'Dashboard and Joule Fill panel', ['system', 'light', 'dark']], ['density', 'Density', 'Row height in Triage', ['compact', 'comfortable']]].map(([name, label, description, options]) => `<div class="appearance-row"><div><h3>${label}</h3><p>${description}</p></div><div class="settings-segment" role="group" aria-label="${label}">${(options as string[]).map(value => `<button type="button" data-appearance="${name}" data-value="${value}" aria-pressed="false">${value[0].toUpperCase() + value.slice(1)}</button>`).join('')}</div></div>`).join('')}</fieldset><p id="appearance-status" role="status">Loading appearance…</p></section></div>`;
-  const bank = createAnswerBank(page.querySelector('.settings-grid')!, api, notice);
+  const grid = page.querySelector('.settings-grid')!;
+  const left = document.createElement('div'), right = document.createElement('div');
+  left.className = right.className = 'settings-column'; right.append(...Array.from(grid.children)); grid.append(left, right);
+  const bank = createAnswerBank(left, api, notice);
+  const profile = createProfileCard(left, api, notice, changed, scoring);
   const get = (id: string) => document.getElementById(id)!;
   const controls = get('appearance-controls') as HTMLFieldSetElement;
   let appearance: Appearance;
@@ -50,8 +55,8 @@ export function createSettings(api: <T>(path: string, method?: string, body?: un
     catch (error) { get('appearance-status').textContent = 'Could not save appearance.'; notice(error); }
     finally { controls.disabled = false; if (document.activeElement === document.body) button.focus({ preventScroll: true }); }
   });
-  get('settings-refresh').addEventListener('click', () => { void loadAppearance(); void connections(); void bank.load(); });
+  get('settings-refresh').addEventListener('click', () => { void loadAppearance(); void connections(); void bank.load(); void profile.load(); });
   get('settings-joule-url').textContent = location.origin;
   get('settings-copy-url').addEventListener('click', () => void navigator.clipboard.writeText(location.origin).then(() => { get('settings-copy-url').textContent = 'Copied'; }).catch(notice));
-  return { init: loadAppearance, connections, open() { void connections(); void bank.load(); } };
+  return { init: loadAppearance, connections, refreshProfile: profile.load, open() { void connections(); void bank.load(); void profile.load(); } };
 }
