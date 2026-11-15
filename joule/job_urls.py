@@ -42,7 +42,7 @@ def url_key(value):
         return None
 
 
-def resolve(db, url):
+def resolve(db, url, *, strict=False):
     key = url_key(url)
     matches = set()
     for row in db.execute(
@@ -52,6 +52,8 @@ def resolve(db, url):
         links = (row["link"], extra.get("apply_url"), extra.get("application_url"))
         if key and any(url_key(link) == key for link in links):
             matches.add(row["primary_id"] or row["id"])
+    if strict and len(matches) > 1:
+        raise ValueError("Several Jobs match this URL; pick one from the Job list")
     # URL normalization can collide; leave ambiguous matches to the operator.
     if len(matches) == 1:
         row = db.execute(

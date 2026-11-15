@@ -10,6 +10,7 @@ function widget({required = true, selected = '', async = false, choices = ['Yes'
   const window = document.defaultView, input = document.getElementById('q');
   window.HTMLElement.prototype.getClientRects = () => [{width: 100, height: 20}];
   const choose = text => {
+    document.querySelector('.css-test-singleValue')?.remove();
     const value = document.createElement('span');
     value.className = 'css-test-singleValue'; value.textContent = display(text);
     document.getElementById('values').append(value);
@@ -56,6 +57,8 @@ test('required options are discovered, replayed, saved, and existing selections 
   assert.equal((await worker.apply(set('Yes'), field)).filled, 1);
   assert.deepEqual(worker.answer(field), {question: 'Authorized?*', answer: 'Yes'});
   assert.equal((await worker.apply(set('No'))).filled, 0);
+  assert.equal((await worker.apply([{...set('No')[0], overwrite: true}], field)).filled, 1);
+  assert.equal(worker.answer(field).answer, 'No');
 });
 test('city query waits for async options and selects the exact label', async () => {
   const {worker, input} = widget({async: true, choices: ['Boise, Idaho, United States']});

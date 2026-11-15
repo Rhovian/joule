@@ -85,3 +85,6 @@ _Avoid_: Mail sync (not implemented by connecting)
 **Email suggestion**:
 A matched email's proposed Pipeline Move or Next date, awaiting the owner's confirmation. Ignore dismisses it; Not this Job excludes that Message-ID/Job pair until the inbox is disconnected. Fetching/classifying never makes a Move.
 _Avoid_: Automatic move, email action (nothing is sent)
+
+**Manual Source**:
+Jobs the owner explicitly creates from a page in the Extension. It stores the page URL and bounded text; cheap filters and scoring apply, but it does not fetch new postings.

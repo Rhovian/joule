@@ -141,7 +141,7 @@
       for (const action of actions) {
         const element = controls[action.ref];
         if (!element || !combo(element)) { filled += (await apply([action])).filled; continue; }
-        if (action.action !== 'set' || typeof action.value !== 'string' || !required(element) || !emptyCombo(element) || sensitive(element)) continue;
+        if (action.action !== 'set' || typeof action.value !== 'string' || !required(element) || (!action.overwrite && !emptyCombo(element)) || sensitive(element)) continue;
         element.focus();
         key(element, 'ArrowDown');
         // Async city widgets need a query before options exist; never accept free text as a selection.
@@ -157,7 +157,7 @@
         const matches = matching();
         let committed = false;
         // Recheck after async loading, including operator edits and newly selected values.
-        if (visible(element) && !selection(element) && !selectedText(element) && (!element.value || element.value === action.value) && matches.length === 1) {
+        if (visible(element) && (action.overwrite || !selection(element) && !selectedText(element)) && (action.overwrite || !element.value || element.value === action.value) && matches.length === 1) {
           // D12 revisit: activate only an exact matched widget option (§2 no-submit).
           activate(matches[0], leverLocation(element) ? 'mousedown' : 'click');
           // Greenhouse renders a country option (United States +1) as only +1 after selection.
@@ -207,7 +207,7 @@
         if (!element || action.action !== 'set') continue;
         if (group(element)) {
           const buttons = choices(element);
-          if (!required(element) || !visible(element) || sensitive(element) || pressed(element) || buttons.length !== 2 ||
+          if (!required(element) || !visible(element) || sensitive(element) || pressed(element) && !action.overwrite || buttons.length !== 2 ||
             !['yes', 'no'].every(value => buttons.some(button => button.dataset.option === value))) continue;
           const button = buttons.find(button => button.dataset.option === action.value && visible(button));
           if (!button) continue;
@@ -215,7 +215,7 @@
           if (await waitFor(() => button.getAttribute('aria-pressed') === 'true')) { element.style.outline = '2px solid #25854a'; filled++; }
         } else {
           const commitOnBlur = element.matches('.ashby-application-form-input-text');
-          if (commitOnBlur && (!visible(element) || element.value !== '')) continue;
+          if (commitOnBlur && (!visible(element) || element.value !== '' && !action.overwrite)) continue;
           if (commitOnBlur) element.focus();
           filled += apply([action], undefined, true).filled;
           // With Resource Timing, the wrapper waits for the debounced save before blurring.
@@ -283,7 +283,7 @@
         let element = controls[action.ref];
         if (element && sensitive(element)) continue;
         if (action.action === 'set' && element?.type === 'radio') {
-          if (radios(element).some(option => option.checked)) continue;
+          if (radios(element).some(option => option.checked) && !action.overwrite) continue;
           element = radios(element).find(option => option.value === action.value && visible(option));
           if (!element) continue;
           Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'checked').set.call(element, true);
@@ -294,7 +294,7 @@
         }
         // Recheck immediately before writing; operator typing in this tiny window is an accepted design race (§6).
         if (action.action !== 'set' || typeof action.value !== 'string' || !element || !visible(element) ||
-          element.value !== '' || combo(element) ||
+          element.value !== '' && !action.overwrite || combo(element) ||
           !['text', 'email', 'tel', 'url', 'search', 'textarea', 'select-one'].includes(element.type)) continue;
         if (element.tagName === 'SELECT' && ![...element.options].some(option => option.value === action.value && !option.disabled && !option.closest('optgroup[disabled]'))) continue;
         const prototype = element.tagName === 'SELECT' ? window.HTMLSelectElement.prototype :
@@ -433,6 +433,7 @@
     const worker = createWorker(document);
     chrome.runtime.onMessage.addListener((message, sender, respond) => {
       if (sender.id !== chrome.runtime.id || sender.tab || !allowed(location.href)) return;
+      if (message.type === 'page') { respond({text: document.body.innerText.slice(0, 50000), title: document.querySelector('h1')?.textContent.trim().slice(0, 500) || document.title.slice(0, 500)}); return; }
       if (message.type === 'describe') {
         worker.prepare().then(() => chrome.runtime.sendMessage({type: 'frame', request: message.request, fields: worker.describe()}))
           .then(() => respond({ok: true}), () => respond({ok: false}));

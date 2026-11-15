@@ -71,6 +71,9 @@ test('Lever searches on keydown, commits only the exact result on mousedown, and
   assert.equal(worker.answer(field).answer, value);
   assert.equal((await worker.apply(action(field, 'Denver, PA, USA'))).filled, 0);
   assert.equal(commits, 1); assert.equal(submits, 0);
+  assert.equal((await worker.apply([{...action(field, 'Denver, PA, USA')[0], overwrite: true}], field)).filled, 1);
+  assert.equal(JSON.parse(hidden.value).name, 'Denver, PA, USA');
+  assert.equal(commits, 2); assert.equal(submits, 0);
 });
 test('Lever leaves operator typing focused when a search response is pending', async () => {
   const {document, worker, fields} = setup(), input = document.querySelector('#location-input');

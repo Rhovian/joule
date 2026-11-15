@@ -29,11 +29,13 @@ test('required Yes/No buttons accept an exact choice, preserve either selection 
   document.querySelector('form').addEventListener('submit', () => submissions++);
   for (const button of container.querySelectorAll('button')) button.addEventListener('click', event => {
     assert.equal(event.defaultPrevented, true);
-    button.setAttribute('aria-pressed', 'true');
+    for (const choice of container.querySelectorAll('button')) choice.setAttribute('aria-pressed', String(choice === button));
   });
   assert.equal((await worker.apply([{ref: field.ref, action: 'set', value: 'no'}])).filled, 1);
   assert.equal(worker.answer(field).answer, 'No');
   assert.equal((await worker.apply([{ref: field.ref, action: 'set', value: 'yes'}])).filled, 0);
+  assert.equal((await worker.apply([{ref:field.ref,action:'set',value:'yes',overwrite:true}])).filled,1);
+  assert.equal(worker.answer(field).answer,'Yes');
   assert.equal(submissions, 0);
 });
 test('optional, sensitive and disabled Yes/No controls remain untouched', async () => {
@@ -82,6 +84,8 @@ test('basic controlled inputs commit updated state on blur without an operator c
   assert.equal((await worker.apply(actions)).filled, 2);
   assert.deepEqual(committed, {_systemfield_name: 'Ada Lovelace', _systemfield_email: 'ada@example.com'});
   assert.equal((await worker.apply(actions)).filled, 0);
+  assert.equal((await worker.apply([{...actions[0],value:'Reviewed name',overwrite:true}])).filled,1);
+  assert.deepEqual(committed, {_systemfield_name:'Reviewed name',_systemfield_email:'ada@example.com'});
 });
 test('Wrapbook survey radios expose the question and omit sensitive choices', async () => {
   const {document, worker} = setup();
