@@ -1,4 +1,5 @@
 import './pipeline.css';
+import { createMetrics, periodSelect, type Statistics } from './pipeline-stats';
 import { age, dateTime, escape } from './format';
 import { score } from './job';
 import type { Undo } from './undo';
@@ -14,11 +15,12 @@ export function createPipeline(api: <T>(path: string, method?: string, body?: un
   active: () => boolean; phone: () => boolean; drawer: () => number; replace: (id: string, html: string) => void;
 }) {
   const page = document.getElementById('a-pipeline')!, root = document.getElementById('dashboard')!;
-  page.innerHTML = `<header class="pipeline-heading"><h1>Pipeline</h1><p id="pipeline-summary">Loading Pipeline…</p></header><div id="pipeline-content"></div><footer class="keyboard-hint"><span>Applied · oldest first</span><span><kbd>h</kbd> <kbd>l</kbd> column · <kbd>j</kbd> <kbd>k</kbd> card · <kbd>o</kbd> open · <kbd>[</kbd> <kbd>]</kbd> back / on · <kbd>x</kbd> close · <kbd>e</kbd> date / note · <kbd>z</kbd> undo</span></footer>`;
+  page.innerHTML = `<header class="pipeline-heading"><h1>Pipeline</h1><p id="pipeline-summary">Loading Pipeline…</p>${periodSelect()}</header><div class="pipeline-layout"><div class="pipeline-main"><section class="pipeline-flow"><header><h2>Flow</h2><div class="flow-legend">${[["moved","Moved on"],["stage","Still in stage"],["no_reply","No reply"],["rejected","Rejected"],["withdrawn","Withdrawn"]].map(([key,text]) => `<span class="flow-${key}">${text}</span>`).join('')}</div><button id="pipeline-flow-toggle" aria-controls="pipeline-flow-body" aria-expanded="true">Hide <kbd>v</kbd></button></header><div id="pipeline-flow-body">Loading flow…</div></section><div id="pipeline-content"></div></div><aside id="pipeline-rates" class="reply-card" aria-label="Reply rate by Fit Score">Loading reply rates…</aside></div><footer class="keyboard-hint"><span>Applied · oldest first</span><span><kbd>h</kbd> <kbd>l</kbd> column · <kbd>j</kbd> <kbd>k</kbd> card · <kbd>o</kbd> open · <kbd>[</kbd> <kbd>]</kbd> back / on · <kbd>x</kbd> close · <kbd>e</kbd> date / note · <kbd>z</kbd> undo · <kbd>v</kbd> flow</span></footer>`;
   const dialog = document.createElement('dialog'); dialog.id = 'pipeline-dialog'; dialog.setAttribute('aria-labelledby', 'pipeline-dialog-title');
   dialog.innerHTML = `<form><header><h2 id="pipeline-dialog-title"></h2><button type="button" data-cancel aria-label="Close dialog">×</button></header><label data-close-fields>Closed reason<select name="reason">${reasons.map(r => `<option value="${r}">${label(r)}</option>`).join('')}</select></label><div data-edit-fields><label>Next date<input name="date" type="datetime-local"></label><label>Label<input name="label" maxlength="200" placeholder="Technical interview"></label></div><label>Note (optional)<textarea name="note" maxlength="10000" rows="3"></textarea></label><p role="status" id="pipeline-error"></p><footer><button class="btn primary" type="submit">Save</button><button type="button" data-cancel>Cancel</button></footer></form>`;
   root.append(dialog);
-  let rows: Card[] = [], selected = 0, col = 0, busy = false, error = '';
+  let all: Card[] = [], rows: Card[] = [], selected = 0, col = 0, busy = false, error = '', version = 0;
+  const metrics = createMetrics(load, actions.error, actions.replace);
   const details = new Map<number, Entry | string>();
   const visible = () => col === 4 ? reasons.flatMap(reason => rows.filter(r => r.closed_reason === reason)) : rows.filter(r => column(r) === columns[col]);
   const current = () => rows.find(r => r.job_id === selected);
@@ -33,17 +35,21 @@ export function createPipeline(api: <T>(path: string, method?: string, body?: un
   }
   function render() {
     const active = rows.filter(r => !r.closed_reason).length;
-    document.querySelectorAll('[data-pipeline-count]').forEach(node => { node.textContent = error ? '—' : String(active); });
+    document.querySelectorAll('[data-pipeline-count]').forEach(node => { node.textContent = String(all.filter(r => !r.closed_reason).length); });
     const summary = document.getElementById('pipeline-summary')!;
-    if (error) summary.textContent = error; else summary.innerHTML = `<span class="pipeline-total">${rows.length} applied · </span>${active} active · ${rows.length - active} closed`;
+    if (error) summary.textContent = error; else summary.innerHTML = `${metrics.query() ? 'This period · ' : ''}<span class="pipeline-total">${rows.length} applied · </span>${active} active · ${rows.length - active} closed`;
     const groups = Object.fromEntries(columns.map(key => [key, rows.filter(r => column(r) === key)]));
-    actions.replace('pipeline-content', `<nav class="pipeline-tabs" aria-label="Pipeline columns">${columns.map((key,i) => `<button data-pipeline-column="${i}" aria-pressed="${col === i}"><b>${groups[key].length}</b>${label(key)}</button>`).join('')}</nav><div class="pipeline-board">${columns.map((key,i) => `<section class="pipeline-column" data-column="${key}" data-current="${col === i}" aria-label="${label(key)}"><button class="pipeline-column-heading" data-pipeline-column="${i}" aria-pressed="${col === i}"><b>${label(key)}</b><span>${groups[key].length}</span>${i === 0 ? '<small>oldest first</small>' : ''}</button>${key === 'closed' ? reasons.map(reason => { const group = groups[key].filter(r => r.closed_reason === reason); return group.length ? `<div class="pipeline-closed-group"><h3>${label(reason)} <span>${group.length}</span></h3>${group.map(card).join('')}</div>` : ''; }).join('') : groups[key].map(card).join('')}${!groups[key].length ? '<p class="pipeline-empty">No Jobs</p>' : ''}</section>`).join('')}</div>${!rows.length && !error ? '<p class="pipeline-empty">Mark a Job applied in <a href="#triage">Triage</a> to start Pipeline.</p>' : ''}`);
+    actions.replace('pipeline-content', `<nav class="pipeline-tabs" aria-label="Pipeline columns">${columns.map((key,i) => `<button data-pipeline-column="${i}" aria-pressed="${col === i}"><b>${groups[key].length}</b>${label(key)}</button>`).join('')}</nav><div class="pipeline-board">${columns.map((key,i) => `<section class="pipeline-column" data-column="${key}" data-current="${col === i}" aria-label="${label(key)}"><button class="pipeline-column-heading" data-pipeline-column="${i}" aria-pressed="${col === i}"><b>${label(key)}</b><span>${groups[key].length}</span>${i === 0 ? '<small>oldest first</small>' : ''}</button>${key === 'closed' ? reasons.map(reason => { const group = groups[key].filter(r => r.closed_reason === reason); return group.length ? `<div class="pipeline-closed-group"><h3>${label(reason)} <span>${group.length}</span></h3>${group.map(card).join('')}</div>` : ''; }).join('') : groups[key].map(card).join('')}${!groups[key].length ? '<p class="pipeline-empty">No Jobs</p>' : ''}</section>`).join('')}</div>${!rows.length && !error ? `<p class="pipeline-empty">${all.length ? 'No Jobs in this period. Choose All time to see older applications.' : 'Mark a Job applied in <a href="#triage">Triage</a> to start Pipeline.'}</p>` : ''}`);
   }
   function focus() { if (actions.active() && !actions.drawer()) document.getElementById(`pipeline-card-${selected}`)?.focus({preventScroll:true}); document.getElementById(`pipeline-card-${selected}`)?.scrollIntoView({block:'nearest', inline:'nearest'}); }
   function select(id: number, reveal = false) { selected = id; const row = current(); if (row) col = columns.indexOf(column(row)); render(); if (reveal) focus(); }
   async function load() {
-    try { rows = await api<Card[]>('pipeline'); error = ''; const row = current(); if (row) col = columns.indexOf(column(row)); else selected = visible()[0]?.job_id ?? 0; }
-    catch (e) { error = 'Could not load Pipeline. Reopen Pipeline to retry.'; actions.error(e); }
+    const request = ++version, query = metrics.query();
+    try {
+      const [next, stats] = await Promise.all([api<Card[]>('pipeline'), api<Statistics>(`pipeline/stats${query}`)]);
+      if (request !== version) return;
+      const ids = new Set(stats.job_ids); all = next; rows = all.filter(row => ids.has(row.job_id)); metrics.render(stats); error = ''; const row = current(); if (row) col = columns.indexOf(column(row)); else selected = visible()[0]?.job_id ?? 0;
+    } catch (e) { if (request !== version) return; error = 'Could not load Pipeline. Reopen Pipeline to retry.'; metrics.failed(); actions.error(e); }
     render();
   }
   async function loadEntry(id: number) {
@@ -51,8 +57,9 @@ export function createPipeline(api: <T>(path: string, method?: string, body?: un
     actions.changed();
   }
   async function update(id: number, payload: unknown) {
-    const next = await api<Entry>(`pipeline/${id}`, 'PATCH', payload);
-    rows = rows.map(row => row.job_id === id ? {...row, ...next} : row); details.set(id, next); if (selected === id) select(id, true); else render(); actions.changed();
+    const next = await api<Entry>(`pipeline/${id}`, 'PATCH', payload), request = ++version;
+    all = all.map(row => row.job_id === id ? {...row, ...next} : row); rows = rows.map(row => row.job_id === id ? {...row, ...next} : row); error = ''; details.set(id, next); if (selected === id) select(id, true); else render(); actions.changed();
+    void api<Statistics>(`pipeline/stats${metrics.query()}`).then(stats => { if (request === version) { const ids = new Set(stats.job_ids); rows = all.filter(row => ids.has(row.job_id)); metrics.render(stats); render(); } }).catch(e => { if (request === version) { metrics.failed(); actions.error(e); } });
     return next;
   }
   function change(id: number, payload: (previous: Entry) => Record<string, unknown> | null, text: string) {
@@ -115,7 +122,7 @@ export function createPipeline(api: <T>(path: string, method?: string, body?: un
     if (row) { select(row.job_id, true); if (actions.drawer()) void actions.open(row.job_id).catch(actions.error); }
   }
   return {
-    load, loadEntry, invalidate: (id: number) => details.delete(id), reveal: (id: number) => select(id, true), visible,
+    load, loadEntry, invalidate: (id: number) => details.delete(id), reveal: (id: number) => { if (!rows.some(row => row.job_id === id) && metrics.query()) { metrics.period(''); rows = all; actions.error('Showing All time · this Job is outside the selected period'); void load(); } select(id, true); }, visible,
     focus, move: moveCursor,
     section(id: number) {
       const row = details.get(id);
@@ -123,13 +130,14 @@ export function createPipeline(api: <T>(path: string, method?: string, body?: un
     },
     key(event: KeyboardEvent) {
       const key = event.key;
-      if (!['h','l','j','k','o','[',']','x','e','z'].includes(key)) return false;
+      if (!['h','l','j','k','o','[',']','x','e','z','v'].includes(key)) return false;
       event.preventDefault(); if (event.repeat && ['[',']','x','e'].includes(key)) return true;
       if (key === 'h' || key === 'l') { selectColumn(Math.max(0, Math.min(4, col + (key === 'h' ? -1 : 1)))); }
       if (key === 'j' || key === 'k') moveCursor(key === 'j' ? 1 : -1);
       if (key === 'o' && selected) void actions.open(selected).catch(actions.error);
       if ((key === '[' || key === ']') && selected) void step(selected, key === '[' ? -1 : 1).catch(actions.error);
       if ((key === 'x' || key === 'e') && selected) edit(selected, key === 'x');
+      if (key === 'v' && !event.repeat) metrics.toggle();
       if (key === 'z') void undo.run('pipeline').catch(actions.error);
       return true;
     },

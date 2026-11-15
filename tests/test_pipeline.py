@@ -1,5 +1,5 @@
 from contextlib import closing
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 from joule.db import connect
 from tests import test_jobs
@@ -88,3 +88,83 @@ def test_pipeline_moves_and_reapplication(client):
     assert len(again["history"]) == 1 and again["first_move_id"] > cleared["id"]
     with closing(connect(client.app.state.data_dir / "joule.db")) as db:
         assert db.execute(history_sql).fetchone()[0] == count + 1
+
+
+def test_pipeline_flow_and_reply_rates(client):
+    def stats(query=""):
+        response = client.get("/api/pipeline/stats" + query)
+        assert response.status_code == 200
+        return response.json()
+
+    assert stats()["total"] == 0
+    with closing(connect(client.app.state.data_dir / "joule.db")) as db, db:
+        db.execute("UPDATE jobs SET score=69 WHERE id=1")
+        db.execute("UPDATE jobs SET score=70 WHERE id=7")
+    for job_id, moves in [
+        (1, [{"stage": "interview"}, {"stage": "applied"}]),
+        (
+            2,
+            [
+                {"closed_reason": "rejected"},
+                {"stage": "applied"},
+                {"closed_reason": "withdrawn"},
+            ],
+        ),
+        (3, [{"closed_reason": "no_reply"}]),
+        (4, [{"stage": "accepted"}]),
+        (5, [{"closed_reason": "rejected"}]),
+        (7, [{"closed_reason": "withdrawn"}]),
+    ]:
+        client.patch(f"/api/jobs/{job_id}", json={"state": "applied"})
+        for move in moves:
+            assert client.patch(f"/api/pipeline/{job_id}", json=move).status_code == 200
+    with closing(connect(client.app.state.data_dir / "joule.db")) as db, db:
+        for job_id, days in [(2, 45), (5, 95)]:
+            db.execute(
+                "UPDATE pipeline_moves SET created_at=? WHERE id=(SELECT first_move_id FROM pipeline WHERE job_id=?)",
+                ((datetime.now(UTC) - timedelta(days=days)).isoformat(), job_id),
+            )
+    result = stats()
+    assert (result["total"], result["replies"], result["reached"]) == (
+        6,
+        4,
+        [6, 2, 2, 1],
+    )
+    assert {
+        (t["at"], t["stage"], t["closed_reason"]): t["count"]
+        for t in result["terminals"]
+    } == {
+        (2, "applied", None): 1,
+        (0, None, "withdrawn"): 2,
+        (0, None, "no_reply"): 1,
+        (3, "accepted", None): 1,
+        (0, None, "rejected"): 1,
+    }
+    assert [(r["name"], r["applied"], r["replies"]) for r in result["bands"]] == [
+        ("90+", 2, 2),
+        ("80–89", 1, 1),
+        ("70–79", 1, 0),
+        ("<70", 1, 1),
+        ("Unscored", 1, 0),
+    ]
+    assert result["sources"] == [
+        {"name": "hotfix", "applied": 5, "replies": 3},
+        {"name": "remoteok", "applied": 1, "replies": 1},
+    ]
+    for query, ids, replies in [
+        ("?days=30", [1, 3, 4, 7], 2),
+        ("?days=90", [1, 2, 3, 4, 7], 3),
+    ]:
+        filtered = stats(query)
+        assert filtered["job_ids"] == ids
+        assert [r["job_id"] for r in client.get("/api/pipeline" + query).json()] == ids
+        assert (
+            filtered["total"]
+            == sum(r["applied"] for r in filtered["sources"])
+            == sum(r["applied"] for r in filtered["bands"])
+            == len(ids)
+        )
+        assert filtered["replies"] == replies
+    client.patch("/api/jobs/1", json={"state": "new"})
+    client.patch("/api/jobs/1", json={"state": "applied"})
+    assert stats()["reached"] == [6, 1, 1, 1]  # Old application's history stays hidden.

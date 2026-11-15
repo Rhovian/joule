@@ -1,7 +1,7 @@
 """Current Pipeline entries point into append-only Move history."""
 
 from contextlib import closing
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
@@ -9,6 +9,7 @@ from pydantic import AwareDatetime, Field
 
 from joule.config import StrictModel
 from joule.db import connect
+from joule.pipeline_stats import summarize
 
 router = APIRouter(prefix="/api/pipeline")
 CURRENT = (
@@ -37,17 +38,32 @@ def entry(db, job_id):
     }
 
 
+def cohort(db, days):
+    cutoff = (
+        (datetime.now(UTC) - timedelta(days=int(days))).isoformat() if days else None
+    )
+    return [
+        dict(row)
+        for row in db.execute(
+            "SELECT m.*, j.title, j.company, j.source, j.link, j.score, p.first_move_id, a.created_at AS applied_at"
+            + CURRENT
+            + " AND (? IS NULL OR julianday(a.created_at)>=julianday(?)) ORDER BY p.first_move_id",
+            (cutoff, cutoff),
+        )
+    ]
+
+
 @router.get("")
-def list_entries(request: Request):
+def list_entries(request: Request, days: Literal["30", "90"] | None = None):
     with closing(connect(request.app.state.data_dir / "joule.db")) as db:
-        return [
-            dict(row)
-            for row in db.execute(
-                "SELECT m.*, j.title, j.company, j.source, j.link, j.score, p.first_move_id, a.created_at AS applied_at"
-                + CURRENT
-                + " ORDER BY p.first_move_id",
-            )
-        ]
+        return cohort(db, days)
+
+
+@router.get("/stats")
+def statistics(request: Request, days: Literal["30", "90"] | None = None):
+    with closing(connect(request.app.state.data_dir / "joule.db")) as db:
+        db.execute("BEGIN")  # Keep the cohort and its history in one read snapshot.
+        return summarize(db, cohort(db, days))
 
 
 @router.get("/{job_id}")
