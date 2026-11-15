@@ -1,5 +1,7 @@
 @import "./tokens.css";
 :root { font-family: var(--font-ui); color: var(--ink); background: var(--ground); font-size: 13px; line-height: 1.45; font-synthesis: none; -webkit-font-smoothing: antialiased; }
+.app-dialog { width: min(var(--dialog-width, 460px), calc(100vw - var(--dialog-gutter, 32px))); border: 1px solid var(--line); border-radius: 12px; background: var(--paper); color: var(--ink); }
+.app-dialog::backdrop { background: #0006; }
 * { box-sizing: border-box; }
 body { margin: 0; }
 button, input, textarea, select { font: inherit; }
