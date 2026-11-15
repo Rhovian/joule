@@ -380,6 +380,12 @@ def test_upwork_apply(bot, mode):
     failed = mode in ("reject", "disconnected")
     state = "new" if failed or mode in ("cancel", "blanks") else "applied"
     assert db.execute("SELECT state FROM jobs").fetchone()[0] == state
+    assert db.execute("SELECT COUNT(*) FROM pipeline").fetchone()[0] == (
+        state == "applied"
+    )
+    assert db.execute("SELECT COUNT(*) FROM pipeline_moves").fetchone()[0] == (
+        state == "applied"
+    )
     assert len(calls) == (0 if mode in ("cancel", "disconnected", "blanks") else 1)
     if calls:
         expected = {"jobReference": "1", "chargedAmount": 95.0, "coverLetter": "Latest"}
