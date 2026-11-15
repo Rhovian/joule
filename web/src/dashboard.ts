@@ -140,7 +140,7 @@ async function pollScan() {
     if (scan.status !== 'running') {
       runningId = null; renderSources();
       notice(`${scoringAll ? 'Scoring' : 'Scan'} ${scan.status}`); scoringAll = false; renderScoreAll();
-      const results = await Promise.allSettled([loadJobs(), loadSources(), ...(view === 'settings' ? [settingsPage.refreshProfile()] : [])]);
+      const results = await Promise.allSettled([loadJobs(), loadSources(), ...(view === 'settings' ? [settingsPage.refreshProfile(), settingsPage.refreshRules()] : [])]);
       results.forEach(r => { if (r.status === 'rejected') notice(r.reason); });
       return;
     }
