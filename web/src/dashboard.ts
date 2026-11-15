@@ -1,6 +1,7 @@
 import type { Scan, Source, Job, DraftKind } from './types';
 import { age, escape } from './format';
 import { createSourceFilter } from './sources';
+import { createViews } from './views';
 import { createScans } from './scans';
 import { createMobile } from './mobile';
 import { createTriageActions } from './triage-actions';
@@ -21,7 +22,7 @@ let detailVersion = 0, activeSection = 'fit';
 let scheduled = false, detailId = 0, jobsVersion = 0, connected = true, runningId: number | null = null, scan: Scan | null = null, starting = false;
 let sort = 'rank', scoringAll = false, view = 'triage';
 let jobCounts: Record<string, number> = {};
-const sourceFilter = createSourceFilter(() => void loadJobs().catch(notice), () => void loadSources().catch(notice), () => mobile.openFilters());
+const sourceFilter = createSourceFilter(() => { views.modified(); void loadJobs().catch(notice); }, () => void loadSources().catch(notice), () => mobile.openFilters());
 let noticeTimer: ReturnType<typeof setTimeout>, pollTimer: ReturnType<typeof setTimeout>, searchTimer: ReturnType<typeof setTimeout>;
 function notice(error: unknown) {
   element('notice').textContent = error instanceof Error ? error.message : String(error);
@@ -90,6 +91,7 @@ async function loadJobs() {
   query.set('sort', sort);
   query.set('q', (element('job-search') as HTMLInputElement).value.trim());
   sourceQuery.set('q', query.get('q')!);
+  if (views.minScore !== null) { query.set('min_score', String(views.minScore)); sourceQuery.set('min_score', String(views.minScore)); }
   const [next, totals]: [Job[], Record<string, number>] = selectedSources?.length === 0 ? [[], {}] : await Promise.all([
     api<Job[]>(`jobs?${query}`), api<Record<string, number>>(`jobs/counts?${sourceQuery}`),
   ]);
@@ -121,7 +123,7 @@ async function toggleSchedule() {
 async function loadSources() {
   const result = await api<{ sources: Source[]; running: number | null; scheduled: boolean }>('sources');
   sources = result.sources; scheduled = result.scheduled;
-  sourceFilter.update(sources);
+  if (sourceFilter.update(sources)) void loadJobs().catch(notice);
   if (sources.some(s => s.name === 'upwork')) connected = (await api<{ connected: boolean }>('upwork/status')).connected;
   renderSources();
   if (result.running && !runningId) watchScan(result.running);
@@ -297,6 +299,13 @@ function showView(next: string, focus = false) {
   if (focus) element(view === 'triage' ? 'triage' : 'a-scans').focus();
 }
 window.addEventListener('hashchange', () => showView(location.hash.slice(1), true));
+const views = createViews(preset => {
+  sort = preset.sort;
+  (element('job-sort') as HTMLSelectElement).value = sort;
+  (element('job-search') as HTMLInputElement).value = '';
+  root.querySelectorAll<HTMLInputElement>('.controls > label input').forEach(input => { input.checked = preset.show.includes(input.name); });
+  sourceFilter.set(preset.sources);
+}, () => void loadJobs().catch(notice));
 showView(location.hash.slice(1));
 root.addEventListener('click', event => {
   const target = (event.target as HTMLElement).closest<HTMLElement>('[data-action]');
@@ -306,15 +315,10 @@ root.addEventListener('click', event => {
     return;
   }
   if (target.dataset.action === 'show-filtered') {
-    root.querySelector<HTMLInputElement>('[name="filtered"]')!.checked = true;
+    root.querySelector<HTMLInputElement>('[name="filtered"]')!.checked = true; views.modified();
     void loadJobs().catch(notice);
   }
-  if (target.dataset.action === 'clear-filters') {
-    (element('job-search') as HTMLInputElement).value = '';
-    sourceFilter.reset();
-    root.querySelectorAll<HTMLInputElement>('.controls > label input').forEach(input => { input.checked = ['new', 'unscored'].includes(input.name); });
-    void loadJobs().catch(notice);
-  }
+  if (target.dataset.action === 'clear-filters') views.reset();
   const id = Number(target.dataset.id);
   if (target.dataset.action === 'move') moveJob(Number(target.dataset.step));
   if (target.dataset.action === 'section') jumpSection(target.dataset.section!);
@@ -327,7 +331,7 @@ root.addEventListener('click', event => {
   if (target.dataset.action === 'bulk-state') void triage.state(triage.ids(), target.dataset.state!).catch(notice);
   if (target.dataset.action === 'bulk-score') void scoreAll(triage.ids(), true).catch(notice);
   if (target.dataset.action === 'dismiss-below') void triage.state(triage.below(), 'dismissed').catch(notice);
-  if (target.dataset.action === 'clear-search') { (element('job-search') as HTMLInputElement).value = ''; void loadJobs().catch(notice); }
+  if (target.dataset.action === 'clear-search') { views.modified(); (element('job-search') as HTMLInputElement).value = ''; void loadJobs().catch(notice); }
   if (target.dataset.action === 'queue') void queueJob(id).catch(notice);
   if (target.dataset.action === 'telegram') void api('telegram/start', 'POST', {}).then(() => notice('Sent the queue head to Telegram')).catch(notice);
   if (target.dataset.action === 'open') void openJob(id).catch(notice);
@@ -350,11 +354,11 @@ root.addEventListener('change', event => {
   const input = event.target as HTMLInputElement;
   if (input.dataset.pickJob) triage.toggle(Number(input.dataset.pickJob));
   if (input.id === 'job-sort') sort = input.value;
-  if (input.matches('.controls > label input, #job-sort')) void loadJobs().catch(notice);
+  if (input.matches('.controls > label input, #job-sort')) { views.modified(); void loadJobs().catch(notice); }
 });
 element('job-search').addEventListener('input', () => {
   // astro@7.3.8/dist/runtime/client/load.js only hydrates; a native trailing timer coalesces input.
-  clearTimeout(searchTimer); jobsVersion++;
+  views.modified(); clearTimeout(searchTimer); jobsVersion++;
   searchTimer = setTimeout(() => void loadJobs().catch(notice), 200);
 });
 const shortcuts = element('shortcuts') as HTMLDialogElement;
