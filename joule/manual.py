@@ -15,16 +15,19 @@ Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
 class ProposalRequest(StrictModel):
+    title: Text = Field(default="Pasted Upwork Job", max_length=500)
+    company: str | None = Field(default=None, max_length=500)
     description: Text = Field(max_length=50000)
     questions: list[Annotated[Text, Field(max_length=5000)]] = Field(max_length=50)
 
 
-def job(title, description, source, questions=()):
+def job(title, description, source, questions=(), company=None):
     candidate = Candidate(
         source=source,
         source_id="manual",
         link="",
         title=title,
+        company=company,
         description=description,
         extra={"screening_questions": list(questions)},
     ).model_dump()
@@ -36,7 +39,7 @@ async def proposal(request: Request, body: ProposalRequest):
     directory = request.app.state.data_dir
     try:
         return await drafts.generate(
-            job("Pasted Upwork Job", body.description, "upwork", body.questions),
+            job(body.title, body.description, "upwork", body.questions, body.company),
             "proposal",
             None,
             load_settings(directory),
@@ -46,18 +49,34 @@ async def proposal(request: Request, body: ProposalRequest):
         raise HTTPException(502, str(error)) from error
 
 
-class CVRequest(StrictModel):
+class PostingRequest(StrictModel):
+    company: str | None = Field(default=None, max_length=500)
     title: Text = Field(max_length=500)
     description: Text = Field(max_length=50000)
 
 
+@router.post("/cover-letter")
+async def cover_letter(request: Request, body: PostingRequest):
+    directory = request.app.state.data_dir
+    try:
+        return await drafts.generate(
+            job(body.title, body.description, "manual", company=body.company),
+            "cover_letter",
+            None,
+            load_settings(directory),
+            directory,
+        )
+    except ai.AIError as error:
+        raise HTTPException(502, str(error)) from error
+
+
 @router.post("/cv")
-async def tailored_cv(request: Request, body: CVRequest):
+async def tailored_cv(request: Request, body: PostingRequest):
     directory = request.app.state.data_dir
     settings = load_settings(directory)
     try:
         document = await drafts.generate(
-            job(body.title, body.description, "manual"),
+            job(body.title, body.description, "manual", company=body.company),
             "tailored_cv",
             None,
             settings,

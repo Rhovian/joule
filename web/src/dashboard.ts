@@ -289,7 +289,6 @@ function showView(next: string, focus = false) {
   element('job-search-box').hidden = view !== 'triage';
   if (view !== 'triage') triage.clear();
   element('a-scans').hidden = view !== 'scans';
-  element('manual-panel').hidden = view !== 'triage';
   document.querySelectorAll<HTMLElement>('.app-nav [data-view], #mobile-nav [data-view]').forEach(tab => {
     if (tab.dataset.view === view) tab.setAttribute('aria-current', 'page');
     else tab.removeAttribute('aria-current');
@@ -371,7 +370,7 @@ root.addEventListener('input', event => {
   if (target.id === 'ask-question') editing(detailId).question = target.value;
 });
 document.addEventListener('keydown', event => {
-  if ((element('mobile-filters') as HTMLDialogElement).open || shortcuts.open) return;
+  if ((element('mobile-filters') as HTMLDialogElement).open || shortcuts.open || (element('fill-dialog') as HTMLDialogElement).open) return;
   const versions = root.querySelector<HTMLElement>('.draft-version-menu:popover-open');
   if (event.key === 'Escape' && versions) {
     event.preventDefault(); versions.hidePopover(); element(versions.id.replace('draft-version-menu-', 'draft-versions-')).focus({ preventScroll: true }); return;
