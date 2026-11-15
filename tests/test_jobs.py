@@ -17,7 +17,7 @@ def client(tmp_path):
     with TestClient(create_app(tmp_path), base_url="http://localhost") as client:
         with closing(connect(tmp_path / "joule.db")) as db, db:
             for id, score, posted, reason, state, primary in [
-                (1, 85, "2026-01-01", None, "new", None),
+                (1, 85, "2026-01-01", None, "seen", None),
                 (2, 80, "2026-01-02", None, "seen", None),
                 (3, None, "2026-01-03", None, "new", None),
                 (4, 90, "2026-01-04", "pay", "new", None),
@@ -43,6 +43,10 @@ def client(tmp_path):
                         "[]",
                     ),
                 )
+            db.executemany(
+                "UPDATE jobs SET title=? WHERE id=?",
+                [("engineer A", 1), ("Engineer C", 2), ("Engineer B", 3)],
+            )
             db.execute("UPDATE jobs SET source='hn' WHERE id=6")
             db.execute(
                 "UPDATE jobs SET source='remoteok', company='Acme Zürich', score_reason='focused' WHERE id=2"
@@ -67,6 +71,11 @@ def client(tmp_path):
         ("?source=hn&source=remoteok", [2, 1]),
         ("?sort=score", [1, 2, 3]),
         ("?sort=newest", [3, 2, 1]),
+        ("?sort=score&direction=asc", [2, 1, 3]),
+        ("?sort=title&direction=asc", [1, 3, 2]),
+        ("?sort=reason&direction=asc", [2, 3, 1]),
+        ("?sort=source&direction=asc", [3, 1, 2]),
+        ("?sort=state&direction=asc", [3, 2, 1]),
         ("?min_score=90&filtered=true", [4]),
         ("?q=ENGINEER", [2, 1, 3]),
         ("?q=ZÜRICH", [2]),
@@ -529,7 +538,11 @@ def test_proposal_guidance_is_scoped(client, monkeypatch, kind):
     monkeypatch.setattr(ai, "structured", structured)
     path = "/api/jobs/1/ask" if kind == "ask" else "/api/jobs/1/drafts"
     payload = {"question": "Why?"} if kind == "ask" else {"kind": kind}
-    assert client.post(path, json=payload).status_code == 200
+    response = client.post(path, json=payload)
+    if kind == "follow_up":
+        assert response.status_code == 422
+        return
+    assert response.status_code == 200
     for fragment in (
         "Use past tense",
         "Reserve words",
@@ -538,8 +551,6 @@ def test_proposal_guidance_is_scoped(client, monkeypatch, kind):
     ):
         assert (fragment in prompts[0]) == (kind == "proposal")
     assert ("one-line greeting" in prompts[0]) == (kind == "cover_letter")
-    if kind == "follow_up":
-        assert "## cv.yaml" in prompts[0]
 
 
 @pytest.mark.parametrize("wrong", [True, False])

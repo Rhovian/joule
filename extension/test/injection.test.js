@@ -18,26 +18,23 @@ function setup() {
   background.installGestures();
   return {listeners, calls, background};
 }
-test('manifest keeps destination access temporary and declares the command', () => {
+test('manifest keeps destination access temporary without keyboard commands', () => {
   assert.ok(manifest.permissions.includes('activeTab'));
   assert.ok(manifest.permissions.includes('scripting'));
   assert.equal(manifest.host_permissions, undefined);
   assert.equal(JSON.stringify(manifest).includes('<all_urls>'), false);
-  assert.equal(manifest.commands['fill-with-joule'].suggested_key, 'Ctrl+Shift+Y');
+  assert.equal(manifest.commands, undefined);
 });
-test('both gestures inject the same worker on an unlisted host without requesting host access', async () => {
+test('context menu injects the worker without host access or a keyboard listener', async () => {
   const {listeners, calls} = setup(), tab = {id: 4, url: 'https://employer.example/apply'};
   listeners.install();
   assert.deepEqual(calls.pop(), {id: 'fill-with-joule', title: 'Fill with Joule', contexts: ['page', 'editable']});
-  for (const invoke of [() => listeners.menu({menuItemId: 'fill-with-joule'}, tab),
-    () => listeners.command('fill-with-joule', tab)]) {
-    const pending = invoke();
-    // open() must be called synchronously while the user gesture is active.
-    assert.deepEqual(calls.splice(0), [{target: {tabId: 4}, files: ['content.js']}, {tabId: 4}]);
-    await pending;
-  }
+  assert.equal(listeners.command, undefined);
+  const pending = listeners.menu({menuItemId: 'fill-with-joule'}, tab);
+  // open() must be called synchronously while the user gesture is active.
+  assert.deepEqual(calls.splice(0), [{target: {tabId: 4}, files: ['content.js']}, {tabId: 4}]);
+  await pending;
   listeners.menu({menuItemId: 'other'}, tab);
-  listeners.command('other', tab);
   assert.equal(calls.length, 0);
 });
 test('injection refuses denied hosts, subdomains, trailing dots and restricted URLs before browser calls', async () => {

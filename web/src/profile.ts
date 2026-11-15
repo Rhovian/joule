@@ -2,17 +2,26 @@ import { dateTime, escape } from './format';
 type Profile = { exists: boolean; updated_at: string | null; fields: {label: string; value: string}[]; error: string | null; stale: number; busy: boolean; backed_up?: boolean };
 export function createProfileCard(grid: Element, api: <T>(path: string, method?: string, body?: unknown) => Promise<T>, notice: (error: unknown) => void, changed: () => Promise<void>, scoring: (id: number) => void) {
   const card = document.createElement('section'); card.className = 'settings-card master-profile'; card.setAttribute('aria-labelledby', 'master-profile-title');
-  card.innerHTML = `<header><h2 id="master-profile-title">Master CV &amp; profile</h2><span>Feeds Fit Score, every Draft and Joule Fill</span></header><div class="master-file"><div><strong>cv.yaml</strong><p id="master-updated">Loading Master CV…</p></div><a id="master-open" class="btn small" target="_blank" rel="noopener noreferrer">Open</a><button id="master-replace" disabled>Replace</button><input id="master-upload" type="file" accept=".yaml,.yml,application/yaml,text/yaml" aria-label="Replace Master CV" hidden></div><div id="master-stale" hidden><p></p><button id="master-rescore">Rescore</button></div><dl id="master-fields"></dl><p id="master-status" role="status"></p>`;
+  card.innerHTML = `<header><h2 id="master-profile-title">Master CV &amp; profile</h2><span>Feeds Fit Score, every Draft and Joule Fill</span></header><div class="master-file"><div><strong>cv.yaml</strong><p id="master-updated">Loading Master CV…</p></div><a id="master-open" class="btn small" target="_blank" rel="noopener noreferrer">Open</a><button id="master-replace" disabled>Replace</button><input id="master-upload" type="file" accept=".yaml,.yml,application/yaml,text/yaml" aria-label="Replace Master CV" hidden></div><div id="master-stale" hidden><p></p><button id="master-rescore">Rescore</button><button id="master-dismiss" aria-label="Dismiss out-of-date Fit Score banner">Dismiss</button></div><dl id="master-fields"></dl><p id="master-status" role="status"></p>`;
   grid.prepend(card);
   const get = <T extends HTMLElement>(id: string) => card.querySelector<T>(`#master-${id}`)!;
   const file = get<HTMLInputElement>('upload'), replace = get<HTMLButtonElement>('replace'), rescore = get<HTMLButtonElement>('rescore'), status = get('status');
+  // Astro 7.3.8 runtime/client/load.js only hydrates; localStorage keeps this browser's dismissal per CV revision.
+  const dismissalKey = 'joule.profile.dismissedStale';
+  let revision = '', dismissed: string | null = null;
+  try { dismissed = localStorage.getItem(dismissalKey); } catch { /* Dismissal still works in memory. */ }
+  get('dismiss').addEventListener('click', () => {
+    dismissed = revision; get('stale').hidden = true;
+    try { localStorage.setItem(dismissalKey, revision); } catch { /* Dismissal still works in memory. */ }
+  });
   function render(value: Profile) {
     get('updated').textContent = value.exists ? `YAML · updated ${value.updated_at ? dateTime(value.updated_at) : 'unknown'}` : 'No Master CV uploaded';
     const open = get<HTMLAnchorElement>('open');
     if (value.exists && !value.error) open.href = '/api/profile/cv.pdf'; else open.removeAttribute('href');
     open.setAttribute('aria-disabled', String(!value.exists || !!value.error));
     get('fields').innerHTML = value.fields.map(field => `<div><dt>${escape(({label:'Title',name:'Name',firstName:'First name',lastName:'Last name',location:'Location / address'} as Record<string,string>)[field.label] || field.label.replaceAll('_',' ').replace(/^./, c => c.toUpperCase()))}</dt><dd>${escape(field.value)}</dd></div>`).join('');
-    get('stale').hidden = !value.stale;
+    revision = value.updated_at ?? 'missing';
+    get('stale').hidden = !value.stale || dismissed === revision;
     get('stale').querySelector('p')!.textContent = `${value.stale} retained Job${value.stale === 1 ? '' : 's'} ${value.stale === 1 ? 'has' : 'have'} an out-of-date Fit Score.`;
     rescore.textContent = `Rescore ${value.stale}`; rescore.disabled = value.busy || !value.stale;
     status.textContent = value.error || ''; replace.disabled = false;

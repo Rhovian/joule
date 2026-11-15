@@ -10,13 +10,11 @@ export function createTriageActions(history: Undo, actions: {
 }) {
   const picks = new Set<number>();
   let busy = false, undo: { changes: Change[]; cursor: number } | null = null;
-  const below = () => actions.jobs().filter(j => j.score !== null && j.score < 70 && ['new', 'seen'].includes(j.state) && j.filtered_reason === null);
   function render() {
+    const all = document.getElementById('select-all') as HTMLInputElement | null;
+    if (all) { all.checked = !!actions.jobs().length && picks.size === actions.jobs().length; all.indeterminate = picks.size > 0 && !all.checked; }
     document.getElementById('bulk-actions')!.hidden = !picks.size;
     document.getElementById('selected-count')!.textContent = `${picks.size} selected`;
-    const low = document.getElementById('dismiss-below') as HTMLButtonElement;
-    low.innerHTML = `Dismiss below 70 <span class="muted">${below().length}</span>`;
-    low.disabled = busy || !below().length;
     document.querySelectorAll<HTMLButtonElement>('[data-action=state], [data-action=bulk-state], [data-action=undo]').forEach(button => { button.disabled = busy; });
   }
   function announce(changes: Change[], cursor: number, label: string, view: string) {
@@ -45,7 +43,7 @@ export function createTriageActions(history: Undo, actions: {
       const changed = new Set(done.map(j => j.id));
       done.forEach(j => picks.delete(j.id));
       const next = list.slice(index + 1).find(j => !changed.has(j.id)) ?? list.slice(0, index).reverse().find(j => !changed.has(j.id));
-      if (index >= 0) actions.select(next?.id ?? 0);
+      if (index >= 0 && actions.cursor() === cursor) actions.select(next?.id ?? 0);
       announce(changes.filter(j => changed.has(j.id)), cursor,
         `${state === 'dismissed' ? 'Dismissed' : state === 'applied' ? 'Applied' : changes.some(j => j.state === 'applied') ? 'Unmarked applied' : 'Restored'} · ${done.length === 1 ? (list.find(j => j.id === done[0].id) ?? detail)?.title : `${done.length} Jobs`}`, view);
       await actions.refresh();
@@ -68,16 +66,8 @@ export function createTriageActions(history: Undo, actions: {
   }
   return {
     has: (id: number) => picks.has(id), ids: () => [...picks], render,
-    state: (ids: number[], next: string) => { const view = actions.view(); return history.perform(() => state(ids, next, view)); }, undo: () => history.run('triage'),
-    key(key: 'a' | 'd') {
-      const view = actions.view(), ids = [...picks], target = key === 'a' ? 'applied' : 'dismissed';
-      return history.perform(async () => {
-        if (ids.length) return state(ids, target, view);
-        const job = actions.detail() ?? actions.jobs().find(j => j.id === actions.cursor());
-        if (job) await state([job.id], job.state === target ? 'seen' : target, view);
-      });
-    },
-    below: () => below().map(j => j.id),
+    state: (ids: number[], next: string) => { const view = actions.view(); return history.perform(() => state(ids, next, view)); },
+    selectAll(checked: boolean) { actions.jobs().forEach(j => { if (checked) picks.add(j.id); else picks.delete(j.id); }); actions.render(); },
     checkbox: (id: number) => `<label class="row-pick"><input type="checkbox" data-pick-job="${id}" aria-label="Select Job ${escape(id)}" ${picks.has(id) ? 'checked' : ''}></label>`,
     toggle(id: number) { if (picks.has(id)) picks.delete(id); else picks.add(id); actions.render(); },
     clear() { if (picks.size) { picks.clear(); actions.render(); } },

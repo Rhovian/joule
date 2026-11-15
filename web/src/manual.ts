@@ -2,11 +2,11 @@ import './fill.css';
 import { readPaste } from './fill-paste';
 
 const dialog = document.getElementById('fill-dialog') as HTMLDialogElement;
-dialog.innerHTML = `<header class="fill-header"><div><h2 id="fill-title">Fill a Job</h2><p>Paste a Job. Leave with the words and the PDF.</p></div><button type="button" data-close>Close <kbd>Esc</kbd></button></header>
+dialog.innerHTML = `<header class="fill-header"><div><h2 id="fill-title">Fill a Job</h2><p>Paste a Job. Leave with the words and the PDF.</p></div><button type="button" data-close>Close</button></header>
 <form id="fill-form"><div class="fill-columns"><section class="fill-paste"><label for="fill-text">Paste here</label><p>A Job posting, or an Upwork posting with screening questions. Put questions one per line under “Application questions”.</p><textarea id="fill-text" maxlength="50000" required placeholder="Paste a Job posting…" autofocus></textarea><p class="fill-private">Inputs and outputs are not saved or queued. Copy or download before leaving.</p></section>
 <section class="fill-options"><label for="fill-kind">Joule read this as</label><div class="fill-detection"><select id="fill-kind"><option value="posting">Job posting</option><option value="upwork">Upwork posting</option><option value="questions">Application questions</option></select><span id="fill-question-count"></span></div><p class="fill-kind-help"></p><details id="fill-question-review" hidden><summary>Review detected questions</summary><ol></ol></details>
 <label for="fill-job-title">Title</label><input id="fill-job-title" maxlength="500" required><div class="fill-metadata"><div><label for="fill-company">Company</label><input id="fill-company" maxlength="500"></div><div><label for="fill-filename">CV file name</label><input id="fill-filename" maxlength="150"></div></div>
-<h3>What do you want back?</h3><label class="fill-output"><input id="fill-letter" type="checkbox" checked><span><b>Cover Letter</b><small>From your Profile and writing samples.</small></span></label><label class="fill-output"><input id="fill-answers" type="checkbox"><span><b>Answers to application questions</b><small id="fill-answers-help"></small></span></label><label class="fill-output"><input id="fill-cv" type="checkbox" checked><span><b>Tailored CV</b><small>PDF from your Master CV.</small></span></label><label class="fill-output"><input id="fill-proposal" type="checkbox"><span><b>Proposal</b><small>Upwork cover text.</small></span></label></section></div><footer class="fill-footer"><button class="btn primary" id="fill-generate" type="submit">Generate outputs</button><kbd>⌘ / Ctrl Enter</kbd><button type="button" data-close>Cancel</button></footer></form>
+<h3>What do you want back?</h3><label class="fill-output"><input id="fill-letter" type="checkbox" checked><span><b>Cover Letter</b><small>From your Profile and writing samples.</small></span></label><label class="fill-output"><input id="fill-cv" type="checkbox" checked><span><b>Tailored CV</b><small>PDF from your Master CV.</small></span></label></section></div><footer class="fill-footer"><button class="btn primary" id="fill-generate" type="submit">Generate outputs</button><button type="button" data-close>Cancel</button></footer></form>
 <section id="fill-results" hidden><div class="fill-results-heading"><button type="button" id="fill-back">‹ Paste</button><span>Step 2 of 2 · Outputs</span><button type="button" id="fill-new">New fill</button></div><h3 id="fill-result-title" tabindex="-1"></h3><p id="fill-result-kind"></p><p>Copy or download before leaving; these outputs are not saved.</p><div id="fill-cards"></div></section><p id="fill-status" role="status" aria-live="polite"></p>`;
 const get = <T extends HTMLElement>(id: string) => dialog.querySelector<T>(`#fill-${id}`)!;
 const form = get<HTMLFormElement>('form');
@@ -17,8 +17,6 @@ const company = get<HTMLInputElement>('company');
 const filename = get<HTMLInputElement>('filename');
 const cv = get<HTMLInputElement>('cv');
 const letter = get<HTMLInputElement>('letter');
-const answers = get<HTMLInputElement>('answers');
-const proposal = get<HTMLInputElement>('proposal');
 const status = get('status');
 const results = get('results');
 const cards = get('cards');
@@ -30,23 +28,18 @@ const nav = document.getElementById('mobile-nav')!;
 const triggers = document.querySelectorAll<HTMLButtonElement>('[data-open-fill]');
 function defaults(reset = false) {
   const upwork = kind.value === 'upwork';
-  const count = readPaste(paste.value).questions.length;
-  proposal.disabled = !upwork;
-  answers.disabled = !upwork || !count;
+  cv.disabled = letter.disabled = upwork;
   if (reset || !edited.has('outputs')) {
-    proposal.checked = upwork;
-    answers.checked = upwork && count > 0;
     cv.checked = letter.checked = !upwork;
   }
-  get('answers-help').textContent = upwork ? `${count} screening question${count === 1 ? '' : 's'} detected.` : 'Board-question answers are not available for pasted Jobs.';
-  dialog.querySelector('.fill-kind-help')!.textContent = kind.value === 'questions' ? 'Paste the Job posting above the questions to provide context, then correct the kind.' : 'Detected locally. Correct the kind or edit the pasted text if needed.';
+  dialog.querySelector('.fill-kind-help')!.textContent = upwork ? 'Use Telegram for Upwork Proposals.' : kind.value === 'questions' ? 'Paste the Job posting above the questions to provide context, then correct the kind.' : 'Detected locally. Correct the kind or edit the pasted text if needed.';
   updateButton();
 }
 function updateButton() {
-  const count = [letter, cv, answers, proposal].filter(input => input.checked && !input.disabled).length;
+  const count = [letter, cv].filter(input => input.checked && !input.disabled).length;
   const button = get<HTMLButtonElement>('generate');
   button.textContent = busy ? 'Generating…' : `Generate ${count} output${count === 1 ? '' : 's'}`;
-  button.disabled = busy || !count || kind.value === 'questions';
+  button.disabled = busy || !count || kind.value !== 'posting';
 }
 function updateFilename() {
   if (!edited.has('filename')) filename.value = `JB_CV_${(company.value || title.value || 'Job').replace(/[^\p{L}\p{N}_-]+/gu, '_')}.pdf`;
@@ -66,7 +59,7 @@ function detect() {
 paste.addEventListener('input', detect);
 kind.addEventListener('change', () => { kindChanged = true; defaults(true); });
 for (const [name, input] of [['title', title], ['company', company], ['filename', filename]] as const) input.addEventListener('input', () => { edited.add(name); updateFilename(); });
-[letter, cv, answers, proposal].forEach(input => input.addEventListener('change', () => { edited.add('outputs'); updateButton(); }));
+[letter, cv].forEach(input => input.addEventListener('change', () => { edited.add('outputs'); updateButton(); }));
 function open() {
   if (dialog.open) return;
   navHome = { parent: nav.parentNode!, next: nav.nextSibling }; dialog.append(nav);
@@ -82,13 +75,6 @@ dialog.addEventListener('close', () => {
   navHome = null;
   nav.querySelector('[data-open-fill]')!.removeAttribute('aria-current');
   if (location.hash !== '#settings') nav.querySelector(`[data-view="${location.hash === '#scans' ? 'scans' : 'triage'}"]`)!.setAttribute('aria-current', 'page');
-});
-document.addEventListener('keydown', event => {
-  if (dialog.open) {
-    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && !busy && !get<HTMLButtonElement>('generate').disabled && !form.hidden) { event.preventDefault(); form.requestSubmit(); }
-    return;
-  }
-  if (event.key === 'n' && !event.repeat && !event.metaKey && !event.ctrlKey && !event.altKey && !event.isComposing && !document.querySelector('dialog[open]') && !(event.target as HTMLElement).closest('input:not([type=checkbox]), textarea, select, [contenteditable]')) { event.preventDefault(); open(); }
 });
 get('back').addEventListener('click', () => { results.hidden = true; form.hidden = false; paste.focus(); });
 function discardPDF() { if (pdfUrl) URL.revokeObjectURL(pdfUrl); pdfUrl = null; }
@@ -115,10 +101,10 @@ async function request(path: string, body: object) {
   return response;
 }
 form.addEventListener('submit', async event => {
-  event.preventDefault(); if (busy) return;
+  event.preventDefault(); if (busy || kind.value !== 'posting') return;
   const data = readPaste(paste.value);
   if (!data.description || data.questions.length > 50 || data.questions.some(question => question.length > 5000)) { status.textContent = 'Include a Job posting and at most 50 questions, each at most 5,000 characters.'; return; }
-  const wanted = { letter: letter.checked, cv: cv.checked, proposal: proposal.checked && !proposal.disabled, answers: answers.checked && !answers.disabled };
+  const wanted = { letter: letter.checked, cv: cv.checked };
   const metadata = { title: title.value.trim(), company: company.value.trim() || null, description: data.description };
   const downloadName = (filename.value.trim() || 'Tailored_CV.pdf').replace(/[\\/\x00-\x1f]/g, '_').replace(/(?:\.pdf)?$/i, '.pdf');
   busy = true;
@@ -126,13 +112,6 @@ form.addEventListener('submit', async event => {
   controls.forEach(input => { input.disabled = true; }); updateButton(); status.textContent = 'Generating your outputs…';
   cards.replaceChildren(); discardPDF();
   const errors: string[] = [];
-  if (wanted.proposal || wanted.answers) {
-    try {
-      const bundle = await (await request('proposal', { ...metadata, questions: wanted.answers ? data.questions : [] })).json();
-      if (wanted.proposal) output('Proposal', bundle.cover);
-      if (wanted.answers) bundle.answers.forEach((answer: string, i: number) => output(data.questions[i], answer));
-    } catch (error) { errors.push(`Proposal / answers: ${error instanceof Error ? error.message : String(error)}`); }
-  }
   if (wanted.letter) {
     try {
       const document = await (await request('cover-letter', metadata)).json();
@@ -152,7 +131,7 @@ form.addEventListener('submit', async event => {
   status.textContent = errors.join(' · ');
   if (cards.children.length) {
     get('result-title').textContent = metadata.title;
-    get('result-kind').textContent = `${kind.selectedOptions[0].textContent} · ${wanted.answers ? data.questions.length : 0} screening questions`;
+    get('result-kind').textContent = kind.selectedOptions[0].textContent;
     form.hidden = true; results.hidden = false;
     if (dialog.open) get('result-title').focus();
   } else if (dialog.open) get('generate').focus();

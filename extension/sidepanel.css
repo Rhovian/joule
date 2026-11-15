@@ -63,12 +63,12 @@
 body { margin:0; font:inherit; overflow-wrap:anywhere; }
 h2,p { margin:0; }
 h2 { font-size:14px; line-height:1.3; }
-button,input { font:inherit; }
+button,input,textarea { font:inherit; }
 button,a { -webkit-tap-highlight-color:transparent; }
 button { min-height:30px; padding:0 11px; border:1px solid var(--control-border); border-radius:6px; background:var(--paper); color:var(--ink); font-size:12.5px; font-weight:600; cursor:pointer; }
 button:hover { background:var(--faint); }
 button:disabled { opacity:.45; cursor:default; }
-button:focus-visible,a:focus-visible,input:focus-visible,summary:focus-visible { outline:2px solid var(--green); outline-offset:2px; }
+button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,summary:focus-visible { outline:2px solid var(--green); outline-offset:2px; }
 a { color:var(--green); text-decoration:none; }
 a:hover { text-decoration:underline; }
 input:not([type=checkbox]) { min-width:0; width:100%; height:34px; padding:0 10px; border:1px solid var(--control-border); border-radius:6px; color:var(--ink); background:var(--paper); }
@@ -136,7 +136,7 @@ main { display:flex; flex-direction:column; gap:12px; padding:14px; min-width:0;
 .field-question { flex:1; min-width:0; font-size:12.5px; }
 .required { font-size:10px; color:var(--error); text-transform:uppercase; font-weight:600; }
 .field-reason { font-size:11.5px; color:var(--muted); }
-.field-answer { white-space:pre-wrap; border:1px solid var(--control-border); border-radius:6px; padding:8px 10px; background:var(--paper); font-size:12.5px; line-height:1.5; }
+.field-answer { width:100%; resize:vertical; color:var(--ink); white-space:pre-wrap; border:1px solid var(--control-border); border-radius:6px; padding:8px 10px; background:var(--paper); font-size:12.5px; line-height:1.5; }
 .field-row.answered { background:var(--faint); }
 .field-row button { min-height:26px; font-size:12px; padding:0 9px; border-radius:5px; }
 .after main,.nomatch main,.offline main { padding-bottom:104px; }
@@ -146,7 +146,6 @@ main { display:flex; flex-direction:column; gap:12px; padding:14px; min-width:0;
 .after .job-text h2 { font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .after .job-text p { display:none; }
 .after #change { grid-row:1; }
-.after #cv-card { display:none; }
 .after #fill-controls,.nomatch #fill-controls,.offline #fill-controls { position:fixed; inset:auto 0 0; padding:10px 14px 14px; background:var(--paper); border-top:1px solid var(--line); z-index:2; }
 .after #fill-controls { display:flex; gap:8px; align-items:center; }
 .after #fill { order: 1; background: var(--paper); color: var(--ink); border-color: var(--control-border); width:auto; min-height:32px; font-size:12.5px; margin-left:0; }

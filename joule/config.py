@@ -29,7 +29,6 @@ class Schedule(StrictModel):
 
 
 class Pipeline(StrictModel):
-    follow_up_days: int = Field(default=14, ge=1)
     no_reply_days: int = Field(default=21, ge=1)
 
 

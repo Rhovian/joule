@@ -57,10 +57,18 @@ async def list_jobs(
     dismissed: bool = False,
     applied: bool = False,
     source: Annotated[list[str] | None, Query()] = None,
-    sort: Literal["rank", "score", "newest"] = "rank",
+    sort: Literal[
+        "rank", "score", "newest", "title", "reason", "source", "state"
+    ] = "rank",
+    direction: Literal["asc", "desc"] = "desc",
     q: str = "",
     min_score: Annotated[int | None, Query(ge=0, le=100)] = None,
 ):
+    order = {
+        "newest": "COALESCE(posted_at, first_seen_at)",
+        "reason": "COALESCE(filtered_reason, score_reason) COLLATE NOCASE",
+        "title": "title COLLATE NOCASE",
+    }.get(sort, sort)
     directory = request.app.state.data_dir
     stamp = score.fingerprint(directory, load_settings(directory))
     with closing(connect(directory / "joule.db")) as db:
@@ -71,8 +79,7 @@ async def list_jobs(
             f"AND {SHOW_CATEGORY} IN (SELECT value FROM json_each(?)) "
             f"AND {SOURCE_FILTER} "
             f"AND {SEARCH_FILTER} AND {MIN_SCORE_FILTER} "
-            f"ORDER BY {'COALESCE(posted_at, first_seen_at)' if sort == 'newest' else sort} "
-            "DESC NULLS LAST, posted_at DESC, jobs.id DESC LIMIT 500",
+            f"ORDER BY {order} {direction} NULLS LAST, posted_at DESC, jobs.id DESC LIMIT 500",
             (
                 json.dumps(
                     [
@@ -208,7 +215,7 @@ async def rescore_job(request: Request, job_id: int, body: StrictModel):
 
 
 class DraftRequest(StrictModel):
-    kind: Literal["cover_letter", "proposal", "tailored_cv", "follow_up"]
+    kind: Literal["cover_letter", "proposal", "tailored_cv"]
     note: str | None = Field(None, max_length=2000)
 
 

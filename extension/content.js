@@ -135,8 +135,13 @@
         element.blur();
       }
     }
+    function sameDescriptor(field, expected) {
+      // Session storage can reorder object keys; field identity is independent of serialization order.
+      return field && Object.keys(field).every(key => key === 'options' ? field.options.length === expected.options?.length &&
+        field.options.every((option,i) => option.value === expected.options[i].value && option.label === expected.options[i].label) : field[key] === expected[key]);
+    }
     async function applyComboboxes(actions, expected) {
-      if (expected && JSON.stringify(describe()[expected.ref]) !== JSON.stringify(expected)) return {filled: 0};
+      if (expected && !sameDescriptor(describe()[expected.ref],expected)) return {filled: 0};
       let filled = 0;
       for (const action of actions) {
         const element = controls[action.ref];
@@ -200,7 +205,7 @@
       }));
     }
     async function applyWidgets(actions, expected) {
-      if (expected && JSON.stringify(describe()[expected.ref]) !== JSON.stringify(expected)) return {filled: 0};
+      if (expected && !sameDescriptor(describe()[expected.ref],expected)) return {filled: 0};
       let filled = 0;
       for (const action of actions) {
         const element = controls[action.ref];
@@ -227,7 +232,7 @@
     }
     const remoteSave = element => !!window.PerformanceObserver && !!element && !!fieldRoot(element);
     let saveBlocked = false;
-    function watchSave() {
+    function watchSave(operation = 'ApiSetFormValue', timeout = 5000) {
       // Ashby qRe/NN saves local state after 500ms; overlapping mutations can lose other fields.
       // Captured source: https://cdn.ashbyprd.com/frontend_non_user/cffa242202eae98df17fda905c8a6012577a34bd/assets/index-CJB0DO-6.js
       // Resource Timing is shared with the page even in Chrome's isolated content-script world.
@@ -241,12 +246,12 @@
         for (const entry of list.getEntries()) {
           const url = new URL(entry.name);
           if (entry.startTime < since || url.origin !== window.location.origin ||
-            url.pathname !== '/api/non-user-graphql' || url.searchParams.get('op') !== 'ApiSetFormValue') continue;
+            url.pathname !== '/api/non-user-graphql' || url.searchParams.get('op') !== operation) continue;
           finish(entry.responseStatus === undefined || (entry.responseStatus >= 200 && entry.responseStatus < 300));
         }
       });
       observer.observe({type: 'resource'});
-      timer = window.setTimeout(() => finish(false), 5000);
+      timer = window.setTimeout(() => finish(false), timeout);
       return {done, cancel: () => finish(null)};
     }
     async function applyAshby(actions, expected) {
@@ -277,7 +282,7 @@
       if (actions.some(action => action.action === 'set' && controls[action.ref] && combo(controls[action.ref]) && required(controls[action.ref]))) return applyComboboxes(actions, expected);
       if (!committing && actions.some(action => { const element = controls[action.ref]; return element && (group(element) || element.matches('.ashby-application-form-input-text')); })) return applyWidgets(actions, expected);
       // Compare fresh page data after a slow Ask; navigation/edits must not retarget the answer.
-      if (expected && JSON.stringify(describe()[expected.ref]) !== JSON.stringify(expected)) return {filled: 0};
+      if (expected && !sameDescriptor(describe()[expected.ref],expected)) return {filled: 0};
       let filled = 0;
       for (const action of actions) {
         let element = controls[action.ref];
@@ -375,15 +380,27 @@
       return {filled, trace: rows};
     }
     function upload(ref, file) {
-      const element = controls[ref];
-      if (!element || element.type !== 'file' || !visible(element) || element.files.length || element.value) return {filled: 0};
+      const field = descriptors?.[ref], matches = field?.id ? [...document.querySelectorAll('input[type=file]')].filter(node => node.id === field.id) : [controls[ref]];
+      const element = matches.length === 1 ? matches[0] : null;
+      if (!element || (field && (controlName(element) !== field.name || label(element) !== field.label)) || element.type !== 'file' || !visible(element) || element.files.length || element.value) return {filled: 0};
       const bytes = Uint8Array.from(window.atob(file.base64), char => char.charCodeAt(0));
       const transfer = new window.DataTransfer();
       transfer.items.add(new window.File([bytes], file.name, {type: 'application/pdf'}));
-      const uploadRoot = element.closest('.file-upload');
+      const uploadRoot = element.closest('.file-upload'), ashbyRoot = element.closest('.ashby-application-form-input-file');
+      if (ashbyRoot?.querySelector('.ashby-application-form-input-file-item-name')) return {filled: 0};
+      // Current Ashby hHe/mHe uploads then saves ApiSetFormValueToFile; a FileList alone is not a saved attachment.
+      // https://cdn.ashbyprd.com/frontend_non_user/b50cb9203b8003693f6bceeb8fc9b3209b460d20/assets/index-CuxEQYaR.js
+      const watch = ashbyRoot && window.PerformanceObserver ? watchSave('ApiSetFormValueToFile', 30000) : null;
       element.files = transfer.files;
       for (const type of ['input', 'change']) element.dispatchEvent(new window.Event(type, {bubbles: true}));
       element.style.outline = '2px solid #25854a';
+      if (watch) return watch.done.then(async saved => {
+        if (!saved || !await waitFor(() => {
+          const root = (field.id ? document.getElementById(field.id) : element)?.closest('.ashby-application-form-input-file');
+          return root?.querySelector('.ashby-application-form-input-file-item-delete') && root.querySelector('.ashby-application-form-input-file-item-name')?.textContent.includes(file.name);
+        })) throw Error('Resume upload was not confirmed');
+        return {filled: 1};
+      }).finally(watch.cancel);
       // Greenhouse io commits the uploaded URL only when its filename replaces progress.
       // https://job-boards.cdn.greenhouse.io/assets/entry.client-2CybloNd.js
       // jsdom 26.1.0 has no ATS upload-completion helper (source linked above).
