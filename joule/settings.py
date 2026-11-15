@@ -2,13 +2,12 @@
 
 import json
 import logging
-from pathlib import Path
-from tempfile import NamedTemporaryFile
 from typing import Literal
 
 from fastapi import APIRouter, Request
 
 from joule.config import StrictModel
+from joule.files import atomic_write
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -34,18 +33,9 @@ def get_appearance(request: Request):
 
 @router.put("/api/appearance")
 def set_appearance(request: Request, body: Appearance):
-    directory = request.app.state.data_dir
-    # tempfile provides unique writers; Path.replace atomically publishes a complete file.
-    # https://docs.python.org/3.13/library/tempfile.html#tempfile.NamedTemporaryFile
-    temporary = None
-    try:
-        with NamedTemporaryFile(mode="w", dir=directory, delete=False) as file:
-            temporary = Path(file.name)
-            file.write(body.model_dump_json() + "\n")
-        temporary.replace(directory / "appearance.json")
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+    atomic_write(
+        request.app.state.data_dir / "appearance.json", body.model_dump_json() + "\n"
+    )
     return body
 
 

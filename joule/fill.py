@@ -6,11 +6,11 @@ import re
 from contextlib import closing
 from typing import Annotated, Literal
 
-import yaml
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import Field, create_model
 
-from joule import ai, cv, drafts
+from joule import ai, answers, cv, drafts
+from joule.answers import normalize
 from joule.config import StrictModel, load_settings
 from joule.db import connect
 from joule.jobs import primary
@@ -49,22 +49,9 @@ class AskRequest(StrictModel):
     options: list[Option] = Field(default_factory=list, max_length=100)
 
 
-class SaveRequest(StrictModel):
-    question: str = Field(min_length=1, max_length=500)
-    answer: str = Field(min_length=1, max_length=5000)
-
-
 @router.post("/answers")
-def save(request: Request, body: SaveRequest):
-    path = request.app.state.data_dir / "profile" / "answers.yaml"
-    if path.exists() and path.stat().st_size > 200 * 1024:
-        raise HTTPException(413, "Answer bank exceeds 200 KB")
-    # PyYAML 6.0.3 emits multiple writes when given a stream; serialize first:
-    # https://github.com/yaml/pyyaml/blob/6.0.3/lib/yaml/__init__.py#L215-L254
-    entry = yaml.safe_dump([body.model_dump()], allow_unicode=True, width=1e9)
-    # ADR §6: always append once; duplicate adjacent entries are an accepted race.
-    with path.open("a", encoding="utf-8") as bank:
-        bank.write(entry)
+def save(request: Request, body: answers.AnswerInput):
+    answers.append(request.app.state.data_dir, [body.model_dump()], from_fill=True)
     return {}
 
 
@@ -120,12 +107,6 @@ SENSITIVE = re.compile(
 )
 
 
-def normalize(text):
-    # Pydantic 2.14 validates strings, not ATS semantics:
-    # https://github.com/pydantic/pydantic/blob/v2.14.0/pydantic/types.py
-    return " ".join(text.lower().replace("*", "").replace("✱", "").split())
-
-
 def sensitive(text):
     return bool(SENSITIVE.search(normalize(text)))
 
@@ -169,22 +150,9 @@ def identity(document):
 
 
 def answer_bank(directory):
-    path = directory / "profile" / "answers.yaml"
-    if not path.is_file():
-        return {}
     try:
-        # PyYAML 6.0.3 parses YAML, not the shared bank's list-entry contract:
-        # https://github.com/yaml/pyyaml/blob/6.0.3/lib/yaml/__init__.py#L117-L125
-        entries = yaml.safe_load(path.read_text())
-        if not isinstance(entries, list) or any(
-            not isinstance(entry, dict)
-            or not isinstance(entry.get("question"), str)
-            or not isinstance(entry.get("answer"), str)
-            for entry in entries
-        ):
-            raise ValueError("invalid answer bank")
-        return {normalize(entry["question"]): entry["answer"] for entry in entries}
-    except (OSError, UnicodeError, yaml.YAMLError, ValueError):
+        return {normalize(e["question"]): e["answer"] for e in answers.read(directory)}
+    except HTTPException:
         logging.getLogger(__name__).warning("Ignoring unreadable answers.yaml")
         return {}
 

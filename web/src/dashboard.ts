@@ -292,7 +292,7 @@ function showView(next: string, focus = false) {
   if (view !== 'triage') triage.clear();
   element('a-scans').hidden = view !== 'scans';
   element('a-settings').hidden = view !== 'settings';
-  if (view === 'settings') void settingsPage.connections();
+  if (view === 'settings') settingsPage.open();
   document.querySelectorAll<HTMLElement>('.app-nav [data-view], #mobile-nav [data-view], #settings-link').forEach(tab => {
     if (tab.dataset.view === view) tab.setAttribute('aria-current', 'page');
     else tab.removeAttribute('aria-current');
