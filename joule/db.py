@@ -66,25 +66,20 @@ CREATE TABLE IF NOT EXISTS scans (
 
 
 EMAIL_SCHEMA = (
-    """CREATE TABLE IF NOT EXISTS email_suggestions (
+    """CREATE TABLE IF NOT EXISTS gmail_events (
         id INTEGER PRIMARY KEY, account TEXT NOT NULL, message_id TEXT NOT NULL,
-        job_id INTEGER NOT NULL REFERENCES jobs(id), first_move_id INTEGER NOT NULL, move_id INTEGER NOT NULL,
-        folder TEXT NOT NULL, uid INTEGER NOT NULL, sender_name TEXT NOT NULL,
-        sender_address TEXT NOT NULL, subject TEXT NOT NULL, quote TEXT NOT NULL, date TEXT,
-        proposal TEXT NOT NULL, state TEXT NOT NULL CHECK (state IN ('pending','confirmed','ignored','excluded')),
-        UNIQUE(account,message_id,job_id)
+        job_id INTEGER NOT NULL REFERENCES jobs(id), first_move_id INTEGER NOT NULL,
+        sender TEXT NOT NULL, subject TEXT NOT NULL, quote TEXT NOT NULL, date TEXT NOT NULL,
+        state TEXT NOT NULL, UNIQUE(account,message_id,job_id)
     )""",
-    """CREATE TABLE IF NOT EXISTS email_dedup (
-        account TEXT NOT NULL, message_id TEXT NOT NULL, job_id INTEGER NOT NULL REFERENCES jobs(id),
-        outcome TEXT NOT NULL, PRIMARY KEY(account,message_id,job_id)
+    """CREATE TABLE IF NOT EXISTS gmail_checks (
+        account TEXT PRIMARY KEY, checked_at TEXT NOT NULL, through_at TEXT, window_at TEXT, page_token TEXT
     )""",
-    "CREATE INDEX IF NOT EXISTS email_suggestions_job ON email_suggestions(job_id)",
-    """CREATE TABLE IF NOT EXISTS email_checks (
-        account TEXT NOT NULL, folder TEXT NOT NULL, validity TEXT NOT NULL,
-        uid INTEGER NOT NULL, checked_at TEXT NOT NULL, PRIMARY KEY(account,folder)
-    )""",
+    # Retired IMAP proposals are never replayed as automatic Gmail Moves.
+    "DROP TABLE IF EXISTS email_suggestions",
+    "DROP TABLE IF EXISTS email_dedup",
+    "DROP TABLE IF EXISTS email_checks",
 )
-
 
 PIPELINE_SCHEMA = (
     """CREATE TABLE IF NOT EXISTS pipeline_moves (
@@ -110,7 +105,7 @@ PIPELINE_SCHEMA = (
 )
 
 
-def enter_pipeline(db, job_id, how="manual"):
+def enter_pipeline(db, job_id, how="manual", *, applied_at=None):
     missing = db.execute(
         "SELECT 1 FROM jobs WHERE id=? AND state='applied' AND primary_id IS NULL "
         "AND NOT EXISTS (SELECT 1 FROM pipeline WHERE job_id=jobs.id)",
@@ -119,7 +114,7 @@ def enter_pipeline(db, job_id, how="manual"):
     if missing:
         move_id = db.execute(
             "INSERT INTO pipeline_moves (job_id,stage,created_at,how) VALUES (?,'applied',?,?)",
-            (job_id, datetime.now(UTC).isoformat(), how),
+            (job_id, (applied_at or datetime.now(UTC)).isoformat(), how),
         ).lastrowid
         db.execute("INSERT INTO pipeline VALUES (?,?,?)", (job_id, move_id, move_id))
 
@@ -207,6 +202,15 @@ def init_db(path: Path) -> None:
                 )
             for statement in PIPELINE_SCHEMA + EMAIL_SCHEMA:
                 connection.execute(statement)
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(gmail_checks)")
+            }
+            for column in ("window_at", "page_token"):
+                if column not in columns:
+                    connection.execute(
+                        f"ALTER TABLE gmail_checks ADD COLUMN {column} TEXT"
+                    )
             for row in connection.execute(
                 "SELECT id FROM jobs WHERE state='applied' AND primary_id IS NULL "
                 "AND NOT EXISTS (SELECT 1 FROM pipeline WHERE job_id=jobs.id)"

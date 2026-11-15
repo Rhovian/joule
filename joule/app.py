@@ -15,10 +15,8 @@ from joule.answers import router as answers_router
 from joule.config import data_dir as default_data_dir
 from joule.config import load_env, load_settings
 from joule.db import connect, init_db
-from joule.email_connection import EmailConnection
-from joule.email_connection import router as email_router
-from joule.email_suggestions import EmailSuggestions
-from joule.email_suggestions import router as suggestions_router
+from joule.gmail_agent import GmailAgent
+from joule.gmail_agent import router as gmail_router
 from joule.fill import router as fill_router
 from joule.jobs import router as jobs_router
 from joule.manual import router as manual_router
@@ -39,6 +37,9 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         init_db(directory / "joule.db")
+        (directory / "email.json").unlink(
+            missing_ok=True
+        )  # retire saved IMAP passwords
         try:
             with closing(connect(directory / "joule.db")) as db, db:
                 evaluate(db, load_settings(directory))
@@ -62,10 +63,9 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                 client,
                 app.state.upwork_auth,
                 telegram,
-                app.state.email_suggestions,
             )
             telegram_task = asyncio.create_task(telegram.run()) if telegram else None
-            email_task = asyncio.create_task(app.state.email_suggestions.run())
+            email_task = asyncio.create_task(app.state.gmail.run())
             schedule_task = asyncio.create_task(app.state.scanner.run_schedule())
             try:
                 yield
@@ -105,7 +105,6 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
 
     app.add_exception_handler(UpworkNotConnected, upwork_not_connected)
     app.state.data_dir = directory
-    app.state.email = EmailConnection(directory)
     app.include_router(router)
     app.include_router(scan_router)
     app.include_router(jobs_router)
@@ -113,9 +112,8 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     app.include_router(fill_router)
     app.include_router(traces_router)
     app.include_router(settings_router)
-    app.state.email_suggestions = EmailSuggestions(directory, app.state.email)
-    app.include_router(email_router)
-    app.include_router(suggestions_router)
+    app.state.gmail = GmailAgent(directory)
+    app.include_router(gmail_router)
     app.include_router(answers_router)
     app.include_router(profile_router)
     app.include_router(pipeline_router)

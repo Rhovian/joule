@@ -74,13 +74,11 @@ _Avoid_: State change, event log
 An optional timezone-aware appointment or follow-up time on a Pipeline Job, with an optional label such as Technical. Stored in UTC; clearing the date also clears its label.
 _Avoid_: Deadline, reminder (no notification is implied)
 
-**Inbox connection**:
-The owner's validated IMAP account and read-only folder configuration for Pipeline email. Connecting validates access; it does not fetch messages or move Jobs.
-_Avoid_: Mail sync (not implemented by connecting)
+**Gmail connection**:
+The owner's Google OAuth grant limited to gmail.readonly, used by the Gmail MCP server. A dedicated scheduled mail agent reads application replies and may append automatic Moves or discover applications made outside Joule.
 
-**Email suggestion**:
-A matched email's proposed Pipeline Move or Next date, awaiting the owner's confirmation. Ignore dismisses it; Not this Job excludes that Message-ID/Job pair until the inbox is disconnected. Fetching/classifying never makes a Move.
-_Avoid_: Automatic move, email action (nothing is sent)
+**Email flag**:
+A matched message requiring review because its application identity or intent is uncertain, or because acceptance requires the operator’s Accepted decision. Shown in Pipeline for operator review. Uncertain matches do not move Jobs; acceptance mail may advance to Offer while awaiting the operator’s Accepted decision. Only sender, subject, one line and metadata are retained.
 
 **Manual Source**:
 Jobs the owner explicitly creates from a page in the Extension. It stores the page URL and bounded text; cheap filters and scoring apply, but it does not fetch new postings.
