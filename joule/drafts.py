@@ -10,6 +10,7 @@ from joule.upwork_auth import UpworkNotConnected
 
 KINDS = {
     "cover_letter": "Cover Letter",
+    "follow_up": "Follow-up",
     "proposal": "Proposal",
     "tailored_cv": "Tailored CV",
 }
@@ -104,7 +105,7 @@ async def write(db, job, kind, note, settings, data_dir, auth=None):
             "SELECT text FROM drafts WHERE kind IN ('proposal', 'cover_letter') "
             "ORDER BY id DESC LIMIT 10"
         ).fetchall()
-        if kind != "tailored_cv"
+        if kind in {"cover_letter", "proposal"}
         else []
     )
     document = await generate(job, kind, note, settings, data_dir, recent)
@@ -123,6 +124,17 @@ async def write(db, job, kind, note, settings, data_dir, auth=None):
 
 
 async def generate(job, kind, note, settings, data_dir, recent=()):
+    if kind == "follow_up":
+        prompt = (
+            f"Write a short follow-up about the owner's application to this Job, in their voice. {RULES}"
+            "Use 30 to 60 words: politely check on the application and express continued interest. "
+            "Do not claim contact, replies or interviews that are not in the context. "
+            "Do not write a new application pitch or screening answers. Nothing is sent.\n"
+            f"Owner's note: {note or ''}\n{context(job, data_dir)}"
+        )
+        return (
+            await ai.retry_structured(settings.models.drafts, prompt, CoverLetter)
+        ).model_dump()
     count = len(json.loads(job["extra"] or "{}").get("screening_questions", []))
     schema = (
         CoverLetter

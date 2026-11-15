@@ -41,7 +41,7 @@ CREATE INDEX IF NOT EXISTS jobs_primary_id ON jobs(primary_id);
 CREATE TABLE IF NOT EXISTS drafts (
     id INTEGER PRIMARY KEY,
     job_id INTEGER NOT NULL REFERENCES jobs(id),
-    kind TEXT NOT NULL CHECK (kind IN ('tailored_cv', 'cover_letter', 'proposal')),
+    kind TEXT NOT NULL CHECK (kind IN ('tailored_cv', 'cover_letter', 'proposal', 'follow_up')),
     text TEXT NOT NULL,
     pdf_path TEXT,
     note TEXT,
@@ -107,6 +107,23 @@ def connect(path: Path) -> sqlite3.Connection:
     return connection
 
 
+def extend_check(connection, table, existing, added):
+    sql = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)
+    ).fetchone()[0]
+    if added not in sql:
+        # SQLite's existing CHECK migration: https://sqlite.org/lang_altertable.html#otheralter
+        version = connection.execute("PRAGMA schema_version").fetchone()[0]
+        connection.execute("PRAGMA writable_schema=ON")
+        connection.execute(
+            "UPDATE sqlite_master SET sql=? WHERE type='table' AND name=?",
+            (sql.replace(existing, f"{existing}, {added}"), table),
+        )
+        connection.execute(f"PRAGMA schema_version={version + 1}")
+        connection.execute("PRAGMA writable_schema=OFF")
+    return sql
+
+
 def init_db(path: Path) -> None:
     new = not path.exists()
     if new:
@@ -117,18 +134,8 @@ def init_db(path: Path) -> None:
             connection.executescript(SCHEMA)
         with connection:
             connection.execute("BEGIN")
-            sql = connection.execute(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'"
-            ).fetchone()[0]
-            if "'applied'" not in sql:
-                version = connection.execute("PRAGMA schema_version").fetchone()[0]
-                connection.execute("PRAGMA writable_schema=ON")
-                connection.execute(
-                    "UPDATE sqlite_master SET sql=? WHERE type='table' AND name='jobs'",
-                    (sql.replace("'dismissed'", "'dismissed', 'applied'"),),
-                )
-                connection.execute(f"PRAGMA schema_version={version + 1}")
-                connection.execute("PRAGMA writable_schema=OFF")
+            sql = extend_check(connection, "jobs", "'dismissed'", "'applied'")
+            extend_check(connection, "drafts", "'proposal'", "'follow_up'")
             if "queued" not in sql:
                 connection.execute(
                     "ALTER TABLE jobs ADD COLUMN queued INTEGER NOT NULL DEFAULT 0"

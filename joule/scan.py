@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Request
 from joule import ai, drafts, filters, scan_alerts, score
 from joule.config import StrictModel, load_env, load_preferences, load_settings
 from joule.db import connect
+from joule.pipeline import evaluate
 from joule.sources import (
     adzuna,
     freehire,
@@ -104,6 +105,11 @@ class Scanner:
     def tick(self):
         settings = load_settings(self.data_dir)
         now = datetime.now(UTC)
+        try:
+            with closing(connect(self.path)) as db, db:
+                evaluate(db, settings, now)
+        except Exception:
+            logger.exception("Pipeline evaluation failed; continuing Scan/purge tick")
         cutoff = now - timedelta(hours=settings.upwork.retention_hours)
         with closing(connect(self.path)) as db, db:
             db.execute(

@@ -66,7 +66,7 @@ async def list_jobs(
     with closing(connect(directory / "joule.db")) as db:
         rows = db.execute(
             f"SELECT jobs.*, {score.RANK} AS rank, drafted.job_id IS NOT NULL AS has_drafts "
-            "FROM jobs LEFT JOIN (SELECT DISTINCT job_id FROM drafts) drafted "
+            "FROM jobs LEFT JOIN (SELECT DISTINCT job_id FROM drafts WHERE kind!='follow_up') drafted "
             "ON drafted.job_id=jobs.id WHERE primary_id IS NULL "
             f"AND {SHOW_CATEGORY} IN (SELECT value FROM json_each(?)) "
             f"AND {SOURCE_FILTER} "
@@ -208,7 +208,7 @@ async def rescore_job(request: Request, job_id: int, body: StrictModel):
 
 
 class DraftRequest(StrictModel):
-    kind: Literal["cover_letter", "proposal", "tailored_cv"]
+    kind: Literal["cover_letter", "proposal", "tailored_cv", "follow_up"]
     note: str | None = Field(None, max_length=2000)
 
 
@@ -226,7 +226,7 @@ async def write_draft(request: Request, job_id: int, body: DraftRequest):
     directory = request.app.state.data_dir
     with closing(connect(directory / "joule.db")) as db:
         job = primary(db, job_id)
-        if body.kind != "tailored_cv" and (body.kind == "proposal") != (
+        if body.kind in {"cover_letter", "proposal"} and (body.kind == "proposal") != (
             job["source"] == "upwork"
         ):
             raise HTTPException(400, "Draft kind does not match Job source")

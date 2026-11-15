@@ -28,6 +28,11 @@ class Schedule(StrictModel):
     upwork_minutes: int | None = 15
 
 
+class Pipeline(StrictModel):
+    follow_up_days: int = Field(default=14, ge=1)
+    no_reply_days: int = Field(default=21, ge=1)
+
+
 class Upwork(StrictModel):
     scoring: bool = True
     retention_hours: int = 24
@@ -82,6 +87,7 @@ class Settings(StrictModel):
             "getarustjob",
         ]
     )
+    pipeline: Pipeline = Field(default_factory=Pipeline)
     schedule: Schedule = Field(default_factory=Schedule)
     upwork: Upwork = Field(default_factory=Upwork)
     models: Models = Field(default_factory=Models)
