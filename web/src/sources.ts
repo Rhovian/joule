@@ -1,5 +1,6 @@
 import type { Source } from './types';
 import { age, escape } from './format';
+import { sourceStatus } from './source-status';
 
 export function createSourceFilter(onChange: () => void, onOpen: () => void) {
   const menu = document.getElementById('sources-menu')!;
@@ -20,13 +21,10 @@ export function createSourceFilter(onChange: () => void, onOpen: () => void) {
     options.innerHTML = [true, false].map(showing => {
       const group = matching.filter(s => selected.has(s.name) === showing);
       return `<section aria-label="${showing ? 'Showing' : 'Hidden'}"><h3 class="source-group">${showing ? 'Showing' : 'Hidden'} · ${group.length}</h3>${group.map(s => {
-        const last = s.last, finished = last?.status === 'running' ? s.last_finished : last;
-        const stamp = finished?.finished_at ?? finished?.started_at;
+        const last = s.last, { stamp, days, failed, interrupted, stale } = sourceStatus(s);
         const jobsLabel = `${s.new_jobs} new Job${s.new_jobs === 1 ? '' : 's'}`;
-        const days = stamp ? Math.floor((Date.now() - Date.parse(stamp)) / 86400000) : 0;
-        const failed = last?.status === 'failed' || !!last?.counts?.errors?.length;
         // Running status belongs to a shared Scan; label Source membership.
-        const flag = failed ? '<span class="tag failed">failed</span>' : last?.status === 'interrupted' ? '<span class="tag filtered">interrupted</span>' : last?.status === 'running' ? '<span class="tag running" title="Included in the current Scan">in Scan</span>' : days >= 14 ? `<span class="tag filtered">${days}d old</span>` : '';
+        const flag = failed ? '<span class="tag failed">failed</span>' : interrupted ? '<span class="tag filtered">interrupted</span>' : last?.status === 'running' ? '<span class="tag running" title="Included in the current Scan">in Scan</span>' : stale ? `<span class="tag filtered">${days}d old</span>` : '';
         return `<div class="source-row"><button type="button" class="source-option" role="checkbox" aria-checked="${showing}" data-source="${escape(s.name)}" aria-label="${escape(s.name)}, ${jobsLabel}" aria-describedby="source-status-${escape(s.name)} source-age-${escape(s.name)}"><span class="source-check" aria-hidden="true">${showing ? '✓' : ''}</span><span class="source-name">${escape(s.name)}</span><span class="source-status" id="source-status-${escape(s.name)}">${flag}</span><span class="source-new" title="${jobsLabel}">${s.new_jobs}</span><span class="source-age" id="source-age-${escape(s.name)}"><span class="sr-only">Last finished Scan </span>${stamp ? age(stamp, true) : 'never'}</span></button><button type="button" class="source-only btn small" data-only="${escape(s.name)}" aria-label="Show only ${escape(s.name)}">only <kbd>o</kbd></button></div>`;
       }).join('')}</section>`;
     }).join('') + (matching.length ? '' : `<p class="source-empty">${sources.length ? 'No Sources match your search.' : 'No Sources enabled.'}</p>`);
