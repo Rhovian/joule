@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const {JSDOM} = require('jsdom');
 
-for (const filled of [1, 0]) test(`set rows have no actions; Ask filled=${filled} preserves the save flow`, async () => {
+test('set rows have no actions; Ask preview edits are used by Fill field and Copy', async () => {
   const job = {id: 1, title: 'Engineer', company: 'Acme', source: 'hotfix'}, calls = [];
   const fields = ['First Name', 'Country', 'Why us?', 'Gender', 'Resume'].map((label, i) => ({ref: [0, i], label, required: i !== 3}));
   const actions = ['set', 'set', 'ask', 'leave', 'upload'].map((action, i) => ({ref: fields[i].ref, action}));
@@ -14,7 +14,7 @@ for (const filled of [1, 0]) test(`set rows have no actions; Ask filled=${filled
       const value = {
         detect: job, jobs: [job], resume: {},
         fill: {job, fields, actions, filled: 2},
-        ask: {value: 'Profile answer <b>as text</b>', filled}, save: {},
+        'ask-preview': {value: 'Profile answer <b>as text</b>'}, 'fill-field': {filled:1}, save: {},
       }[message.type];
       return {value};
     }},
@@ -38,10 +38,18 @@ for (const filled of [1, 0]) test(`set rows have no actions; Ask filled=${filled
   buttons()[0].click(); await settle();
   assert.equal(settings.disabled, true, 'actions preserve unrelated disabled controls');
   assert.deepEqual(buttons().map(button => button.textContent), ['Fill field', 'Copy', 'Save to bank', 'Ask again']);
-  assert.equal(askRow.querySelector('.field-answer').textContent, 'Profile answer <b>as text</b>');
+  const preview = askRow.querySelector('.field-answer'), edited = 'Edited <b>answer</b>\nSecond line';
+  assert.equal(preview.matches(':enabled:not([readonly])'), true);
+  assert.equal(preview.value, 'Profile answer <b>as text</b>');
+  preview.value = edited;
   assert.equal(askRow.querySelector('b'), null);
+  assert.match(element('status').textContent, /preview only.*Fill field/i);
+  assert.equal(calls.filter(call => call.type === 'fill-field').length,0);
+  buttons().find(button => button.textContent === 'Fill field').click(); await settle();
+  assert.equal(calls.find(call => call.type === 'fill-field').value, edited);
+  assert.equal(element('status').textContent, 'Field filled. Review the form.');
   buttons().find(button => button.textContent === 'Copy').click(); await settle();
-  assert.equal(copied, 'Profile answer <b>as text</b>');
+  assert.equal(copied, edited);
   buttons().find(button => button.textContent === 'Save to bank').click(); await settle();
   const saved = calls.find(call => call.type === 'save');
   assert.equal(saved.jobId, job.id);
@@ -51,16 +59,20 @@ for (const filled of [1, 0]) test(`set rows have no actions; Ask filled=${filled
   panel.window.close();
 });
 
-test('Fill offers the PDF download and clears it on the next Fill or Job change', async () => {
+test('matched Jobs always offer CV download, with edited Job selection clearing the cached file', async () => {
   const job = {id: 1, source: 'hotfix'};
   const changes = [];
   let download = {name: 'JB_CV_Acme.pdf', base64: 'JVBERg=='};
   const panel = new JSDOM(fs.readFileSync(`${__dirname}/../sidepanel.html`, 'utf8'), {runScripts: 'outside-only'});
+  const downloads = [], nativeClick = panel.window.HTMLAnchorElement.prototype.click;
+  panel.window.HTMLAnchorElement.prototype.click = function () {
+    if (this.hasAttribute('download')) downloads.push({name:this.download,href:this.href}); else nativeClick.call(this);
+  };
   panel.window.chrome = {
     runtime: {sendMessage: async message => {
       if (['mark-applied','undo-applied'].includes(message.type)) { changes.push(message); return {value:{job:{...job,state:message.type==='mark-applied'?'applied':'new'},canUndo:message.type==='mark-applied'}}; }
       return {value: {
-      detect: job, select: {...job, id: 2}, jobs: [job, {...job, id: 2}], resume: {},
+      detect: job, select: {...job, id: 2}, jobs: [job, {...job, id: 2}], resume: {}, 'resume-download': download,
       fill: {job, fields: [], actions: [], filled: 0, resumeDownload: download},
     }[message.type]}; }},
     tabs: {query: async () => [{id: 4}], onActivated: {addListener() {}}, onUpdated: {addListener() {}}},
@@ -69,8 +81,15 @@ test('Fill offers the PDF download and clears it on the next Fill or Job change'
   panel.window.eval(fs.readFileSync(`${__dirname}/../sidepanel.js`, 'utf8'));
   const settle = () => new Promise(resolve => setImmediate(resolve));
   const element = id => panel.window.document.getElementById(id);
-  await settle(); element('fill').click(); await settle();
+  await settle();
   const link = element('resume-download');
+  assert.equal(link.closest('#cv-card') !== null, true);
+  assert.equal(link.hidden, false);
+  link.click(); await settle();
+  assert.equal(link.download, download.name);
+  assert.deepEqual(downloads,[{name:download.name,href:`data:application/pdf;base64,${download.base64}`}]);
+  assert.equal(changes.length, 0);
+  element('fill').click(); await settle();
   assert.equal(link.hidden, false);
   assert.equal(link.textContent, 'Download Tailored CV');
   assert.equal(link.download, download.name);
@@ -83,13 +102,15 @@ test('Fill offers the PDF download and clears it on the next Fill or Job change'
   assert.equal(element('undo-applied').hidden, true);
   download = undefined;
   element('fill').click(); await settle();
-  assert.equal(link.hidden, true);
-  assert.equal(link.hasAttribute('href'), false);
+  assert.equal(link.hidden, false);
+  assert.equal(link.getAttribute('href'), '#');
+  assert.equal(link.hasAttribute('download'), false);
   download = {name: 'CV.pdf', base64: 'JVBERg=='};
   element('fill').click(); await settle();
   element('change').click();
   element('job-choices').querySelector('[data-job="2"]').click(); await settle();
-  assert.equal(link.hidden, true);
-  assert.equal(link.hasAttribute('href'), false);
+  assert.equal(link.hidden, false);
+  assert.equal(link.getAttribute('href'), '#');
+  assert.equal(link.hasAttribute('download'), false);
   panel.window.close();
 });

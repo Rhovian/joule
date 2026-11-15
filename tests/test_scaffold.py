@@ -88,6 +88,38 @@ def test_db_initialization_and_unique_jobs(tmp_path):
             db.execute(sql, values)
         with pytest.raises(sqlite3.IntegrityError, match="jobs.source_id"):
             db.execute(sql, ("hn", None, "https://example.com", "Engineer"))
+        for source in ("hotfix", "freehire", "getarustjob"):
+            db.execute(sql, (source, "1", "https://example.com", "Engineer"))
+        db.execute(
+            "UPDATE jobs SET location_raw='New York, NY',remote=0,location_unclear=1 WHERE source!='hn'"
+        )
+        db.execute(
+            "UPDATE jobs SET location_raw=NULL,description='This role is onsite NYC.' WHERE source='getarustjob'"
+        )
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    preferences = profile / "preferences.yaml"
+    preferences.write_text(
+        "roles: []\nlocations:\n  cities: [{city: Boston, country: US}]\n"
+    )
+    init_db(path)
+    with closing(connect(path)) as db:
+        rows = db.execute("SELECT * FROM jobs WHERE source!='hn'").fetchall()
+        assert all(
+            row["city"] == "New York" and row["location_unclear"] == 0 for row in rows
+        )
+        assert all(
+            row["filtered_reason"] == "location: city New York not allowed"
+            for row in rows
+        )
+    preferences.write_text("roles: []\nlocations:\n  cities: []\n")
+    init_db(path)
+    with closing(connect(path)) as db:
+        # Reopening keeps corrected locations consistent with current Preferences.
+        assert all(
+            row[0] is None
+            for row in db.execute("SELECT filtered_reason FROM jobs WHERE source!='hn'")
+        )
 
 
 def test_startup_interrupts_running_scans(tmp_path):

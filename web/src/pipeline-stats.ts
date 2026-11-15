@@ -2,7 +2,7 @@ import { escape } from './format';
 import './pipeline-stats.css';
 type Rate = { name: string; applied: number; replies: number };
 type Terminal = { at: number; stage: string | null; closed_reason: string | null; count: number };
-export type Statistics = { follow_up_ids: number[]; follow_up_ages: Record<number, number>; follow_up_error: boolean; follow_up_days: number | null; no_reply_days: number | null; total: number; job_ids: number[]; replies: number; reached: number[]; terminals: Terminal[]; bands: Rate[]; sources: Rate[] };
+export type Statistics = { total: number; job_ids: number[]; replies: number; reached: number[]; terminals: Terminal[]; bands: Rate[]; sources: Rate[] };
 const stages = ['Applied', 'Screen', 'Interview', 'Offer', 'Accepted'];
 const names: Record<string, string> = { applied:'Waiting', screen:'In screen', interview:'Interviewing', offer:'Deciding', accepted:'Accepted', stage:'Still in stage', no_reply:'No reply', rejected:'Rejected', withdrawn:'Withdrawn' };
 const percent = (n: number, total: number) => total ? `${Math.round(100 * n / total)}%` : '—';
@@ -48,12 +48,12 @@ export function createMetrics(reload: () => Promise<void>, error: (e: unknown) =
   function toggle() {
     hidden = !hidden; document.getElementById('pipeline-flow-body')!.hidden = hidden;
     const button = document.getElementById('pipeline-flow-toggle')!;
-    button.setAttribute('aria-expanded', String(!hidden)); button.innerHTML = `${hidden ? 'Show' : 'Hide'} <kbd>v</kbd>`;
+    button.setAttribute('aria-expanded', String(!hidden)); button.textContent = hidden ? 'Show' : 'Hide';
   }
   document.getElementById('pipeline-flow-toggle')!.addEventListener('click', toggle);
   document.getElementById('source-reply-rates')!.innerHTML = `<header><h3>Reply rate by Source</h3>${periodSelect()}</header><p class="muted">Replies to Jobs you applied to, from Pipeline.</p><div id="source-rate-rows">Loading reply rates…</div>`;
   return {
-    period, query: () => days ? `?days=${days}` : '', toggle,
+    period, query: () => days ? `?days=${days}` : '',
     render(data: Statistics) {
       replace('pipeline-flow-body', data.total ? flow(data) : `<p class="pipeline-empty">${days ? 'No applied Jobs in this period. Choose All time to see older applications.' : 'No applied Jobs. Mark a Job applied in <a href="#triage">Triage</a> to start the flow.'}</p>`);
       replace('pipeline-rates', `<h3>Reply rate <small>by current Fit Score</small></h3>${rates(data.bands)}<p class="muted">A reply is any answer, including a rejection. <a href="#scans">By Source ›</a></p>`);

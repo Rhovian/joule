@@ -8,9 +8,10 @@ const manifest = JSON.parse(fs.readFileSync(`${__dirname}/../manifest.json`, 'ut
 test('panel detects on open, tab switch and navigation; unmatched pages allow manual selection', async () => {
   const job = {id: 1, title: 'Engineer', company: 'Acme', source: 'hotfix'};
   const values = {origin: 'http://localhost:8000'}, calls = [], listeners = {};
-  const storage = {get: async key => ({[key]: values[key]}), set: async data => Object.assign(values, data)};
+  const storage = {get: async key => key === null ? {...values} : ({[key]: values[key]}), set: async data => Object.assign(values, data)};
   let tab = {id: 4, active: true, url: 'https://jobs.lever.co/acme/1/apply?utm_source=feed'};
   let createError, createdBody, listed = true, resolveFails = false, theme = 'dark', themeFails = false;
+  let coverWrites = 0, copied, workerSupportsCover = true;
   let releaseTheme;
   let themeGate = new Promise(resolve => { releaseTheme = resolve; });
   const ui = {id: 'extension', url: 'chrome-extension://extension/sidepanel.html'};
@@ -36,16 +37,20 @@ test('panel detects on open, tab switch and navigation; unmatched pages allow ma
       assert.equal(path.searchParams.get('url'), tab.url);
       value = tab.url.includes('/acme/1/') ? job : null;
     } else if (path.pathname === '/api/fill/jobs') { if (createError) return {ok:false,status:409,json:async()=>({detail:createError})}; createdBody = JSON.parse(options.body); value = {id:6,title:createdBody.title,source:'manual'}; }
+    else if (path.pathname === '/api/fill/jobs/1/match') value = {job,cover_letter_draft_id:job.drafts ? 3 : null};
     else if (path.pathname === '/api/jobs') value = listed ? [job] : [];
+    else if (path.pathname === '/api/jobs/1/drafts') { assert.deepEqual(JSON.parse(options.body), {kind:'cover_letter'}); coverWrites++; job.drafts = {cover_letter:{content:{text:'Letter <b>as text</b>'}}}; value = job; }
     else if (path.pathname === '/api/jobs/1') value = job;
     return {ok: true, json: async () => value};
   });
   chrome.runtime.sendMessage = async message => {
+    if (message.type === 'cover-letter' && !workerSupportsCover) return {error:'Unknown request'};
     try { return {value: await background.handle(message, ui)}; }
     catch (error) { return {error: error.message}; }
   };
   const panel = new JSDOM(fs.readFileSync(`${__dirname}/../sidepanel.html`, 'utf8'), {runScripts: 'outside-only'});
   panel.window.chrome = chrome;
+  panel.window.navigator.clipboard = {writeText: async value => { copied = value; }};
   const permissions = []; chrome.permissions = {request: async request => { permissions.push(request); return true; }};
   panel.window.fetch = async () => ({ok: true, json: async () => []});
   panel.window.eval(fs.readFileSync(`${__dirname}/../options.js`, 'utf8'));
@@ -63,16 +68,45 @@ test('panel detects on open, tab switch and navigation; unmatched pages allow ma
   assert.match(element('status').textContent, /Detected Job from page URL/);
   releaseTheme(); themeGate = null; await settle();
   assert.equal(panel.window.document.documentElement.classList.contains('dark'), true);
+  assert.equal(element('cover-letter').hidden, false);
+  element('cover-generate').click(); await settle();
+  assert.equal(coverWrites, 1);
+  assert.equal(element('cover-text').textContent, 'Letter <b>as text</b>');
+  assert.equal(element('cover-text').querySelector('b'), null);
+  element('cover-copy').click(); await settle();
+  assert.equal(copied, 'Letter <b>as text</b>');
+  workerSupportsCover = false;
+  element('retry').click(); await settle();
+  assert.match(element('status').textContent, /Detected Job from page URL/);
+  assert.equal(element('cover-status').textContent, '');
+  assert.equal(element('cover-text').textContent, copied, 'a cached generation survives a failed optional draft read');
+  workerSupportsCover = true;
+  element('retry').click(); await settle();
+  assert.equal(coverWrites, 1, 'refresh reads the saved letter without regenerating');
+  assert.equal(element('cover-text').textContent, copied);
+  assert.equal(element('cover-status').textContent, '');
+  await assert.rejects(background.handle({type:'cover-letter',jobId:99,generate:true},ui), /Active Job changed/);
+  assert.equal(coverWrites, 1, 'stale Job requests must not generate');
+  const active = values.active; values.active = {...active,source:'upwork'};
+  await assert.rejects(background.handle({type:'cover-letter',jobId:1,generate:true},ui), /non-Upwork/);
+  values.active = active;
   tab = {...tab, id: 5, url: 'https://employer.example/unknown'};
   listeners.activate({tabId: 5});
   await settle();
   assert.equal(values.active, null);
+  assert.equal(element('cover-letter').hidden, true);
+  assert.equal(element('cover-text').textContent, '');
   assert.equal(element('fill').disabled, true);
   assert.match(element('status').textContent, /No stored Job matches/);
   element('job-choices').querySelector('[data-job="1"]').click();
   await settle();
   assert.equal(values.active.id, 1);
   assert.equal(element('fill').disabled, false);
+  const manuallySelected = {...tab};
+  tab = {id:6,active:true,url:'https://employer.example/another'}; listeners.activate(); await settle();
+  assert.equal(element('matched').hidden,true);
+  tab = manuallySelected; listeners.activate(); await settle();
+  assert.equal(element('active').textContent,'Engineer','returning to an unmatched page preserves its manual Job selection');
   tab.url = 'https://jobs.lever.co/acme/1/apply';
   listeners.update(5, {url: tab.url}, tab);
   await settle();

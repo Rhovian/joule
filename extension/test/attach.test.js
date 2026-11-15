@@ -8,9 +8,10 @@ const {createBackground} = require('../background.js');
 function storage(values) {
   return {get: async key => ({[key]: values[key]}), set: async data => Object.assign(values, data)};
 }
-for (const site of ['lever', 'rippling']) for (const existing of [true, false]) test(`panel and resume attachment; site=${site}; existing=${existing}`, async () => {
-  const url = site === 'rippling' ? 'https://ats.rippling.com/acme/jobs/example/apply' : 'https://jobs.lever.co/acme/apply';
-  const markup = site === 'rippling' ? fs.readFileSync(`${__dirname}/fixtures/rippling-upload.html`, 'utf8') : '<input id="resume" type="file">';
+for (const [site, existing] of [['lever',false],['rippling',true],['ashby',true]]) test(`panel and resume attachment; site=${site}; existing=${existing}`, async () => {
+  const url = site === 'ashby' ? 'https://jobs.ashbyhq.com/talkiatry/example/application' : site === 'rippling' ? 'https://ats.rippling.com/acme/jobs/example/apply' : 'https://jobs.lever.co/acme/apply';
+  // Captured Talkiatry markup: current Ashby mHe/hHe upload uses ApiSetFormValueToFile.
+  const markup = site === 'ashby' ? '<div class="ashby-application-form-field-entry"><label for="_systemfield_resume">Resume</label><div class="ashby-application-form-input-file"><input id="_systemfield_resume" type="file"></div></div>' : site === 'rippling' ? fs.readFileSync(`${__dirname}/fixtures/rippling-upload.html`, 'utf8') : '<input id="resume" type="file">';
   const document = new JSDOM(markup, {url}).window.document;
   document.defaultView.HTMLElement.prototype.getClientRects = () => [{width: 100, height: 20}];
   const window = document.defaultView, worker = createWorker(document);
@@ -19,9 +20,18 @@ for (const site of ['lever', 'rippling']) for (const existing of [true, false]) 
     files = [];
     items = {add: file => this.files.push(file)};
   };
-  const input = document.querySelector('input'), events = [], calls = [];
-  Object.defineProperty(input, 'files', {value: [], writable: true});
-  for (const type of ['input', 'change']) input.addEventListener(type, event => events.push(event.type));
+  let input = document.querySelector('input'), commitUpload;
+  const events = [], calls = [], observers = new Set();
+  window.PerformanceObserver = class { constructor(callback) { this.callback=callback; } observe() { observers.add(this); } disconnect() { observers.delete(this); } };
+  function trackInput() {
+    Object.defineProperty(input, 'files', {value: [], writable: true});
+    for (const type of ['input','change']) input.addEventListener(type, () => events.push(type));
+    if(site === 'ashby') input.addEventListener('change', () => { commitUpload = () => {
+      input.parentElement.insertAdjacentHTML('beforeend', '<span class="ashby-application-form-input-file-item-name">JB_CV_Acme.pdf</span><button class="ashby-application-form-input-file-item-delete">Delete</button>');
+      for(const observer of [...observers]) observer.callback({getEntries:()=>[{name:`${new URL(url).origin}/api/non-user-graphql?op=ApiSetFormValueToFile`,responseStatus:200,startTime:window.performance.now()}]});
+    }; });
+  }
+  trackInput();
   const tab = {id: 4, url};
   const ui = {id: 'extension', url: 'chrome-extension://extension/sidepanel.html'};
   const active = {id: 1, title: 'Engineer', company: 'Acme', source: 'hotfix'};
@@ -29,7 +39,7 @@ for (const site of ['lever', 'rippling']) for (const existing of [true, false]) 
     storage: {local: storage({origin: 'http://localhost:8000'}), session: storage({active})},
     tabs: {get: async () => tab, query: async () => [tab],
       onActivated: {addListener() {}}, onUpdated: {addListener() {}}}};
-  let generated = existing;
+  let generated = existing, changeJobDuringDownload = false;
   const draft = {id: 9, version: 2, created_at: '2026-10-14T10:00:00Z'};
   const background = createBackground(chrome, async (url, options) => {
     calls.push({url, options});
@@ -41,9 +51,13 @@ for (const site of ['lever', 'rippling']) for (const existing of [true, false]) 
       generated = true;
       return {ok: true, json: async () => ({})};
     }
-    if (url.endsWith('/pdf')) return {ok: true,
+    if (url.endsWith('/pdf')) {
+      if(changeJobDuringDownload) await chrome.storage.session.set({active:{id:2}});
+      if(site === 'ashby') { const replacement=input.cloneNode(true); input.replaceWith(replacement); input=replacement; trackInput(); }
+      return {ok: true,
       headers: new Headers({'Content-Disposition': 'inline; filename="JB_CV_Acme.pdf"'}),
       arrayBuffer: async () => Uint8Array.from([37, 80, 68, 70]).buffer};
+    }
     const {fields} = JSON.parse(options.body);
     return {ok: true, json: async () => ({resume_draft_id: generated ? 9 : null,
       resume_draft: generated ? draft : null, cover_letter_draft_id: null,
@@ -63,6 +77,7 @@ for (const site of ['lever', 'rippling']) for (const existing of [true, false]) 
   };
   chrome.runtime.sendMessage = async message => ({value: await background.handle(message, ui)});
   const panel = new JSDOM(fs.readFileSync(`${__dirname}/../sidepanel.html`, 'utf8'), {runScripts: 'outside-only'});
+  panel.window.HTMLAnchorElement.prototype.click = function () { if (!this.hasAttribute('download')) this.dispatchEvent(new panel.window.MouseEvent('click',{bubbles:true,cancelable:true})); };
   panel.window.chrome = chrome;
   panel.window.matchMedia = () => ({matches: false, addEventListener() {}});
   panel.window.eval(fs.readFileSync(`${__dirname}/../sidepanel.js`, 'utf8'));
@@ -74,9 +89,19 @@ for (const site of ['lever', 'rippling']) for (const existing of [true, false]) 
   if (existing) {
     assert.match(element('resume').textContent, /v2/);
     assert.ok(element('resume').textContent.includes(new Date(draft.created_at).toLocaleString()));
-  } else assert.equal(element('resume').textContent, 'Generated during Fill if attached');
+  } else assert.equal(element('resume').textContent, 'Generated when needed for Fill or Download');
+  if(!existing) {
+    await assert.rejects(background.handle({type:'resume-download',jobId:2},ui),/Active Job changed/);
+    changeJobDuringDownload = true;
+    await assert.rejects(background.handle({type:'resume-download',jobId:1},ui),/Active Job changed/);
+    changeJobDuringDownload = false; await chrome.storage.session.set({active});
+    element('resume-download').click(); await settle();
+    assert.equal(element('resume-download').download,'JB_CV_Acme.pdf');
+  }
   element('fill').click();
   await settle();
+  if(site === 'ashby') { assert.doesNotMatch(element('resume-result').textContent,/attached/); commitUpload?.(); await settle(); }
+  assert.equal(input.files.length,1);
   assert.equal(input.files[0].name, 'JB_CV_Acme.pdf');
   assert.equal(input.files[0].type, 'application/pdf');
   assert.equal(input.files[0].size, 4);
@@ -85,6 +110,7 @@ for (const site of ['lever', 'rippling']) for (const existing of [true, false]) 
   assert.ok(calls.some(call => call.url === 'http://localhost:8000/api/drafts/9/pdf'));
   assert.match(element('resume').textContent, /v2/);
   assert.match(element('resume-result').textContent, /JB_CV_Acme.pdf attached/);
+  if(site === 'rippling') { element('resume-download').click(); await settle(); assert.equal(element('resume-download').download,'JB_CV_Acme.pdf'); assert.deepEqual(events,['input','change']); }
 });
 
 for (const mode of ['reuse', 'generate', 'missing-input', 'missing-input-generate', 'failure', 'changed', 'upload-error', 'upload-error-generated', 'preserved', 'no-cv', 'off']) test(`Fill CV: ${mode}`, async () => {

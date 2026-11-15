@@ -52,7 +52,7 @@ export function createMobile(actions: { state: (id: number, state: string) => Pr
   root.addEventListener('click', event => {
     if (swiped?.contains(event.target as Node) && performance.now() - swipeTime < 400) { event.preventDefault(); event.stopImmediatePropagation(); swiped = null; }
   }, true);
-  return { openFilters, get phone() { return phone.matches; },
+  return { get phone() { return phone.matches; },
     revealCursor(id: number) { if (phone.matches) root.querySelector(`[data-job="${id}"]`)?.scrollIntoView({ block: 'center' }); },
     update(count: number, summary: string) {
     opener.textContent = summary;

@@ -14,29 +14,25 @@ export function createPipeline(api: <T>(path: string, method?: string, body?: un
   active: () => boolean; phone: () => boolean; drawer: () => number; replace: (id: string, html: string) => void;
 }) {
   const page = document.getElementById('a-pipeline')!, root = document.getElementById('dashboard')!;
-  page.innerHTML = `<header class="pipeline-heading"><h1>Pipeline</h1><p id="pipeline-summary">Loading Pipeline…</p>${periodSelect()}</header><div class="pipeline-layout"><div class="pipeline-main"><section class="pipeline-flow"><header><h2>Flow</h2><div class="flow-legend">${[["moved","Moved on"],["stage","Still in stage"],["no_reply","No reply"],["rejected","Rejected"],["withdrawn","Withdrawn"]].map(([key,text]) => `<span class="flow-${key}">${text}</span>`).join('')}</div><button id="pipeline-flow-toggle" aria-controls="pipeline-flow-body" aria-expanded="true">Hide <kbd>v</kbd></button></header><div id="pipeline-flow-body">Loading flow…</div></section><div id="pipeline-content"></div></div><aside class="pipeline-sidebar"><section id="email-rail" class="reply-card" aria-label="From email"></section><section id="pipeline-followup" class="reply-card" aria-label="Follow up"></section><section id="pipeline-rates" class="reply-card" aria-label="Reply rate by Fit Score">Loading reply rates…</section></aside></div><footer class="keyboard-hint"><span>Applied · oldest first</span><span><kbd>h</kbd> <kbd>l</kbd> column · <kbd>j</kbd> <kbd>k</kbd> card · <kbd>o</kbd> open · <kbd>[</kbd> <kbd>]</kbd> back / on · <kbd>x</kbd> close · <kbd>e</kbd> date / note · <kbd>z</kbd> undo · <kbd>v</kbd> flow</span></footer>`;
+  page.innerHTML = `<header class="pipeline-heading"><h1>Pipeline</h1><p id="pipeline-summary">Loading Pipeline…</p>${periodSelect()}</header><div class="pipeline-layout"><div class="pipeline-main"><section class="pipeline-flow"><header><h2>Flow</h2><div class="flow-legend">${[["moved","Moved on"],["stage","Still in stage"],["no_reply","No reply"],["rejected","Rejected"],["withdrawn","Withdrawn"]].map(([key,text]) => `<span class="flow-${key}">${text}</span>`).join('')}</div><button id="pipeline-flow-toggle" aria-controls="pipeline-flow-body" aria-expanded="true">Hide</button></header><div id="pipeline-flow-body">Loading flow…</div></section><div id="pipeline-content"></div></div><aside class="pipeline-sidebar"><section id="email-rail" class="reply-card" aria-label="From email"></section><section id="pipeline-rates" class="reply-card" aria-label="Reply rate by Fit Score">Loading reply rates…</section></aside></div><footer class="list-status">Applied · oldest first</footer>`;
   const dialog = document.createElement('dialog'); dialog.className = 'app-dialog'; dialog.id = 'pipeline-dialog'; dialog.setAttribute('aria-labelledby', 'pipeline-dialog-title');
   dialog.innerHTML = `<form><header><h2 id="pipeline-dialog-title"></h2><button type="button" data-cancel aria-label="Close dialog">×</button></header><label data-close-fields>Closed reason<select name="reason">${reasons.map(r => `<option value="${r}">${label(r)}</option>`).join('')}</select></label><div data-edit-fields><label>Next date<input name="date" type="datetime-local"></label><label>Label<input name="label" maxlength="200" placeholder="Technical interview"></label></div><label>Note (optional)<textarea name="note" maxlength="10000" rows="3"></textarea></label><p role="status" id="pipeline-error"></p><footer><button class="btn primary" type="submit">Save</button><button type="button" data-cancel>Cancel</button></footer></form>`;
   root.append(dialog);
   let all: Card[] = [], rows: Card[] = [], selected = 0, col = 0, busy = false, error = '', version = 0;
   const metrics = createMetrics(load, actions.error, actions.replace);
-  let followUps: Record<number, number> = {}, thresholds = '', followUpError = false;
-  function statistics(stats: Statistics) { followUps = stats.follow_up_ages; followUpError = stats.follow_up_error; thresholds = followUpError ? '' : `Follow up after ${stats.follow_up_days}d · Closes as No reply after ${stats.no_reply_days}d`; metrics.render(stats); }
   const details = new Map<number, Entry | string>();
   const visible = () => col === 4 ? reasons.flatMap(reason => rows.filter(r => r.closed_reason === reason)) : rows.filter(r => column(r) === columns[col]);
   const current = () => rows.find(r => r.job_id === selected);
   function controls(row: Move, prefix: string) {
     const index = stages.indexOf(row.stage), closed = !!row.closed_reason;
     const button = (action: string, text: string, disabled = false) => `<button id="${prefix}-${row.job_id}-${action}" class="btn small" data-pipeline-action="${action}" data-id="${row.job_id}" ${busy || disabled ? 'disabled' : ''}>${text}</button>`;
-    return `<div class="pipeline-actions">${prefix === 'board' ? `<button class="btn small" data-action="open" data-id="${row.job_id}">Open <kbd>o</kbd></button>` : ''}${button('back', closed ? `Reopen ${label(row.stage)}` : `← ${label(stages[Math.max(0, index - 1)])}`, !closed && index === 0)}${button('on', `${label(stages[Math.min(4, index + 1)])} →`, closed || index === 4)}${button('close', 'Close…', closed)}${button('edit', 'Date / note')}</div>`;
+    return `<div class="pipeline-actions">${prefix === 'board' ? `<button class="btn small" data-action="open" data-id="${row.job_id}">Open</button>` : ''}${button('back', closed ? `Reopen ${label(row.stage)}` : `← ${label(stages[Math.max(0, index - 1)])}`, !closed && index === 0)}${button('on', `${label(stages[Math.min(4, index + 1)])} →`, closed || index === 4)}${button('close', 'Close…', closed)}${button('edit', 'Date / note')}</div>`;
   }
   function card(row: Card) {
     const chosen = selected === row.job_id;
-    return `<article id="pipeline-card-${row.job_id}" class="pipeline-card${chosen ? ' selected' : ''}${row.closed_reason ? ' closed' : ''}" tabindex="${chosen ? 0 : -1}" aria-label="${escape(row.title)}" ${chosen ? 'aria-current="true"' : ''}><button id="pipeline-select-${row.job_id}" class="pipeline-card-main" data-pipeline-select="${row.job_id}">${row.closed_reason ? '' : score(row)}<span><strong>${escape(row.title)}</strong><span class="pipeline-meta">${escape(row.company || row.source)} · ${age(row.applied_at)}</span></span></button>${row.email_count ? `<span class="tag applied">${row.email_count} email${row.email_count === 1 ? '' : 's'}</span>` : ''}${row.job_id in followUps ? '<span class="tag filtered">follow up</span>' : ''}${row.stage === 'accepted' ? '<span class="tag applied">Accepted</span>' : ''}${row.closed_reason ? `<p class="pipeline-meta">at ${label(row.stage)}</p>` : ''}${row.next_at ? `<p class="pipeline-next"><b>Next</b> ${escape(row.next_label || '')} · ${escape(dateTime(row.next_at))}</p>` : ''}${chosen ? controls(row, 'board') : ''}</article>`;
+    return `<article id="pipeline-card-${row.job_id}" class="pipeline-card${chosen ? ' selected' : ''}${row.closed_reason ? ' closed' : ''}" tabindex="${chosen ? 0 : -1}" aria-label="${escape(row.title)}" ${chosen ? 'aria-current="true"' : ''}><button id="pipeline-select-${row.job_id}" class="pipeline-card-main" data-pipeline-select="${row.job_id}">${row.closed_reason ? '' : score(row)}<span><strong>${escape(row.title)}</strong><span class="pipeline-meta">${escape(row.company || row.source)} · ${age(row.applied_at)}</span></span></button>${row.email_count ? `<span class="tag applied">${row.email_count} email${row.email_count === 1 ? '' : 's'}</span>` : ''}${row.stage === 'accepted' ? '<span class="tag applied">Accepted</span>' : ''}${row.closed_reason ? `<p class="pipeline-meta">at ${label(row.stage)}</p>` : ''}${row.next_at ? `<p class="pipeline-next"><b>Next</b> ${escape(row.next_label || '')} · ${escape(dateTime(row.next_at))}</p>` : ''}${chosen ? controls(row, 'board') : ''}</article>`;
   }
   function render() {
-    const waiting = rows.filter(row => row.job_id in followUps);
-    actions.replace('pipeline-followup', `<h3>Follow up <span class="tag filtered">${followUpError ? '—' : waiting.length}</span></h3>${waiting.map(row => `<div class="followup-job"><div><b title="${escape(row.title)}">${escape(row.title)}</b><p class="muted">${followUps[row.job_id]}d without a reply</p></div><button class="btn small" data-action="follow-up" data-id="${row.job_id}">Draft follow-up</button></div>`).join('') || `<p class="muted">${escape(followUpError ? 'Follow-up checks unavailable. Check settings.yaml or server logs.' : 'No Jobs need a follow-up.')}</p>`}<p class="muted">${thresholds}</p>`);
     const active = rows.filter(r => !r.closed_reason).length;
     document.querySelectorAll('[data-pipeline-count]').forEach(node => { node.textContent = String(all.filter(r => !r.closed_reason).length); });
     const summary = document.getElementById('pipeline-summary')!;
@@ -51,7 +47,7 @@ export function createPipeline(api: <T>(path: string, method?: string, body?: un
     try {
       const [next, stats] = await Promise.all([api<Card[]>('pipeline'), api<Statistics>(`pipeline/stats${query}`)]);
       if (request !== version) return;
-      const ids = new Set(stats.job_ids); all = next; rows = all.filter(row => ids.has(row.job_id)); statistics(stats); error = ''; const row = current(); if (row) col = columns.indexOf(column(row)); else selected = visible()[0]?.job_id ?? 0;
+      const ids = new Set(stats.job_ids); all = next; rows = all.filter(row => ids.has(row.job_id)); metrics.render(stats); error = ''; const row = current(); if (row) col = columns.indexOf(column(row)); else selected = visible()[0]?.job_id ?? 0;
     } catch (e) { if (request !== version) return; error = 'Could not load Pipeline. Reopen Pipeline to retry.'; metrics.failed(); actions.error(e); }
     render();
   }
@@ -62,7 +58,7 @@ export function createPipeline(api: <T>(path: string, method?: string, body?: un
   async function update(id: number, payload: unknown) {
     const next = await api<Entry>(`pipeline/${id}`, 'PATCH', payload), request = ++version;
     all = all.map(row => row.job_id === id ? {...row, ...next} : row); rows = rows.map(row => row.job_id === id ? {...row, ...next} : row); error = ''; details.set(id, next); if (selected === id) select(id, true); else render(); actions.changed();
-    void api<Statistics>(`pipeline/stats${metrics.query()}`).then(stats => { if (request === version) { const ids = new Set(stats.job_ids); rows = all.filter(row => ids.has(row.job_id)); statistics(stats); render(); } }).catch(e => { if (request === version) { metrics.failed(); actions.error(e); } });
+    void api<Statistics>(`pipeline/stats${metrics.query()}`).then(stats => { if (request === version) { const ids = new Set(stats.job_ids); rows = all.filter(row => ids.has(row.job_id)); metrics.render(stats); render(); } }).catch(e => { if (request === version) { metrics.failed(); actions.error(e); } });
     return next;
   }
   function change(id: number, payload: (previous: Entry) => Record<string, unknown> | null, text: string) {
@@ -130,19 +126,6 @@ export function createPipeline(api: <T>(path: string, method?: string, body?: un
     section(id: number) {
       const row = details.get(id);
       return `<section id="drawer-pipeline" class="drawer-section pipeline-history" tabindex="-1" aria-label="Pipeline"><header><h3>Pipeline</h3><a class="btn small" href="#pipeline" data-action="open-pipeline" data-id="${id}">Open in Pipeline ›</a></header>${!row ? '<p role="status">Loading Pipeline history…</p>' : typeof row === 'string' ? `<p>${escape(row)} <button data-pipeline-action="retry" data-id="${id}">Retry</button></p>` : `<div class="pipeline-trail">${stages.map(stage => `<span class="tag ${stage === row.stage ? 'applied' : ''}">${label(stage)}</span>`).join('<span aria-hidden="true">→</span>')}${row.closed_reason ? `<span class="tag filtered">${label(row.closed_reason)}</span>` : ''}</div>${controls(row, 'drawer')}${row.next_at ? `<p><b>Next:</b> ${escape(row.next_label || '')} · ${escape(dateTime(row.next_at))}</p>` : ''}<ol>${row.history.map(move => `<li><time>${escape(dateTime(move.created_at))}</time><span>${move.closed_reason ? `Closed · ${label(move.closed_reason)} at ${label(move.stage)}` : label(move.stage)} · ${move.how === 'manual' ? 'by hand' : 'auto'}${move.note ? ` · ${escape(move.note)}` : ''}${move.next_at ? `<small>Next: ${escape(move.next_label || '')} · ${escape(dateTime(move.next_at))}</small>` : ''}</span></li>`).reverse().join('')}</ol>`}</section>`;
-    },
-    key(event: KeyboardEvent) {
-      const key = event.key;
-      if (!['h','l','j','k','o','[',']','x','e','z','v'].includes(key)) return false;
-      event.preventDefault(); if (event.repeat && ['[',']','x','e'].includes(key)) return true;
-      if (key === 'h' || key === 'l') { selectColumn(Math.max(0, Math.min(4, col + (key === 'h' ? -1 : 1)))); }
-      if (key === 'j' || key === 'k') moveCursor(key === 'j' ? 1 : -1);
-      if (key === 'o' && selected) void actions.open(selected).catch(actions.error);
-      if ((key === '[' || key === ']') && selected) void step(selected, key === '[' ? -1 : 1).catch(actions.error);
-      if ((key === 'x' || key === 'e') && selected) edit(selected, key === 'x');
-      if (key === 'v' && !event.repeat) metrics.toggle();
-      if (key === 'z') void undo.run('pipeline').catch(actions.error);
-      return true;
     },
   };
 }

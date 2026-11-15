@@ -1,6 +1,6 @@
 if (typeof importScripts === 'function') importScripts('content.js');
 function createBackground(chrome, fetcher = fetch) {
-  const pending = new Map();
+  const pending = new Map(), generating = new Map();
   let registration = Promise.resolve();
   const allowed = typeof module !== 'undefined' ? require('./content.js').allowed :
     url => !/(^|\.)(upwork|linkedin|indeed|glassdoor)\.com\.?$/.test(new URL(url).hostname);
@@ -35,7 +35,11 @@ function createBackground(chrome, fetcher = fetch) {
     for (const byte of new Uint8Array(await response.arrayBuffer())) binary += String.fromCharCode(byte);
     return {name, base64: btoa(binary)};
   }
-  async function handle(message, sender) {
+  // storage.session is extension-only by default and survives panel/worker recreation for this browser session.
+  // Chrome has no persisted request/result facility: https://developer.chrome.com/docs/extensions/reference/api/storage#property-session
+  const selectionKey = (tabId,url) => `selection:${JSON.stringify([tabId,pageURL(url)])}`;
+  const workPrefix = context => `work:${JSON.stringify([context.origin || '', integer(context.job.id), integer(context.tabId), pageURL(context.url)])}:`;
+  async function handle(message, sender, task) {
     if (message.type === 'register' && sender.id === chrome.runtime.id && sender.tab && allowed(sender.url) && (!sender.tab.url || allowed(sender.tab.url))) {
       const key = `frames:${sender.tab.id}`;
       registration = registration.then(async () => {
@@ -50,9 +54,39 @@ function createBackground(chrome, fetcher = fetch) {
       if (!request || sender.id !== chrome.runtime.id || sender.tab?.id !== request.tabId ||
         !allowed(sender.url) || (sender.tab.url && !allowed(sender.tab.url))) throw Error('Unrequested frame');
       request.frames.set(sender.frameId, message.fields);
+      if (sender.documentId) request.documents.set(sender.frameId,sender.documentId);
       return {};
     }
     if (!trusted(sender)) throw Error('Only extension UI can request joule data');
+    if (message.context && !task) {
+      const prefix = workPrefix(message.context);
+      if (message.type === 'work') {
+        const stored = await chrome.storage.session.get(null);
+        return Object.fromEntries(Object.entries(stored).filter(([key]) => key.startsWith(prefix)).map(([key,value]) => [key.slice(prefix.length),value]));
+      }
+      if (message.type === 'work-edit') {
+        if (!validRef(message.field) || typeof message.value !== 'string' || message.value.length > 30000) throw Error('Invalid preview edit');
+        await chrome.storage.session.set({[prefix + 'edit:' + JSON.stringify(message.field.ref)]: message.value}); return {};
+      }
+      if (['fill','ask-preview','resume-download'].includes(message.type) || message.type === 'cover-letter' && message.generate) {
+        const active = message.context.job;
+        if (active.source === 'upwork' || message.jobId !== active.id || message.tabId !== message.context.tabId) throw Error('Generation context changed');
+        const key = prefix + message.type + (message.type === 'ask-preview' ? ':' + JSON.stringify(message.field?.ref) : '');
+        if (generating.has(key)) return generating.get(key);
+        const operation = (async () => {
+          await chrome.storage.session.set({[key]: {status:'running'}});
+          try {
+            let value = await handle({...message, context:undefined, pageURL:message.context.url}, sender, active);
+            if (message.type === 'fill') value = {...value,job:active};
+            if (message.type === 'ask-preview') await chrome.storage.session.remove(prefix + 'edit:' + JSON.stringify(message.field.ref));
+            await chrome.storage.session.set({[key]: {status:'done',value}}); return value;
+          } catch (error) { await chrome.storage.session.set({[key]: {status:'error',error:error.message}}); throw error; }
+          finally { generating.delete(key); }
+        })();
+        generating.set(key,operation); return operation;
+      }
+      if (['resume','cover-letter','fill-field'].includes(message.type)) return handle({...message,context:undefined},sender,message.context.job);
+    }
     if (message.type === 'appearance') return api('/api/appearance');
     if (message.type === 'detect') {
       await chrome.storage.session.set({active: null});
@@ -60,8 +94,9 @@ function createBackground(chrome, fetcher = fetch) {
       // Tab URL metadata needs tabs/host permission; static script matches do not grant it.
       // https://developer.chrome.com/docs/extensions/reference/api/tabs#permissions
       if (!tab.url) throw Error('Chrome did not expose the page URL. Reload the extension to enable tab access, then Retry in the panel.');
+      const remembered = (await chrome.storage.session.get(selectionKey(tab.id,tab.url)))[selectionKey(tab.id,tab.url)];
       const active = /^https?:/.test(tab.url) && allowed(tab.url) ?
-        await api(`/api/jobs/resolve?url=${encodeURIComponent(tab.url)}`) : null;
+        remembered || await api(`/api/jobs/resolve?url=${encodeURIComponent(tab.url)}`) : null;
       await chrome.storage.session.set({active});
       return active;
     }
@@ -74,6 +109,7 @@ function createBackground(chrome, fetcher = fetch) {
       const job = await api(`/api/jobs/${integer(message.id)}`);
       if (job.source === 'upwork') throw Error('Upwork Jobs cannot be filled');
       const active = {id: job.id, title: job.title, company: job.company, source: job.source};
+      if (message.tabId && message.pageURL) await chrome.storage.session.set({[selectionKey(integer(message.tabId),message.pageURL)]:active});
       await chrome.storage.session.set({active});
       return active;
     }
@@ -93,6 +129,12 @@ function createBackground(chrome, fetcher = fetch) {
       await chrome.storage.session.set({active});
       return active;
     }
+    if (message.type === 'cover-letter') {
+      const active = task || (await chrome.storage.session.get('active')).active;
+      if (!active || active.id !== message.jobId || active.source === 'upwork') throw Error('Active Job changed; pick a non-Upwork Job');
+      const job = message.generate ? await api(`/api/jobs/${integer(active.id)}/drafts`, {kind: 'cover_letter'}) : await api(`/api/jobs/${integer(active.id)}`);
+      return job.drafts?.cover_letter?.content?.text || '';
+    }
     if (message.type === 'mark-applied' || message.type === 'undo-applied') {
       const {active} = await chrome.storage.session.get('active');
       const {appliedUndo} = await chrome.storage.session.get('appliedUndo');
@@ -105,7 +147,7 @@ function createBackground(chrome, fetcher = fetch) {
       await chrome.storage.session.set({active: {...active, state: job.state}, appliedUndo: undo});
       return {job, canUndo: !!undo};
     }
-    if (!['fill', 'replay', 'resume', 'ask', 'save', 'fill-field'].includes(message.type)) throw Error('Unknown request');
+    if (!['fill', 'replay', 'resume', 'resume-download', 'ask-preview', 'save', 'fill-field'].includes(message.type)) throw Error('Unknown request');
     if (message.type === 'save') {
       if (!validRef(message.field)) throw Error('Save refused: invalid frame/field reference; run Fill again.');
       if (!Number.isSafeInteger(message.tabId) || message.tabId <= 0) throw Error('Save refused: invalid tab id.');
@@ -121,50 +163,70 @@ function createBackground(chrome, fetcher = fetch) {
       // The bank is shared across Jobs. Auto-detection's transient/changed active Job must not cancel a Save.
       return api('/api/fill/answers', answer);
     }
-    const {active} = await chrome.storage.session.get('active');
+    const active = task || (await chrome.storage.session.get('active')).active;
     const diagnosticOnly = message.type === 'replay' && !active;
     if (!diagnosticOnly && (!active || active.source === 'upwork')) throw Error('No Job selected. Pick a non-Upwork Job before Fill can attach a Tailored CV');
     async function match(fields) {
-      try { return await api(diagnosticOnly ? '/api/fill/replay-match' : `/api/fill/jobs/${integer(active.id)}/match`, {fields}); }
+      try { return await api(diagnosticOnly ? '/api/fill/replay-match' : `/api/fill/jobs/${integer(active.id)}/match`, {fields:fields.map(({documentId,...field}) => field)}); }
       catch (error) {
         if (error.status === 404) await chrome.storage.session.remove('active');
         error.message = `Fill matching failed: ${error.message}`;
         throw error;
       }
     }
+    let result, resumeFile;
+    async function prepareFile() {
+      if (!result.resume_draft_id) {
+        // Duplicate append-only versions across panels are an accepted race (§6); the panel disables its button.
+        await api(`/api/jobs/${integer(active.id)}/drafts`, {kind: 'tailored_cv'});
+        result = {...await match([]), actions: result.actions};
+      }
+      const draftId = result.resume_draft_id;
+      if (!draftId) throw Error('No Tailored CV available after generation');
+      const file = await api(`/api/drafts/${integer(draftId)}/pdf`, undefined, true);
+      resumeFile = file;
+      return file;
+    }
     if (message.type === 'resume') return match([]);
+    if (message.type === 'resume-download') {
+      if (message.jobId !== active.id) throw Error('Active Job changed; pick the intended Job again');
+      result = await match([]); const file = await prepareFile();
+      if (!task && (await chrome.storage.session.get('active')).active?.id !== active.id) throw Error('Active Job changed; pick the intended Job again');
+      return file;
+    }
     const tab = await chrome.tabs.get(integer(message.tabId));
     if (!allowed(tab.url)) throw Error('This host is refused');
+    if (task && message.type === 'fill' && pageURL(tab.url) !== pageURL(message.pageURL)) throw Error('Page changed before Fill');
     if (message.type === 'fill-field') {
       if (message.pageURL && pageURL(message.pageURL) !== pageURL(tab.url)) throw Error('Page changed; run Fill again');
       if (message.jobId !== active.id || !validRef(message.field) || typeof message.value !== 'string' || message.value.length > 30000) throw Error('Field changed; run Fill again');
-      const field = message.field;
+      const {documentId,...field} = message.field;
       const result = await chrome.tabs.sendMessage(tab.id, {type: 'apply', expected: {...field, ref: field.ref[1]},
-        actions: [{ref: field.ref[1], action: 'set', value: message.value, overwrite: true}]}, {frameId: field.ref[0]});
+        actions: [{ref: field.ref[1], action: 'set', value: message.value, overwrite: true}]}, {frameId: field.ref[0],...(documentId ? {documentId} : {})});
       if (result.error) throw Error(result.error);
       if (!result.filled) throw Error('Field could not be filled; review the form or run Fill again');
       return result;
     }
-    if (message.type === 'ask') {
+    // A distinct request prevents an older auto-filling worker from treating a preview as Ask.
+    if (message.type === 'ask-preview') {
       const field = message.field;
       if (message.jobId !== active.id) throw Error('Ask refused: active Job changed since Fill; run Fill again.');
       if (!validRef(field)) throw Error('Ask refused: invalid frame/field reference; run Fill again.');
       let result;
       try { result = await api(`/api/fill/jobs/${integer(active.id)}/ask`, {question: field.label, options: field.options || []}); }
       catch (error) { if (error.status === 404) await chrome.storage.session.remove('active'); throw error; }
-      if (result.value === null) return {...result, filled: 0};
-      const current = await chrome.tabs.get(tab.id);
-      if (pageURL(current.url) !== pageURL(tab.url)) throw Error('Ask refused: page URL changed while generating the answer; run Fill again.');
-      if ((await chrome.storage.session.get('active')).active?.id !== active.id) throw Error('Ask refused: active Job changed while generating the answer; run Fill again.');
-      const applied = await chrome.tabs.sendMessage(tab.id, {type: 'apply', expected: {...field, ref: field.ref[1]},
-        actions: [{ref: field.ref[1], action: 'set', value: result.value}]}, {frameId: field.ref[0]});
-      return {...result, filled: applied.filled};
+      const current = task ? tab : await chrome.tabs.get(tab.id);
+      if (!task && pageURL(current.url) !== pageURL(tab.url)) throw Error('Ask refused: page URL changed while generating the answer; run Fill again.');
+      if (!task && (await chrome.storage.session.get('active')).active?.id !== active.id) throw Error('Ask refused: active Job changed while generating the answer; run Fill again.');
+      return result;
     }
     const key = `frames:${tab.id}`;
     await registration;
     const registered = (await chrome.storage.session.get(key))[key] || {};
     const requestId = crypto.randomUUID();
-    const request = {tabId: tab.id, frames: new Map()};
+    const request = {tabId: tab.id, frames: new Map(), documents:new Map()};
+    // Pin writes to the described document, including same-URL reloads: https://developer.chrome.com/docs/extensions/reference/api/tabs#method-sendMessage
+    const target = frameId => ({frameId,...(request.documents.has(frameId) ? {documentId:request.documents.get(frameId)} : {})});
     pending.set(requestId, request);
     const trace = {version: 1, url: tab.url, job_id: active?.id ?? null, fields: [], errors: []};
     const traceFailure = error => `Diagnostic trace could not be saved (${error.message}).` +
@@ -177,36 +239,23 @@ function createBackground(chrome, fetcher = fetch) {
       const fields = [];
       for (const [frameId, descriptors] of request.frames) {
         for (const descriptor of descriptors) {
-          fields.push({...descriptor, ref: [frameId, descriptor.ref]});
+          fields.push({...descriptor, ...(request.documents.has(frameId) ? {documentId:request.documents.get(frameId)} : {}), ref: [frameId, descriptor.ref]});
         }
       }
       // Fill still prepares a downloadable CV when no supported controls were discovered.
       if (!fields.length && message.type !== 'fill') throw Error('No supported form found. Reload the ATS page if the extension was just installed.');
       if (fields.length > 200) throw Error('Form exceeds the 200-field limit');
-      let result = await match(fields);
-      let resumeFile;
-      async function prepareFile() {
-        if (!result.resume_draft_id) {
-          // Duplicate append-only versions across panels are an accepted race (§6); the panel disables its button.
-          await api(`/api/jobs/${integer(active.id)}/drafts`, {kind: 'tailored_cv'});
-          result = {...await match([]), actions: result.actions};
-        }
-        const draftId = result.resume_draft_id;
-        if (!draftId) throw Error('No Tailored CV available after generation');
-        const file = await api(`/api/drafts/${integer(draftId)}/pdf`, undefined, true);
-        resumeFile = file;
-        return file;
-      }
+      result = await match(fields);
       async function attach() {
         const actions = result.actions.filter(action => action.action === 'upload' && action.file === 'resume');
         if (!actions.length) throw Error('No matching file input found');
         const file = await prepareFile();
         if (pageURL((await chrome.tabs.get(tab.id)).url) !== pageURL(tab.url) ||
-            (await chrome.storage.session.get('active')).active?.id !== active.id)
+            !task && (await chrome.storage.session.get('active')).active?.id !== active.id)
           throw Error('Job or page changed while preparing the CV; run Fill again');
         let filled = 0;
         for (const action of actions) {
-          const applied = await chrome.tabs.sendMessage(tab.id, {type: 'upload', ref: action.ref[1], file}, {frameId: action.ref[0]});
+          const applied = await chrome.tabs.sendMessage(tab.id, {type: 'upload', ref: action.ref[1], file}, target(action.ref[0]));
           if (applied.error) throw Error(applied.error);
           filled += applied.filled;
           const row = trace.fields.find(row => JSON.stringify(row.ref) === JSON.stringify(action.ref));
@@ -219,7 +268,8 @@ function createBackground(chrome, fetcher = fetch) {
         const actions = result.actions.filter(action => action.ref[0] === frameId)
           .map(action => ({...action, ref: action.ref[1]}));
         try {
-          const applied = await chrome.tabs.sendMessage(tab.id, {type: 'trace-apply', actions}, {frameId});
+          if (pageURL((await chrome.tabs.get(tab.id)).url) !== pageURL(tab.url)) throw Error('Page changed during Fill');
+          const applied = await chrome.tabs.sendMessage(tab.id, {type: 'trace-apply', actions}, target(frameId));
           filled += applied.filled || 0;
           if (!applied.trace) trace.errors.push(`frame-${frameId}-trace-unavailable`);
           for (const row of applied.trace || []) trace.fields.push({...row, ref: [frameId, row.ref]});
@@ -277,11 +327,6 @@ function createBackground(chrome, fetcher = fetch) {
     const launch = tab => inject(tab).catch(error => console.error(`Joule Fill: ${error.message}`));
     chrome.contextMenus.onClicked.addListener((info, tab) => {
       if (info.menuItemId === 'fill-with-joule') return launch(tab);
-    });
-    // onCommand supplies the active tab, avoiding an async query that can lose the gesture.
-    // https://developer.chrome.com/docs/extensions/reference/api/commands#event-onCommand
-    chrome.commands.onCommand.addListener((command, tab) => {
-      if (command === 'fill-with-joule') return launch(tab);
     });
   }
   return {handle, inject, installGestures};

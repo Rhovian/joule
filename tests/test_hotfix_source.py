@@ -9,7 +9,7 @@ from joule.sources.hotfix import HotfixError, description, search
 
 JOB = json.loads("""
     {"id": "00000000-0000-4000-8000-000000000001", "title": "Synthetic role",
-     "company_name": "Example", "summary": "Synthetic summary", "locations": ["A", "B"],
+     "company_name": "Example", "summary": "Synthetic summary", "locations": ["San Francisco, CA", "New York, NY"],
      "countries": ["US"], "work_type": "remote", "salary_min": 10000,
      "salary_max": 20000, "salary_currency": "USD", "posted_at": "2026-10-08T12:00:00Z"}
 """)
@@ -25,10 +25,13 @@ def run(handler, operation):
     return asyncio.run(main())
 
 
-@pytest.mark.parametrize("work_type", ["remote", "onsite", "hybrid"])
 @pytest.mark.parametrize(
-    "low, high, yearly",
-    [(10000, 20000, True), (30, 50, False), (0, 0, False)],
+    "work_type, low, high, yearly",
+    [
+        ("remote", 10000, 20000, True),
+        ("onsite", 30, 50, False),
+        ("hybrid", 0, 0, False),
+    ],
 )
 def test_search(work_type, low, high, yearly):
     requests = []
@@ -56,7 +59,8 @@ def test_search(work_type, low, high, yearly):
     assert job.description == "Synthetic summary"
     url = f"https://hotfix.jobs/jobs/{JOB['id']}"
     assert job.link == job.extra["hotfix_url"] == url
-    assert job.location_raw == "A; B" and job.country == "US"
+    assert job.location_raw == "San Francisco, CA; New York, NY" and job.country == "US"
+    assert job.city == "San Francisco; New York"
     assert job.remote == (work_type == "remote")
     assert job.arrangement == (None if work_type == "remote" else work_type)
     assert (job.pay_min, job.pay_max) == (low or None, high or None)

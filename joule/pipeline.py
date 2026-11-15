@@ -52,25 +52,18 @@ def evaluate(db, settings, now=None):
             db.execute(
                 "UPDATE pipeline SET move_id=? WHERE job_id=?", (move, row["job_id"])
             )
-    return {
-        row["job_id"]: int(row["days"])
-        for row in rows
-        if limits.follow_up_days <= row["days"] < limits.no_reply_days
-    }
 
 
 def refresh(db, directory):
     try:
         settings = load_settings(directory)
         with db:
-            follow_up = evaluate(db, settings)
-        return follow_up, settings.pipeline, False
+            evaluate(db, settings)
     except Exception:
         db.rollback()
         logging.getLogger(__name__).exception(
             "Pipeline evaluation failed; returning current entries"
         )
-        return {}, None, True
 
 
 def entry(db, job_id):
@@ -118,21 +111,9 @@ def list_entries(request: Request, days: Literal["30", "90"] | None = None):
 @router.get("/stats")
 def statistics(request: Request, days: Literal["30", "90"] | None = None):
     with closing(connect(request.app.state.data_dir / "joule.db")) as db, db:
-        follow_up, settings, error = refresh(db, request.app.state.data_dir)
+        refresh(db, request.app.state.data_dir)
         db.execute("BEGIN")  # Read snapshot; no write lock when nothing is due.
-        rows = cohort(db, days)
-        follow_up = {
-            row["job_id"]: follow_up[row["job_id"]]
-            for row in rows
-            if row["job_id"] in follow_up
-        }
-        return summarize(db, rows) | {
-            "follow_up_ids": list(follow_up),
-            "follow_up_ages": follow_up,
-            "follow_up_days": settings.follow_up_days if settings else None,
-            "no_reply_days": settings.no_reply_days if settings else None,
-            "follow_up_error": error,
-        }
+        return summarize(db, cohort(db, days))
 
 
 @router.get("/{job_id}")

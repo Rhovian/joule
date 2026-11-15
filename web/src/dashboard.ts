@@ -1,7 +1,6 @@
-import type { Scan, Source, Job, DraftKind } from './types';
+import type { Scan, Source, Job } from './types';
 import { age, escape } from './format';
 import { createSourceFilter } from './sources';
-import { createViews } from './views';
 import { createScans } from './scans';
 import { createEmail } from './email';
 import { createPipeline } from './pipeline';
@@ -11,7 +10,7 @@ import { createMobile } from './mobile';
 import { createTriageActions } from './triage-actions';
 import { sourceStatus } from './source-status';
 import { external, score, dismiss, applied, pay } from './job';
-import { renderDrawer, drawerSections, draftSelection, draftKind, type DrawerEdits, type Asked } from './drawer';
+import { renderDrawer } from './drawer';
 const root = document.querySelector<HTMLElement>('#dashboard')!;
 const element = (id: string) => document.getElementById(id)!;
 const undo = createUndo();
@@ -25,9 +24,9 @@ let jobs: Job[] = [], sources: Source[] = [], selected = 0, detail: Job | null =
 // Astro 7.3.8 runtime/client/load.js delegates hydration; selection epochs guard native fetch responses.
 let detailVersion = 0, activeSection = 'fit';
 let scheduled = false, detailId = 0, jobsVersion = 0, connected = true, runningId: number | null = null, scan: Scan | null = null, starting = false;
-let sort = 'rank', scoringAll = false, view = 'triage';
+let sort = 'score', direction = 'desc', scoringAll = false, view = 'triage';
 let jobCounts: Record<string, number> = {};
-const sourceFilter = createSourceFilter(() => { views.modified(); void loadJobs().catch(notice); }, () => void loadSources().catch(notice), () => mobile.openFilters());
+const sourceFilter = createSourceFilter(() => { void loadJobs().catch(notice); }, () => void loadSources().catch(notice));
 let noticeTimer: ReturnType<typeof setTimeout>, pollTimer: ReturnType<typeof setTimeout>, searchTimer: ReturnType<typeof setTimeout>;
 function notice(error: unknown) {
   element('notice').textContent = error instanceof Error ? error.message : String(error);
@@ -71,7 +70,7 @@ function emptyJobs() {
     .filter((stamp): stamp is string => !!stamp && Number.isFinite(Date.parse(stamp)))
     .sort((a, b) => Date.parse(b) - Date.parse(a))[0];
   const inbox = root.querySelector<HTMLInputElement>('[name="new"]')!.checked && root.querySelector<HTMLInputElement>('[name="unscored"]')!.checked;
-  return `<div class="empty triage-empty"><h3>Inbox zero.</h3><p>${inbox ? 'No new Jobs from' : 'No Jobs match the Show toggles for'} the ${showing} Source${showing === 1 ? '' : 's'} you’re showing.${hidden.length ? ` ${hidden.map(name => `${jobCounts[name] ?? 0} ${name === 'filtered' ? 'Filtered' : 'dismissed'}`).join(' and ')} ${hidden.length === 1 && jobCounts[hidden[0]] === 1 ? 'is' : 'are'} hidden.` : ''}</p><div class="empty-actions"><button class="btn primary" data-action="scan" ${runningId || starting ? 'disabled' : ''}>Scan all</button><button data-action="show-filtered" ${filtered.checked ? 'disabled' : ''}>Show Filtered <span class="empty-count">${jobCounts.filtered ?? 0}</span></button><button class="btn ghost" data-action="clear-filters">Clear filters</button></div><a class="muted empty-scan" href="#scans">${last ? `Last Scan ${age(last, true)}` : 'No Scan yet'} · <kbd>s</kbd> Scans</a></div>`;
+  return `<div class="empty triage-empty"><h3>Inbox zero.</h3><p>${inbox ? 'No new Jobs from' : 'No Jobs match the Show toggles for'} the ${showing} Source${showing === 1 ? '' : 's'} you’re showing.${hidden.length ? ` ${hidden.map(name => `${jobCounts[name] ?? 0} ${name === 'filtered' ? 'Filtered' : 'dismissed'}`).join(' and ')} ${hidden.length === 1 && jobCounts[hidden[0]] === 1 ? 'is' : 'are'} hidden.` : ''}</p><div class="empty-actions"><button class="btn primary" data-action="scan" ${runningId || starting ? 'disabled' : ''}>Scan all</button><button data-action="show-filtered" ${filtered.checked ? 'disabled' : ''}>Show Filtered <span class="empty-count">${jobCounts.filtered ?? 0}</span></button><button class="btn ghost" data-action="clear-filters">Clear filters</button></div><a class="muted empty-scan" href="#scans">${last ? `Last Scan ${age(last, true)}` : 'No Scan yet'} · Scans</a></div>`;
 }
 function renderJobs() {
   renderScoreAll();
@@ -80,11 +79,10 @@ function renderJobs() {
   element('mobile-job-count').textContent = `${jobs.length} Jobs`;
   element('job-count').textContent = `${jobs.length} visible`;
   element('row-position').textContent = `Row ${Math.max(0, jobs.findIndex(j => j.id === selected) + 1)} of ${jobs.length}`;
-  (element('job-sort') as HTMLSelectElement).value = sort;
-  triage.render();
   element('jobs').setAttribute('aria-busy', 'false');
-  replace('jobs', jobs.length ? `<table class="triage-table"><thead><tr><th scope="col">Rank</th><th scope="col">Fit</th><th scope="col">Job</th><th scope="col">Reason</th><th scope="col">Sources</th><th scope="col">Age</th><th scope="col">State</th></tr></thead><tbody>${jobs.map(j =>
-    `<tr class="${j.id === selected ? 'selected' : ''} ${triage.has(j.id) ? 'checked' : ''} ${j.state === 'dismissed' ? 'is-dismissed' : ''}" data-job="${escape(j.id)}" aria-selected="${triage.has(j.id)}"><td class="rank">${triage.checkbox(j.id)}<span class="rank-number">${j.id === selected ? '› ' : ''}${j.rank == null ? '—' : Math.round(j.rank)}</span></td><td>${score(j)}</td><td><button class="job-title" data-action="open" data-id="${escape(j.id)}" title="${escape(j.title)}">${escape(j.title)}</button><span class="mobile-only mobile-title">${escape(j.title)}</span><button class="mobile-only mobile-card-action" data-action="open" data-id="${j.id}" aria-label="Open Job: ${escape(j.title)}"></button><p class="company" title="${escape([j.company, j.location_raw, pay(j)].filter(Boolean).join(' · '))}">${escape((detailId ? [j.company, j.source, j.duplicates.length ? `+${j.duplicates.length}` : null] : [j.company, j.location_raw]).filter(Boolean).join(' · '))}</p><p class="mobile-only mobile-job-meta">${escape([j.company, j.location_raw, j.source + (j.duplicates.length ? ` +${j.duplicates.length}` : '')].filter(Boolean).join(' · '))} · ${age(j.posted_at ?? j.first_seen_at)}</p></td><td><div class="row-reason">${escape(j.filtered_reason ? `Filtered · ${j.filtered_reason}` : j.score_reason ?? (j.score === null ? 'Not scored yet.' : ''))}</div>${scoreAgain(j)}</td><td class="row-sources">${external(j.link, j.source)}${j.duplicates.length ? `<button class="tag duplicate" data-action="open" data-id="${escape(j.id)}" title="${escape(j.duplicates.map(d => d.source).join(', '))}" aria-label="${j.duplicates.length} Duplicates; open Job Sources">+${j.duplicates.length}</button>` : ''}</td><td class="age">${age(j.posted_at ?? j.first_seen_at)}</td><td><div class="flags">${j.state === 'new' ? '' : `<span class="tag state ${['seen', 'dismissed', 'applied'].includes(j.state) ? j.state : ''}">${escape(j.state)}</span>`}${j.filtered_reason ? '<span class="tag filtered">Filtered</span>' : j.score === null ? '<span class="tag unscored">unscored</span>' : ''}${j.score_stale ? '<span class="flag">out of date</span>' : ''}${j.content_purged_at ? '<span class="flag">expired</span>' : ''}${j.location_unclear ? '<span class="flag">location unclear</span>' : ''}</div>${j.id === selected ? `<div class="row-actions">${applied(j, j.state === 'applied' ? 'Unmark' : 'Applied')}${dismiss(j)}</div>` : ''}</td></tr>`).join('')}</tbody></table>` : emptyJobs());
+  replace('jobs', jobs.length ? `<table class="triage-table"><thead><tr><th scope="col"><label class="row-pick"><input id="select-all" type="checkbox" aria-label="Select all visible Jobs"><span class="mobile-only">Select all</span></label></th>${[['score', 'Fit'], ['title', 'Job'], ['reason', 'Reason'], ['source', 'Sources'], ['newest', 'Age'], ['state', 'State']].map(([key, label]) => `<th scope="col" aria-sort="${sort === key ? direction === 'asc' ? 'ascending' : 'descending' : 'none'}"><button data-action="sort" data-sort="${key}">${label}${sort === key ? direction === 'asc' ? ' ↑' : ' ↓' : ''}</button></th>`).join('')}</tr></thead><tbody>${jobs.map(j =>
+    `<tr class="${j.id === selected ? 'selected' : ''} ${triage.has(j.id) ? 'checked' : ''} ${j.state === 'dismissed' ? 'is-dismissed' : ''}" data-job="${escape(j.id)}" aria-selected="${triage.has(j.id)}"><td>${triage.checkbox(j.id)}</td><td>${score(j)}</td><td><button class="job-title" data-action="open" data-id="${escape(j.id)}" title="${escape(j.title)}">${escape(j.title)}</button><span class="mobile-only mobile-title">${escape(j.title)}</span><button class="mobile-only mobile-card-action" data-action="open" data-id="${j.id}" aria-label="Open Job: ${escape(j.title)}"></button><p class="company" title="${escape([j.company, j.location_raw, pay(j)].filter(Boolean).join(' · '))}">${escape((detailId ? [j.company, j.source, j.duplicates.length ? `+${j.duplicates.length}` : null] : [j.company, j.location_raw]).filter(Boolean).join(' · '))}</p><p class="mobile-only mobile-job-meta">${escape([j.company, j.location_raw, j.source + (j.duplicates.length ? ` +${j.duplicates.length}` : '')].filter(Boolean).join(' · '))} · ${age(j.posted_at ?? j.first_seen_at)}</p></td><td><div class="row-reason">${escape(j.filtered_reason ? `Filtered · ${j.filtered_reason}` : j.score_reason ?? (j.score === null ? 'Not scored yet.' : ''))}</div>${scoreAgain(j)}</td><td class="row-sources">${external(j.link, j.source)}${j.duplicates.length ? `<button class="tag duplicate" data-action="open" data-id="${escape(j.id)}" title="${escape(j.duplicates.map(d => d.source).join(', '))}" aria-label="${j.duplicates.length} Duplicates; open Job Sources">+${j.duplicates.length}</button>` : ''}</td><td class="age">${age(j.posted_at ?? j.first_seen_at)}</td><td><div class="flags">${j.state === 'new' ? '' : `<span class="tag state ${['seen', 'dismissed', 'applied'].includes(j.state) ? j.state : ''}">${escape(j.state)}</span>`}${j.filtered_reason ? '<span class="tag filtered">Filtered</span>' : j.score === null ? '<span class="tag unscored">unscored</span>' : ''}${j.score_stale ? '<span class="flag">out of date</span>' : ''}${j.content_purged_at ? '<span class="flag">expired</span>' : ''}${j.location_unclear ? '<span class="flag">location unclear</span>' : ''}</div>${j.id === selected ? `<div class="row-actions">${applied(j, j.state === 'applied' ? 'Unmark' : 'Applied')}${dismiss(j)}</div>` : ''}</td></tr>`).join('')}</tbody></table>` : emptyJobs());
+  triage.render();
 }
 async function loadJobs() {
   clearTimeout(searchTimer);
@@ -94,9 +92,9 @@ async function loadJobs() {
   const sourceQuery = new URLSearchParams();
   selectedSources?.forEach(name => { query.append('source', name); sourceQuery.append('source', name); });
   query.set('sort', sort);
+  query.set('direction', direction);
   query.set('q', (element('job-search') as HTMLInputElement).value.trim());
   sourceQuery.set('q', query.get('q')!);
-  if (views.minScore !== null) { query.set('min_score', String(views.minScore)); sourceQuery.set('min_score', String(views.minScore)); }
   const [next, totals]: [Job[], Record<string, number>] = selectedSources?.length === 0 ? [[], {}] : await Promise.all([
     api<Job[]>(`jobs?${query}`), api<Record<string, number>>(`jobs/counts?${sourceQuery}`),
   ]);
@@ -170,7 +168,7 @@ async function startScan(source?: string) {
   catch (error) { notice(error); await loadSources(); }
   finally { starting = false; renderSources(); }
 }
-const pendingDrafts = new Set<string>(), pendingQueue = new Set<number>();
+const pendingQueue = new Set<number>();
 async function queueJob(id: number) {
   if (pendingQueue.has(id)) return;
   pendingQueue.add(id); renderDetail();
@@ -180,39 +178,8 @@ async function queueJob(id: number) {
     await refreshJobs();
   } finally { pendingQueue.delete(id); renderDetail(); }
 }
-async function writeDraft(id: number, kind: DraftKind) {
-  const key = `${id}:${kind}`;
-  if (pendingDrafts.has(key) || detail?.id !== id) return;
-  const note = document.querySelector<HTMLInputElement>(`#draft-note-${kind}`)?.value || null;
-  pendingDrafts.add(key); renderDetail();
-  try {
-    const next = await api<Job>(`jobs/${id}/drafts`, 'POST', { kind, note });
-    delete editing(id).notes[kind]; delete editing(id).versions[kind];
-    updateDetail(next);
-  } finally { pendingDrafts.delete(key); renderDetail(); }
-}
-const asks = new Map<number, Asked[]>(), edits = new Map<number, DrawerEdits>();
-function editing(id: number) {
-  if (!edits.has(id)) edits.set(id, { question: '', notes: {}, versions: {} });
-  return edits.get(id)!;
-}
 function updateDetail(next: Job) {
   if (detailId === next.id) { detailVersion++; detail = next; renderDetail(); }
-}
-async function ask(id: number) {
-  const question = editing(id).question.trim();
-  if (!question) return;
-  const item: Asked = { question };
-  asks.set(id, [...(asks.get(id) ?? []), item]); editing(id).question = ''; renderDetail();
-  try { item.answer = (await api<{ answer: string }>(`jobs/${id}/ask`, 'POST', { question })).answer; }
-  catch (error) { asks.set(id, (asks.get(id) ?? []).filter(a => a !== item)); if (!editing(id).question) editing(id).question = question; throw error; }
-  finally { renderDetail(); }
-}
-async function copyDraft(index: number) {
-  if (!detail) return;
-  const content = draftSelection(detail, draftKind(detail, editing(detail.id)), editing(detail.id)).draft?.content;
-  if (!content) return;
-  await navigator.clipboard.writeText((index < 0 ? content?.text ?? content?.cover : content?.answers?.[index]) ?? '');
 }
 function renderDetail() {
   const split = !!detailId;
@@ -222,8 +189,8 @@ function renderDetail() {
   if (activeSection === 'pipeline' && detail && detail.state !== 'applied') activeSection = 'fit';
   const ids = view === 'pipeline' ? pipeline.visible().map(row => row.job_id) : jobs.map(row => row.id);
   replace('detail', renderDrawer({ job: detail && { ...detail, rank: jobs.find(j => j.id === detailId)?.rank }, id: detailId, index: ids.indexOf(detailId), total: ids.length,
-    section: activeSection, pipeline: detail?.state === 'applied' ? pipeline.section(detailId) : '', edits: editing(detailId), pendingDrafts, pendingScores, pendingQueue,
-    asks: asks.get(detailId) ?? [], unscored: unscoredVisible().length, scoreAllDisabled: !!runningId || starting || !unscoredVisible().length }));
+    section: activeSection, pipeline: detail?.state === 'applied' ? pipeline.section(detailId) : '', pendingScores, pendingQueue,
+    unscored: unscoredVisible().length, scoreAllDisabled: !!runningId || starting || !unscoredVisible().length }));
   renderScoreAll(); triage.render();
 }
 async function openJob(id: number, focus = !detailId) {
@@ -264,8 +231,6 @@ function jumpSection(section: string) {
   element('detail').querySelector<HTMLElement>('.drawer')?.setAttribute('data-section', section);
   if (!target) return;
   activeSection = section;
-  const copy = root.querySelector<HTMLButtonElement>('.mobile-job-actions [data-action=copy-draft]');
-  if (copy) copy.disabled = section !== 'draft' || copy.dataset.available !== 'true';
   const pane = target.closest<HTMLElement>('.drawer-scroll');
   if (pane) pane.scrollTo({ top: mobile.phone ? 0 : target.offsetTop - (pane.querySelector('.drawer-nav')?.clientHeight ?? 0) - 12 });
   target.focus({ preventScroll: true });
@@ -273,7 +238,12 @@ function jumpSection(section: string) {
     if (button.dataset.section === section) button.setAttribute('aria-current', 'location'); else button.removeAttribute('aria-current');
   });
 }
-const changeState = (id: number, state: string) => triage.state([id], state);
+async function changeState(id: number, state: string) {
+  const advance = view === 'triage' && !mobile.phone && detailId === id && ['dismissed', 'applied'].includes(state);
+  await triage.state([id], state);
+  if (!advance || view !== 'triage' || detailId !== id || detail?.state !== state) return;
+  if (selected) await openJob(selected, false); else closeDetail();
+}
 async function scoreJob(id: number) {
   if (pendingScores.has(id)) return;
   pendingScores.add(id); renderJobs(); renderDetail();
@@ -320,13 +290,13 @@ function showView(next: string, focus = false) {
   if (focus) element(view === 'triage' ? 'triage' : `a-${view}`).focus();
 }
 window.addEventListener('hashchange', () => showView(location.hash.slice(1), true));
-const views = createViews(preset => {
-  sort = preset.sort;
-  (element('job-sort') as HTMLSelectElement).value = sort;
+function resetFilters() {
+  sort = 'score'; direction = 'desc';
   (element('job-search') as HTMLInputElement).value = '';
-  root.querySelectorAll<HTMLInputElement>('.controls > label input').forEach(input => { input.checked = preset.show.includes(input.name); });
-  sourceFilter.set(preset.sources);
-}, () => void loadJobs().catch(notice));
+  root.querySelectorAll<HTMLInputElement>('.controls > label input').forEach(input => { input.checked = ['new', 'unscored'].includes(input.name); });
+  sourceFilter.reset();
+  void loadJobs().catch(notice);
+}
 showView(location.hash.slice(1));
 root.addEventListener('click', event => {
   const target = (event.target as HTMLElement).closest<HTMLElement>('[data-action]');
@@ -336,34 +306,27 @@ root.addEventListener('click', event => {
     return;
   }
   if (target.dataset.action === 'show-filtered') {
-    root.querySelector<HTMLInputElement>('[name="filtered"]')!.checked = true; views.modified();
+    root.querySelector<HTMLInputElement>('[name="filtered"]')!.checked = true;
     void loadJobs().catch(notice);
   }
-  if (target.dataset.action === 'clear-filters') views.reset();
+  if (target.dataset.action === 'clear-filters') resetFilters();
+  if (target.dataset.action === 'sort') {
+    direction = sort === target.dataset.sort && direction === 'desc' ? 'asc' : 'desc';
+    sort = target.dataset.sort!; void loadJobs().catch(notice);
+  }
   const id = Number(target.dataset.id);
   if (target.dataset.action === 'move') moveJob(Number(target.dataset.step));
   if (target.dataset.action === 'section') jumpSection(target.dataset.section!);
-  if (target.dataset.action === 'version') {
-    const kind = target.dataset.kind as DraftKind;
-    editing(detailId).versions[kind] = id; renderDetail(); element(`draft-versions-${kind}`).focus({ preventScroll: true });
-  }
   if (target.dataset.action === 'undo') void undo.run().catch(notice);
   if (target.dataset.action === 'open-pipeline') { closeDetail(); pipeline.reveal(id); location.hash = 'pipeline'; }
   if (target.dataset.action === 'clear-selection') triage.clear();
   if (target.dataset.action === 'bulk-state') void triage.state(triage.ids(), target.dataset.state!).catch(notice);
   if (target.dataset.action === 'bulk-score') void scoreAll(triage.ids(), true).catch(notice);
-  if (target.dataset.action === 'dismiss-below') void triage.state(triage.below(), 'dismissed').catch(notice);
-  if (target.dataset.action === 'clear-search') { views.modified(); (element('job-search') as HTMLInputElement).value = ''; void loadJobs().catch(notice); }
+  if (target.dataset.action === 'clear-search') { (element('job-search') as HTMLInputElement).value = ''; void loadJobs().catch(notice); }
   if (target.dataset.action === 'queue') void queueJob(id).catch(notice);
   if (target.dataset.action === 'telegram') void api('telegram/start', 'POST', {}).then(() => { notice('Sent the queue head to Telegram'); if (view === 'settings') void settingsPage.connections(); }).catch(notice);
   if (target.dataset.action === 'open') void openJob(id).catch(notice);
-  if (target.dataset.action === 'draft-kind') { editing(detailId).kind = target.dataset.kind as DraftKind; renderDetail(); jumpSection('draft'); }
-  if (target.dataset.action === 'follow-up') void openJob(id).then(async () => { if (detailId !== id) return; editing(id).kind = 'follow_up'; renderDetail(); jumpSection('draft'); await writeDraft(id, 'follow_up'); }).catch(notice);
-  if (target.dataset.action === 'draft') void writeDraft(id, target.dataset.kind as DraftKind).catch(notice);
   if (target.dataset.action === 'schedule') void toggleSchedule().catch(notice);
-  if (target.dataset.action === 'ask') void ask(id).catch(notice);
-  if (target.dataset.action === 'copy-answer') void navigator.clipboard.writeText(asks.get(detailId)?.[Number(target.dataset.index)]?.answer ?? '').catch(notice);
-  if (target.dataset.action === 'copy-draft') void copyDraft(Number(target.dataset.index)).catch(notice);
   if (target.dataset.action === 'score-all') void scoreAll().catch(notice);
   if (target.dataset.action === 'score') void scoreJob(id).catch(notice);
   if (target.dataset.action === 'state') void changeState(id, target.dataset.state!).catch(notice);
@@ -376,52 +339,18 @@ window.addEventListener('message', event => {
 });
 root.addEventListener('change', event => {
   const input = event.target as HTMLInputElement;
+  if (input.id === 'select-all') triage.selectAll(input.checked);
   if (input.dataset.pickJob) triage.toggle(Number(input.dataset.pickJob));
-  if (input.id === 'job-sort') sort = input.value;
-  if (input.matches('.controls > label input, #job-sort')) { views.modified(); void loadJobs().catch(notice); }
+  if (input.matches('.controls > label input')) { void loadJobs().catch(notice); }
 });
 element('job-search').addEventListener('input', () => {
   // astro@7.3.8/dist/runtime/client/load.js only hydrates; a native trailing timer coalesces input.
-  views.modified(); clearTimeout(searchTimer); jobsVersion++;
+  clearTimeout(searchTimer); jobsVersion++;
   searchTimer = setTimeout(() => void loadJobs().catch(notice), 200);
 });
-const shortcuts = element('shortcuts') as HTMLDialogElement;
-element('show-shortcuts').addEventListener('click', () => shortcuts.showModal());
-element('close-shortcuts').addEventListener('click', () => shortcuts.close());
-root.addEventListener('input', event => {
-  const target = event.target;
-  if (!detailId || !(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) || !target.closest('#detail')) return;
-  if (target.dataset.note) editing(detailId).notes[target.dataset.note as DraftKind] = target.value;
-  if (target.id === 'ask-question') editing(detailId).question = target.value;
-});
+// Astro 7.3.8 runtime/client/load.js only hydrates; native dialog/popover dismissal needs explicit opt-out.
+document.addEventListener('cancel', event => event.preventDefault(), true);
 document.addEventListener('keydown', event => {
-  if ((element('mobile-filters') as HTMLDialogElement).open || shortcuts.open || (element('fill-dialog') as HTMLDialogElement).open || (element('pipeline-dialog') as HTMLDialogElement).open || (element('email-dialog') as HTMLDialogElement).open) return;
-  const versions = root.querySelector<HTMLElement>('.draft-version-menu:popover-open');
-  if (event.key === 'Escape' && versions) {
-    event.preventDefault(); versions.hidePopover(); element(versions.id.replace('draft-version-menu-', 'draft-versions-')).focus({ preventScroll: true }); return;
-  }
-  if (event.key === 'Escape' && triage.ids().length) { event.preventDefault(); triage.clear(); return; }
-  if (event.key === 'Escape' && detailId) { closeDetail(); return; }
-  if ((event.target as HTMLElement).closest('input:not([type=checkbox]), textarea, select, [contenteditable]') || event.ctrlKey || event.metaKey || event.altKey) return;
-  if (event.key === '?') { event.preventDefault(); shortcuts.showModal(); return; }
-  if (event.key === '/' && view === 'triage') { event.preventDefault(); if (mobile.phone) closeDetail(); (element('job-search') as HTMLInputElement).focus(); return; }
-  if (event.key === 'z' && view === 'triage') { event.preventDefault(); void triage.undo().catch(notice); return; }
-  if (event.key === ',') { event.preventDefault(); location.hash = 'settings'; return; }
-  if (event.key === 'p') { event.preventDefault(); closeDetail(); location.hash = 'pipeline'; return; }
-  if (event.key === 's') { event.preventDefault(); location.hash = 'scans'; return; }
-  if (event.key === 'Escape' && view !== 'triage') { location.hash = 'triage'; return; }
-  if (detail && ['1', '2', '3', '4', '5'].includes(event.key)) { event.preventDefault(); const section = drawerSections(detail)[Number(event.key) - 1]; if (section) jumpSection(section[0]); return; }
-  if (detailId && event.key === 'c') { event.preventDefault(); void copyDraft(-1).catch(notice); return; }
-  if (view === 'pipeline') {
-    if (detail && ['a','d'].includes(event.key) && !event.repeat) { event.preventDefault(); void triage.key(event.key as 'a' | 'd').catch(notice); return; }
-    pipeline.key(event); return;
-  }
-  if (view !== 'triage' || (!jobs.length && !detailId)) return;
-  if (event.repeat && ['a', 'd', 'x'].includes(event.key)) { event.preventDefault(); return; }
-  if (event.key === 'x' && selected) { event.preventDefault(); triage.toggle(selected); return; }
-  if (['a', 'd'].includes(event.key)) { event.preventDefault(); if (!detailId || detail) void triage.key(event.key as 'a' | 'd').catch(notice); return; }
-  if (['j', 'k', 'o'].includes(event.key)) event.preventDefault();
-  if (event.key === 'j' || event.key === 'k') moveJob(event.key === 'j' ? 1 : -1);
-  if (event.key === 'o' && selected) void openJob(selected).catch(notice);
+  if (event.key === 'Escape' && document.querySelector(':popover-open')) event.preventDefault();
 });
 void Promise.allSettled([refreshJobs(), loadSources(), settingsPage.init()]).then(results => results.forEach(r => { if (r.status === 'rejected') notice(r.reason); }));

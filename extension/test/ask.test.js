@@ -4,27 +4,41 @@ const {JSDOM} = require('jsdom');
 const {createWorker} = require('../content.js');
 const {createBackground} = require('../background.js');
 function storage(values) {
-  return {get: async key => ({[key]: values[key]}), set: async data => Object.assign(values, data), remove: async key => { delete values[key]; }};
+  return {get: async key => key === null ? {...values} : ({[key]: values[key]}), set: async data => Object.assign(values, data), remove: async key => { delete values[key]; }};
 }
-test('Ask routes to the selected frame, clips text, maps select values and protects current fields', async () => {
+test('Ask previews without writing; Fill field writes the shown answer to the selected frame', async () => {
   const document = new JSDOM('<label for="q">Why us?</label><textarea id="q" maxlength="4"></textarea><label for="s">Authorized?</label><select id="s"><option value=""></option><option value="yes">Yes</option><option value="no" disabled>No</option></select><input type="checkbox">').window.document;
   document.defaultView.HTMLElement.prototype.getClientRects = () => [{width: 100, height: 20}];
-  const worker = createWorker(document), fields = worker.describe().map(field => ({...field, ref: [7, field.ref]}));
+  const worker = createWorker(document), fields = worker.describe().map(field => Object.fromEntries(Object.entries({...field, options:field.options.map(({label,value})=>({label,value})), documentId:'original-document', ref: [7, field.ref]}).sort(([a],[b])=>a.localeCompare(b))));
   const active = {id: 1, source: 'hotfix'}, tab = {id: 4, url: 'https://jobs.lever.co/acme/apply'};
   const ui = {id: 'extension', url: 'chrome-extension://extension/sidepanel.html'};
   const session = {active}, calls = [], sent = [];
   const chrome = {runtime: {id: 'extension', getURL: path => `chrome-extension://extension/${path}`},
-    storage: {local: storage({origin: 'http://localhost:8000'}), session: storage(session)}, tabs: {get: async () => tab,
+    storage: {local: storage({origin: 'http://localhost:8000'}), session: storage(session)}, tabs: {get: async () => ({...tab}),
       sendMessage: async (id, message, target) => { sent.push(target); return worker.apply(message.actions, message.expected); }}};
-  let value = 'Known answer', state = 'dismissed';
+  let value = 'Known answer', state = 'dismissed', generationGate;
   const background = createBackground(chrome, async (url, options) => {
     calls.push({url, options});
     if (url.endsWith('/api/jobs/1')) { if (options?.method === 'PATCH') state = JSON.parse(options.body).state; return {ok:true,json:async()=>({id:1,state})}; }
+    if (generationGate) await generationGate;
     return {ok: true, json: async () => ({value, reason: value === null ? 'not answerable from Profile' : undefined})};
   });
-  const ask = field => background.handle({type: 'ask', jobId: 1, tabId: 4, field}, ui);
-  assert.equal((await ask(fields[0])).filled, 1);
-  assert.equal(document.getElementById('q').value, 'Know');
+  const ask = field => background.handle({type: 'ask-preview', jobId: 1, tabId: 4, field}, ui);
+  assert.equal((await ask(fields[0])).value, 'Known answer');
+  assert.equal(document.getElementById('q').value, '');
+  assert.equal(sent.length, 0);
+  const context = {job: active, tabId: tab.id, url: tab.url};
+  let release; generationGate = new Promise(resolve => { release = resolve; });
+  const generating = background.handle({type:'ask-preview',jobId:1,tabId:4,field:fields[0],context},ui);
+  await new Promise(resolve => setImmediate(resolve));
+  session.active = {id:2,source:'hotfix'}; tab.url = 'https://jobs.lever.co/other/apply';
+  release(); assert.equal((await generating).value,'Known answer'); generationGate = null;
+  const restarted = createBackground(chrome);
+  const saved = await restarted.handle({type:'work',context},ui);
+  assert.equal(saved['ask-preview:[7,0]'].value.value,'Known answer');
+  assert.equal(sent.length,0,'retained previews never write to the other page');
+  await assert.rejects(background.handle({type:'fill-field',jobId:1,tabId:4,field:fields[0],value:'Known answer',pageURL:context.url},ui),/changed/i);
+  session.active=active; tab.url=context.url;
   document.getElementById('q').value = 'edit';
   const before = calls.length;
   assert.equal((await background.handle({type: 'fill-field', tabId: 4, jobId: 1, field: fields[0], value: 'Shown answer'}, ui)).filled, 1);
@@ -32,17 +46,19 @@ test('Ask routes to the selected frame, clips text, maps select values and prote
   assert.equal(document.getElementById('s').value, '');
   assert.equal(calls.length, before, 'Fill field reuses the shown answer without an AI request');
   for (const change of [{pageURL:'https://jobs.lever.co/other'}, {jobId:2}]) await assert.rejects(background.handle({type:'fill-field',tabId:4,jobId:1,field:fields[0],value:'shown',...change},ui), /changed/i);
-  assert.equal((await ask(fields[0])).filled, 0);
-  value = 'outside';
-  assert.equal((await ask(fields[1])).filled, 0);
+  await ask(fields[0]);
+  assert.equal(document.getElementById('q').value, 'Show');
   value = null;
   const sentBefore = sent.length;
   assert.equal((await ask(fields[1])).reason, 'not answerable from Profile');
   assert.equal(sent.length, sentBefore);
   value = 'yes';
-  assert.equal((await ask(fields[1])).filled, 1);
+  const preview = await ask(fields[1]);
+  assert.equal(document.getElementById('s').value, '');
+  assert.equal(sent.length, sentBefore);
+  assert.equal((await background.handle({type:'fill-field',tabId:4,jobId:1,field:fields[1],value:preview.value},ui)).filled,1);
   assert.equal(document.getElementById('s').value, 'yes');
-  assert.deepEqual(sent[0], {frameId: 7});
+  assert.deepEqual(sent[0], {frameId: 7,documentId:'original-document'});
   assert.equal(calls[0].url, 'http://localhost:8000/api/fill/jobs/1/ask');
   assert.deepEqual(JSON.parse(calls[0].options.body), {question: 'Why us?', options: []});
   assert.equal(document.querySelector('input').checked, false);

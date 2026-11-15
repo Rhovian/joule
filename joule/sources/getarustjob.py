@@ -3,6 +3,7 @@ import re
 
 import httpx
 
+from joule.filters import normalize_location
 from joule.sources import Candidate
 
 JOBS_URL = "https://getarustjob.com/jobs"
@@ -48,11 +49,24 @@ async def search(client: httpx.AsyncClient) -> list[Candidate]:
                     filter(None, [node.get("location"), *(node.get("countries") or [])])
                 )
                 or None,
-                remote=True if "Remote" in (node.get("remote_types") or []) else None,
+                remote=(
+                    True
+                    if "Remote" in (node.get("remote_types") or [])
+                    else False
+                    if set(node.get("remote_types") or []) & {"On-site", "Hybrid"}
+                    else None
+                ),
+                arrangement=(
+                    "hybrid"
+                    if "Hybrid" in (node.get("remote_types") or [])
+                    else "onsite"
+                    if "On-site" in (node.get("remote_types") or [])
+                    else None
+                ),
                 posted_at=node.get("approved_at"),
                 extra={"slug": node["slug"]},
             )
-    return list(candidates.values())
+    return [normalize_location(candidate) for candidate in candidates.values()]
 
 
 async def description(

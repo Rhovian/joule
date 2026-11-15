@@ -1,5 +1,6 @@
 import httpx
 
+from joule.filters import normalize_location
 from joule.sources import Candidate
 
 JOBS_URL = "https://freehire.me/api/v1/agent/jobs/search"
@@ -38,8 +39,8 @@ async def search(client: httpx.AsyncClient, roles: list[str]) -> list[Candidate]
                     location_raw=node.get("location"),
                     remote={"remote": True, "hybrid": False, "onsite": False}.get(mode),
                     arrangement=mode if mode in {"hybrid", "onsite"} else None,
-                    city=cities[0] if len(cities) == 1 else None,
+                    city="; ".join(cities) or None,
                     country=countries[0] if len(countries) == 1 else None,
                     posted_at=node.get("posted_at"),
                 )
-    return list(candidates.values())
+    return [normalize_location(candidate) for candidate in candidates.values()]

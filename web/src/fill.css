@@ -60,7 +60,6 @@ body:has(#fill-dialog[open]) { overflow: hidden; }
   .fill-output b { font-size: 14px; }
   .fill-output small, .fill-header p, .fill-paste p, .fill-kind-help { font-size: 12px; }
   .fill-footer { padding: 12px 16px; }
-  .fill-footer kbd { display: none; }
   #fill-form, #fill-results { flex: 1; min-height: 0; }
   #fill-dialog:has(#fill-results:not([hidden])) .fill-header { display: none; }
   #fill-results { background: var(--ground); padding: 12px 16px; }

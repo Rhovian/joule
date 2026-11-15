@@ -173,7 +173,7 @@ def test_pipeline_flow_and_reply_rates(client):
     assert stats()["reached"] == [6, 1, 1, 1]  # Old application's history stays hidden.
 
 
-def test_follow_up_thresholds_and_automatic_closure(client, monkeypatch):
+def test_automatic_closure(client, monkeypatch):
     from joule import pipeline
 
     now = datetime.now(UTC)
@@ -231,7 +231,8 @@ def test_follow_up_thresholds_and_automatic_closure(client, monkeypatch):
         (7, "withdrawn"),
     ]
     stats = client.get("/api/pipeline/stats").json()
-    assert stats["follow_up_ids"] == [1] and stats["replies"] == 2
+    assert not any(key.startswith("follow_up") for key in stats)
+    assert stats["replies"] == 2
     closed = client.get("/api/pipeline/2").json()
     assert len(closed["history"]) == 2
     assert (closed["stage"], closed["how"]) == ("applied", "auto")
@@ -240,14 +241,7 @@ def test_follow_up_thresholds_and_automatic_closure(client, monkeypatch):
     assert client.get("/api/pipeline/2").json()["closed_reason"] is None
     client.patch("/api/pipeline/7", json={"stage": "applied"})
     assert client.get("/api/pipeline/7").json()["closed_reason"] is None
-    (directory / "settings.yaml").write_text(
-        "pipeline: {follow_up_days: 13, no_reply_days: 15}\n"
-    )
-    stats = client.get("/api/pipeline/stats").json()
-    assert stats["follow_up_ids"] == [1, 3] and (
-        stats["follow_up_days"],
-        stats["no_reply_days"],
-    ) == (13, 15)
+    (directory / "settings.yaml").write_text("pipeline: {no_reply_days: 15}\n")
     with closing(connect(directory / "joule.db")) as db, db:
         db.execute(
             "UPDATE pipeline_moves SET created_at=? WHERE id=(SELECT first_move_id FROM pipeline WHERE job_id=1)",
@@ -256,10 +250,7 @@ def test_follow_up_thresholds_and_automatic_closure(client, monkeypatch):
     client.patch(
         "/api/pipeline/1", json={"next_at": (now + timedelta(days=1)).isoformat()}
     )
-    assert (
-        client.get("/api/pipeline/stats").json()["follow_up_ids"] == [3]
-        and client.get("/api/pipeline/1").json()["closed_reason"] is None
-    )
+    assert client.get("/api/pipeline/1").json()["closed_reason"] is None
     client.patch("/api/pipeline/1", json={"next_at": None})
     client.app.state.scanner.tick()  # Same server timer callback, no Pipeline read.
     with closing(connect(directory / "joule.db")) as db:
@@ -274,8 +265,7 @@ def test_follow_up_thresholds_and_automatic_closure(client, monkeypatch):
     # A fresh application can auto-close again; old auto history is hidden.
     now += timedelta(days=16)
     assert client.get("/api/pipeline/1").json()["closed_reason"] == "no_reply"
-    (directory / "settings.yaml").write_text("pipeline: {follow_up_days: 0}\n")
+    (directory / "settings.yaml").write_text("pipeline: {no_reply_days: 0}\n")
     assert client.get("/api/pipeline").status_code == 200
     stats = client.get("/api/pipeline/stats").json()
-    assert stats["follow_up_error"] is True
-    assert stats["follow_up_days"] is stats["no_reply_days"] is None
+    assert "total" in stats

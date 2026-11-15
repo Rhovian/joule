@@ -1,5 +1,6 @@
 import httpx
 
+from joule.filters import normalize_location
 from joule.sources import Candidate
 
 JOBS_URL = "https://api.hotfix.jobs/v1/jobs"
@@ -23,7 +24,7 @@ def _candidate(node: dict) -> Candidate:
     low, high = node.get("salary_min") or None, node.get("salary_max") or None
     amounts = [amount for amount in (low, high) if amount is not None]
     yearly = bool(amounts) and all(amount >= 10000 for amount in amounts)
-    return Candidate(
+    candidate = Candidate(
         source="hotfix",
         source_id=node["id"],
         link=node.get("apply_url") or hotfix_url,
@@ -41,6 +42,7 @@ def _candidate(node: dict) -> Candidate:
         posted_at=node.get("posted_at"),
         extra={"hotfix_url": hotfix_url},
     )
+    return normalize_location(candidate)
 
 
 async def search(client: httpx.AsyncClient, roles: list[str]) -> list[Candidate]:
