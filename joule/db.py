@@ -1,7 +1,12 @@
+import json
 import sqlite3
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
+
+from joule.config import load_preferences
+from joule.filters import filter_reason, location_unclear, normalize_location
+from joule.sources import Candidate
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -145,6 +150,45 @@ def extend_check(connection, table, existing, added):
     return sql
 
 
+def backfill_locations(connection, directory):
+    preferences = (
+        load_preferences(directory)
+        if (directory / "profile" / "preferences.yaml").exists()
+        else None
+    )
+    changes = []
+    for row in connection.execute(
+        "SELECT * FROM jobs WHERE source IN ('hotfix','freehire','getarustjob')"
+    ).fetchall():
+        # Legacy rows with no location evidence have nothing to backfill.
+        if all(
+            row[key] is None
+            for key in ("city", "country", "remote", "location_raw", "description")
+        ):
+            continue
+        fields = {key: row[key] for key in Candidate.model_fields}
+        fields["extra"] = json.loads(fields["extra"] or "{}")
+        candidate = normalize_location(Candidate.model_validate(fields))
+        columns = ("city", "country", "remote", "arrangement")
+        values = tuple(getattr(candidate, column) for column in columns)
+        unclear = int(location_unclear(candidate))
+        reason = row["filtered_reason"]
+        if preferences is not None and row["primary_id"] is None:
+            reason = filter_reason(candidate, preferences)
+        if (
+            values == tuple(row[column] for column in columns)
+            and unclear == row["location_unclear"]
+            and reason == row["filtered_reason"]
+        ):
+            continue
+        connection.execute(
+            "UPDATE jobs SET city=?,country=?,remote=?,arrangement=?,location_unclear=?,filtered_reason=? WHERE id=?",
+            (*values, unclear, reason, row["id"]),
+        )
+        changes.append((row["id"], row["filtered_reason"], reason))
+    return changes
+
+
 def init_db(path: Path) -> None:
     new = not path.exists()
     if new:
@@ -168,6 +212,7 @@ def init_db(path: Path) -> None:
                 "AND NOT EXISTS (SELECT 1 FROM pipeline WHERE job_id=jobs.id)"
             ).fetchall():
                 enter_pipeline(connection, row["id"], "auto")
+            backfill_locations(connection, path.parent)
             connection.execute(
                 "UPDATE scans SET status='interrupted', finished_at=? "
                 "WHERE status='running'",

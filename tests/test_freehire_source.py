@@ -7,12 +7,12 @@ from test_hotfix_source import run
 from joule.sources.freehire import JOBS_URL, search
 
 
-@pytest.mark.parametrize("mode", ["remote", "hybrid"])
-def test_search(mode):
+@pytest.mark.parametrize("mode, cities", [("remote", ["Boise"]), ("hybrid", [])])
+def test_search(mode, cities):
     roles = iter(["one", "two"])
     node = json.loads(
-        '{"public_slug":"engineer","url":"https://example.com/job","title":"Engineer", "company":"Example","description":"## Full text","location":"Boise, US", "cities":["Boise"],"countries":["us"],"posted_at":"2026-10-08T12:00:00Z"}'
-    ) | {"work_mode": mode}
+        '{"public_slug":"engineer","url":"https://example.com/job","title":"Engineer", "company":"Example","description":"## Full text","location":"Boise, US", "cities":[],"countries":["us"],"posted_at":"2026-10-08T12:00:00Z"}'
+    ) | {"work_mode": mode, "cities": cities}
 
     def respond(request):
         assert request.method == "GET" and str(request.url).split("?")[0] == JOBS_URL

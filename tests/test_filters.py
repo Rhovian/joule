@@ -111,6 +111,7 @@ def limits(**values):
         ({"remote": True}, remote(countries=["US"]), None),
         ({"remote": True, "country": "CA"}, remote(timezones=["UTC"]), None),
         (city("Boston"), cities(), "location"),
+        (city(arrangement="onsite"), {"locations": {"cities": []}}, None),
         (city(), cities(), None),
         (city(country="us"), cities(), None),
         (city(country=None), cities(), None),
@@ -128,7 +129,7 @@ def limits(**values):
         ({"location_raw": "Atlanta, GA"}, exclude("LA"), None),
         ({"location_raw": "New York", "remote": True}, exclude("new york"), None),
         ({"remote": True, "country": "India"}, exclude("india"), "location"),
-        ({"remote": False, "country": "India"}, onsite("United States"), "location"),
+        (city("Bengaluru", "India"), onsite("United States"), "location"),
         ({"remote": False, "country": "united states"}, onsite("United States"), None),
         ({"remote": True, "country": "India"}, onsite("United States"), None),
         ({"remote": False}, onsite("United States"), None),
@@ -268,3 +269,80 @@ def test_client_country_excludes_leave_other_jobs_alone(source, extra):
         upwork_client={"require_hires_outside_us": False},
     )
     assert filter_reason(candidate, preferences) is None
+
+
+@pytest.mark.parametrize(
+    "fields, city, country, unclear, reason",
+    [
+        (
+            {
+                "location_raw": "New York, NY",
+                "remote": False,
+                "country": "United States",
+            },
+            "New York",
+            "United States",
+            False,
+            None,
+        ),
+        (
+            {"description": "<p>This role is onsite NYC.</p>"},
+            "New York",
+            None,
+            False,
+            None,
+        ),
+        ({"description": "Our customers work in NYC."}, None, None, True, None),
+        (
+            {"location_raw": "United States", "remote": False},
+            None,
+            "United States",
+            True,
+            None,
+        ),
+        (
+            {"location_raw": "Florida, United States", "remote": False},
+            None,
+            "United States",
+            True,
+            None,
+        ),
+        (
+            {"location_raw": "Boston, MA; New York, NY", "remote": False},
+            "Boston; New York",
+            None,
+            False,
+            None,
+        ),
+        (
+            {"location_raw": "Boston, MA", "remote": False},
+            "Boston",
+            None,
+            False,
+            "location: city Boston not allowed",
+        ),
+        (
+            {"location_raw": "Bengaluru, India", "remote": False},
+            "Bengaluru",
+            "India",
+            False,
+            "location: onsite country India not allowed",
+        ),
+    ],
+)
+def test_stated_location(fields, city, country, unclear, reason):
+    from joule.filters import location_unclear
+
+    candidate = Candidate(
+        source="hotfix", source_id="1", title="Engineer", link="x", **fields
+    )
+    preferences = Preferences(
+        roles=[],
+        locations={
+            "cities": [{"city": "New York", "country": "US"}],
+            "onsite_countries": ["US"],
+        },
+    )
+    assert filter_reason(candidate, preferences) == reason
+    assert (candidate.city, candidate.country) == (city, country)
+    assert location_unclear(candidate) == unclear

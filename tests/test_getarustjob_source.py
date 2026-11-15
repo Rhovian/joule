@@ -48,7 +48,10 @@ def test_list_and_pagination():
     assert job.link == "https://getarustjob.com/jobs/example-rust"
     assert job.title == "Rust engineer" and job.company == "Example"
     assert job.location_raw == "New York; United States"
-    assert job.remote is True and jobs[1].remote is None
+    assert job.remote is True and jobs[1].remote is False
+    assert jobs[1].arrangement == "onsite"
+    assert job.city == jobs[1].city == "New York"
+    assert job.country == jobs[1].country == "United States"
     assert job.posted_at == datetime(2026, 10, 8, 12, tzinfo=UTC)
     assert job.extra["slug"] == "example-rust"
 
