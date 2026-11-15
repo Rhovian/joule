@@ -1,3 +1,4 @@
+export const label = (value: string) => value.replaceAll('_', ' ').replace(/^./, c => c.toUpperCase());
 export const escape = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 export function age(stamp: string, relative = false) {
   const date = new Date(stamp), hours = Math.max(0, Math.floor((Date.now() - date.getTime()) / 3600000));

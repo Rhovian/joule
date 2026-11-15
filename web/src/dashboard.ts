@@ -112,7 +112,7 @@ async function loadJobs() {
 const scansPage = createScans(replace);
 const settingsPage = createSettings(api, notice, () => loadJobs(), watchScan);
 const pipeline = createPipeline(api, undo, { open: id => openJob(id), changed: renderDetail, error: notice, active: () => view === 'pipeline', drawer: () => detailId, phone: () => mobile.phone, replace });
-const email = createEmail(api); void email.load();
+const email = createEmail(api, async id => { pipeline.invalidate(id); await pipeline.load(); if (detailId === id) await pipeline.loadEntry(id); }); void email.load();
 function refreshJobs() { return Promise.all([loadJobs(), pipeline.load()]); }
 function renderSources() {
   renderScoreAll();

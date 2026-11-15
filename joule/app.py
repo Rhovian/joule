@@ -17,6 +17,8 @@ from joule.config import load_env, load_settings
 from joule.db import connect, init_db
 from joule.email_connection import EmailConnection
 from joule.email_connection import router as email_router
+from joule.email_suggestions import EmailSuggestions
+from joule.email_suggestions import router as suggestions_router
 from joule.fill import router as fill_router
 from joule.jobs import router as jobs_router
 from joule.manual import router as manual_router
@@ -56,9 +58,14 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                 telegram = Telegram(directory, client, token, chat_id, auth)
             app.state.telegram = telegram
             app.state.scanner = Scanner(
-                directory, client, app.state.upwork_auth, telegram
+                directory,
+                client,
+                app.state.upwork_auth,
+                telegram,
+                app.state.email_suggestions,
             )
             telegram_task = asyncio.create_task(telegram.run()) if telegram else None
+            email_task = asyncio.create_task(app.state.email_suggestions.run())
             schedule_task = asyncio.create_task(app.state.scanner.run_schedule())
             try:
                 yield
@@ -67,6 +74,9 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                     telegram_task.cancel()
                     with suppress(asyncio.CancelledError):
                         await telegram_task
+                email_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await email_task
                 schedule_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await schedule_task
@@ -103,7 +113,9 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     app.include_router(fill_router)
     app.include_router(traces_router)
     app.include_router(settings_router)
+    app.state.email_suggestions = EmailSuggestions(directory, app.state.email)
     app.include_router(email_router)
+    app.include_router(suggestions_router)
     app.include_router(answers_router)
     app.include_router(profile_router)
     app.include_router(pipeline_router)
