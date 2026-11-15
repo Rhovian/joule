@@ -21,6 +21,7 @@ for (const filled of [1, 0]) test(`set rows have no actions; Ask filled=${filled
     tabs: {query: async () => [{id: 4}], onActivated: {addListener() {}}, onUpdated: {addListener() {}}},
   };
   let copied; panel.window.navigator.clipboard = {writeText: async value => { copied = value; }};
+  panel.window.matchMedia = () => ({matches: false, addEventListener() {}});
   panel.window.eval(fs.readFileSync(`${__dirname}/../sidepanel.js`, 'utf8'));
   const settle = () => new Promise(resolve => setImmediate(resolve));
   const element = id => panel.window.document.getElementById(id);
@@ -61,6 +62,7 @@ test('Fill offers the PDF download and clears it on the next Fill or Job change'
     }[message.type]})},
     tabs: {query: async () => [{id: 4}], onActivated: {addListener() {}}, onUpdated: {addListener() {}}},
   };
+  panel.window.matchMedia = () => ({matches: false, addEventListener() {}});
   panel.window.eval(fs.readFileSync(`${__dirname}/../sidepanel.js`, 'utf8'));
   const settle = () => new Promise(resolve => setImmediate(resolve));
   const element = id => panel.window.document.getElementById(id);

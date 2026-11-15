@@ -78,6 +78,7 @@ test('fragment-only tab updates preserve pending rows and the selected Job', asy
     calls.push(message);
     return {value: {detect: job, jobs: [job], resume: {}, fill: {job, fields: [field], actions: [{ref: field.ref, action: 'ask'}], filled: 0}, save: {}}[message.type]};
   }}, tabs: {query: async () => [{...tab}], onActivated: {addListener() {}}, onUpdated: {addListener: fn => { listeners.update = fn; }}}};
+  panel.window.matchMedia = () => ({matches: false, addEventListener() {}});
   panel.window.eval(fs.readFileSync(`${__dirname}/../sidepanel.js`, 'utf8'));
   const settle = () => new Promise(resolve => setImmediate(resolve));
   const element = id => panel.window.document.getElementById(id);

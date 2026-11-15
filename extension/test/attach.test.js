@@ -64,6 +64,7 @@ for (const site of ['lever', 'rippling']) for (const existing of [true, false]) 
   chrome.runtime.sendMessage = async message => ({value: await background.handle(message, ui)});
   const panel = new JSDOM(fs.readFileSync(`${__dirname}/../sidepanel.html`, 'utf8'), {runScripts: 'outside-only'});
   panel.window.chrome = chrome;
+  panel.window.matchMedia = () => ({matches: false, addEventListener() {}});
   panel.window.eval(fs.readFileSync(`${__dirname}/../sidepanel.js`, 'utf8'));
   const settle = () => new Promise(resolve => setImmediate(resolve));
   await settle();

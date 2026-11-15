@@ -1,7 +1,23 @@
 const element = id => document.getElementById(id);
 const text = (tag, value, className = '') => Object.assign(document.createElement(tag), {textContent: value ?? '', className});
 let jobs = [], busy = false, active = null, refreshPending = false, choosing = false, connected = null, origin = '';
-let resumeDraft = null, displayedPage = null, lastResult = null;
+let resumeDraft = null, displayedPage = null, lastResult = null, theme = 'system', themeVersion = 0;
+const systemTheme = matchMedia('(prefers-color-scheme: dark)');
+function applyTheme() {
+  document.documentElement.classList.toggle('dark', theme === 'dark' || theme === 'system' && systemTheme.matches);
+}
+systemTheme.addEventListener('change', applyTheme);
+applyTheme();
+async function refreshTheme() {
+  // runtime.sendMessage has no cancellation option; ignore superseded or offline replies.
+  // https://developer.chrome.com/docs/extensions/reference/api/runtime#method-sendMessage
+  const version = ++themeVersion;
+  let value;
+  try { value = await send({type: 'appearance'}); } catch { /* Unavailable appearance falls back to System. */ }
+  if (version !== themeVersion || !connected) return;
+  theme = ['light', 'dark'].includes(value?.theme) ? value.theme : 'system';
+  applyTheme();
+}
 async function send(message) {
   const result = await chrome.runtime.sendMessage(message);
   if (result.error) throw Error(result.error);
@@ -22,7 +38,7 @@ function online(value, reason = '') {
   element('connection-state').textContent = value ? 'Connected' : 'Offline';
   element('connection-title').textContent = value ? 'Connection options' : 'Can’t reach Joule';
   element('connection-message').textContent = reason;
-  if (!value) connectionOptions(true);
+  if (!value) { themeVersion++; theme = 'system'; applyTheme(); connectionOptions(true); }
 }
 function score(job) {
   const value = job.score;
@@ -97,7 +113,7 @@ async function run(work) {
     if (refreshPending) { refreshPending = false; void run(refresh); }
   }
 }
-async function refresh() {
+async function refresh(updateTheme = false) {
   clearResult();
   let detection;
   try {
@@ -110,8 +126,9 @@ async function refresh() {
   } catch (error) { showActive(null); detection = `Auto-detect failed: ${error.message}`; }
   try { jobs = await send({type: 'jobs'}); }
   catch (error) { online(false, error.message); throw error; }
-  const reconnecting = connected === false;
+  const reconnecting = connected === false, checkTheme = updateTheme || connected !== true;
   online(true); if (reconnecting) connectionOptions(false);
+  if (checkTheme) void refreshTheme();
   await refreshDrafts(); picker();
   status(detection, detection.startsWith('Auto-detect failed:'));
 }
@@ -181,11 +198,11 @@ element('job-search').addEventListener('input', picker);
 element('change').addEventListener('click', () => { choosing = true; element('job-search').value = ''; picker(); showActive(active); element('job-search').focus(); });
 element('cancel-pick').addEventListener('click', () => { choosing = false; showActive(active); });
 element('settings').addEventListener('click', () => connectionOptions(element('connection-options').hidden));
-element('retry').addEventListener('click', () => run(refresh));
+element('retry').addEventListener('click', () => run(() => refresh(true)));
 element('test').addEventListener('click', () => run(async () => {
   element('connection-message').textContent = await connect(chrome, element('origin').value);
   origin = normalizeOrigin(element('origin').value);
-  await refresh();
+  await refresh(true);
 }));
 function detectPage() { if (busy) refreshPending = true; else void run(refresh); }
 void run(async () => {
