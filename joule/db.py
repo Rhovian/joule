@@ -63,6 +63,8 @@ CREATE TABLE IF NOT EXISTS scans (
 def connect(path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(path)
     connection.row_factory = sqlite3.Row
+    # SQLite lower() is ASCII-only; Python's Unicode casefold needs no ICU extension.
+    connection.create_function("casefold", 1, str.casefold, deterministic=True)
     connection.execute("PRAGMA foreign_keys=ON")
     return connection
 

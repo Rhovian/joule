@@ -54,7 +54,7 @@ export function createSourceFilter(onChange: () => void, onOpen: () => void, onI
     if (button.dataset.pick) choose(sources.filter(s => button.dataset.pick === 'all' || button.dataset.pick === 'new' && s.new_jobs > 0).map(s => s.name));
   });
   document.addEventListener('keydown', event => {
-    if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return;
+    if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing || document.querySelector('#shortcuts[open]')) return;
     const typing = (event.target as HTMLElement).closest('input:not([type=checkbox]), textarea, select, [contenteditable]');
     if (!menu.hasAttribute('popover')) {
       if (event.key === 'f' && !typing && !document.getElementById('triage')!.hidden) { event.preventDefault(); onInlineOpen(); }
