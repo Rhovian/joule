@@ -81,7 +81,7 @@ dialog.addEventListener('close', () => {
   if (navHome) navHome.parent.insertBefore(nav, navHome.next);
   navHome = null;
   nav.querySelector('[data-open-fill]')!.removeAttribute('aria-current');
-  nav.querySelector(`[data-view="${location.hash === '#scans' ? 'scans' : 'triage'}"]`)!.setAttribute('aria-current', 'page');
+  if (location.hash !== '#settings') nav.querySelector(`[data-view="${location.hash === '#scans' ? 'scans' : 'triage'}"]`)!.setAttribute('aria-current', 'page');
 });
 document.addEventListener('keydown', event => {
   if (dialog.open) {

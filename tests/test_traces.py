@@ -38,9 +38,14 @@ def trace():
 
 
 def test_trace_private_unique_redacted_files(client, tmp_path):
+    assert client.get("/api/connections").json()["extension"] == {"last_fill_at": None}
     paths = [
         client.post("/api/fill/traces", json=trace()).json()["file"] for _ in range(2)
     ]
+    latest = json.loads(Path(paths[-1]).read_text())["recorded_at"]
+    assert client.get("/api/connections").json()["extension"] == {
+        "last_fill_at": latest
+    }
     assert paths[0] != paths[1]
     directory = tmp_path / "traces"
     assert stat.S_IMODE(directory.stat().st_mode) == 0o700

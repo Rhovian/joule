@@ -3,6 +3,7 @@ import { age, escape } from './format';
 import { createSourceFilter } from './sources';
 import { createViews } from './views';
 import { createScans } from './scans';
+import { createSettings } from './settings';
 import { createMobile } from './mobile';
 import { createTriageActions } from './triage-actions';
 import { sourceStatus } from './source-status';
@@ -105,6 +106,7 @@ async function loadJobs() {
   if (detailId) renderDetail();
 }
 const scansPage = createScans(replace);
+const settingsPage = createSettings(api, notice);
 function renderSources() {
   renderScoreAll();
   if (!jobs.length && element('jobs').getAttribute('aria-busy') === 'false') renderJobs();
@@ -283,19 +285,21 @@ const triage = createTriageActions({
 const mobile = createMobile({ state: changeState, error: notice, refresh: () => void loadSources().catch(notice) });
 function showView(next: string, focus = false) {
   sourceFilter.close();
-  view = next === 'scans' ? 'scans' : 'triage';
+  view = ['scans', 'settings'].includes(next) ? next : 'triage';
   closeDetail();
   element('triage').hidden = view !== 'triage';
   element('job-search-box').hidden = view !== 'triage';
   if (view !== 'triage') triage.clear();
   element('a-scans').hidden = view !== 'scans';
-  document.querySelectorAll<HTMLElement>('.app-nav [data-view], #mobile-nav [data-view]').forEach(tab => {
+  element('a-settings').hidden = view !== 'settings';
+  if (view === 'settings') void settingsPage.connections();
+  document.querySelectorAll<HTMLElement>('.app-nav [data-view], #mobile-nav [data-view], #settings-link').forEach(tab => {
     if (tab.dataset.view === view) tab.setAttribute('aria-current', 'page');
     else tab.removeAttribute('aria-current');
   });
-  document.title = `joule · ${view === 'triage' ? 'Triage' : 'Scans'}`;
+  document.title = `joule · ${view === 'triage' ? 'Triage' : view === 'scans' ? 'Scans' : 'Settings'}`;
   if ((element('mobile-filters') as HTMLDialogElement).open) (element('mobile-filters') as HTMLDialogElement).close();
-  if (focus) element(view === 'triage' ? 'triage' : 'a-scans').focus();
+  if (focus) element(view === 'triage' ? 'triage' : `a-${view}`).focus();
 }
 window.addEventListener('hashchange', () => showView(location.hash.slice(1), true));
 const views = createViews(preset => {
@@ -332,7 +336,7 @@ root.addEventListener('click', event => {
   if (target.dataset.action === 'dismiss-below') void triage.state(triage.below(), 'dismissed').catch(notice);
   if (target.dataset.action === 'clear-search') { views.modified(); (element('job-search') as HTMLInputElement).value = ''; void loadJobs().catch(notice); }
   if (target.dataset.action === 'queue') void queueJob(id).catch(notice);
-  if (target.dataset.action === 'telegram') void api('telegram/start', 'POST', {}).then(() => notice('Sent the queue head to Telegram')).catch(notice);
+  if (target.dataset.action === 'telegram') void api('telegram/start', 'POST', {}).then(() => { notice('Sent the queue head to Telegram'); if (view === 'settings') void settingsPage.connections(); }).catch(notice);
   if (target.dataset.action === 'open') void openJob(id).catch(notice);
   if (target.dataset.action === 'draft') void writeDraft(id, target.dataset.kind as DraftKind).catch(notice);
   if (target.dataset.action === 'schedule') void toggleSchedule().catch(notice);
@@ -347,7 +351,7 @@ root.addEventListener('click', event => {
   if (target.dataset.action === 'connect') window.open('/auth/upwork/connect', 'upwork-connect', 'popup,width=640,height=760');
 });
 window.addEventListener('message', event => {
-  if (event.origin === location.origin && event.data === 'upwork-connected') { notice('Upwork connected'); void loadSources().catch(notice); }
+  if (event.origin === location.origin && event.data === 'upwork-connected') { notice('Upwork connected'); void loadSources().catch(notice); if (view === 'settings') void settingsPage.connections(); }
 });
 root.addEventListener('change', event => {
   const input = event.target as HTMLInputElement;
@@ -381,8 +385,9 @@ document.addEventListener('keydown', event => {
   if (event.key === '?') { event.preventDefault(); shortcuts.showModal(); return; }
   if (event.key === '/' && view === 'triage') { event.preventDefault(); if (mobile.phone) closeDetail(); (element('job-search') as HTMLInputElement).focus(); return; }
   if (event.key === 'z' && view === 'triage') { event.preventDefault(); void triage.undo().catch(notice); return; }
+  if (event.key === ',') { event.preventDefault(); location.hash = 'settings'; return; }
   if (event.key === 's') { event.preventDefault(); location.hash = 'scans'; return; }
-  if (event.key === 'Escape' && view === 'scans') { location.hash = 'triage'; return; }
+  if (event.key === 'Escape' && view !== 'triage') { location.hash = 'triage'; return; }
   if (view !== 'triage' || (!jobs.length && !detailId)) return;
   if (event.repeat && ['a', 'd', 'x'].includes(event.key)) { event.preventDefault(); return; }
   if (event.key === 'x' && selected) { event.preventDefault(); triage.toggle(selected); return; }
@@ -393,4 +398,4 @@ document.addEventListener('keydown', event => {
   if (event.key === 'j' || event.key === 'k') moveJob(event.key === 'j' ? 1 : -1);
   if (event.key === 'o' && selected) void openJob(selected).catch(notice);
 });
-void Promise.allSettled([loadJobs(), loadSources()]).then(results => results.forEach(r => { if (r.status === 'rejected') notice(r.reason); }));
+void Promise.allSettled([loadJobs(), loadSources(), settingsPage.init()]).then(results => results.forEach(r => { if (r.status === 'rejected') notice(r.reason); }));
