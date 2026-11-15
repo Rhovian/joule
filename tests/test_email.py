@@ -1,317 +1,414 @@
+"""Gmail replaces the old connection and confirmed-suggestion contracts."""
+
+import asyncio
 import json
 from contextlib import closing
-from datetime import UTC, datetime
-from email.message import EmailMessage
-from functools import partial
-from stat import S_IMODE
+from datetime import UTC, datetime, timedelta
 
-from fastapi.testclient import TestClient
+from joule.db import connect
+from joule.gmail_agent import MailResult, MailRun
+from joule.gmail_server import SCOPE, TOOLS
+from tests import test_jobs
 
-from joule import ai
-from joule.app import create_app
-from joule.db import connect, enter_pipeline
-from tests.imap_fixture import PASSWORD, USERNAME, imap_server
+client = test_jobs.client
 
 
-def test_email_connect_validate_private_and_disconnect(tmp_path, monkeypatch):
-    directory = tmp_path / "joule"
-    responses = []
-    with (
-        imap_server(tmp_path / "tls") as server,
-        TestClient(create_app(directory), base_url="http://localhost") as client,
-    ):
-        monkeypatch.setenv("SSL_CERT_FILE", str(server.certificate))
-        config = {
-            "inbox": "imap",
-            "host": "localhost",
-            "port": server.server_address[1],
-            "username": USERNAME,
-            "password": PASSWORD,
-        }
-        path = directory / "email.json"
-        assert client.get("/api/email").json() == {
-            "state": "not_connected",
-            "config": None,
-        }
-        response = client.put("/api/email", json=config | {"password": "wrong"})
-        responses.append(response)
-        assert response.status_code == 401 and not path.exists()
-        response = client.put("/api/email", json=config)
-        responses.append(response)
-        assert response.status_code == 200 and response.json()["state"] == "connected"
-        assert S_IMODE(path.stat().st_mode) == 0o600
-        assert json.loads(path.read_text()) == config | {
-            "tls": True,
-            "scope": "pipeline",
-            "folder": "INBOX",
-            "check_minutes": 15,
-        }
-        original = path.read_bytes()
-        assert (
-            client.put(
-                "/api/email", json=config | {"username": "other user", "password": None}
-            ).status_code
-            == 400
-            and path.read_bytes() == original
-        )
-        assert (
-            client.put(
-                "/api/email", json=config | {"password": "new wrong password"}
-            ).status_code
-            == 401
-            and client.get("/api/email").json()["state"] == "connected"
-        )
-        response = client.put("/api/email", json=config | {"password": [PASSWORD]})
-        responses.append(response)
-        assert response.status_code == 422 and path.read_bytes() == original
-        response = client.put(
-            "/api/email",
-            json=config | {"password": None, "scope": "folder", "folder": "missing"},
-        )
-        responses.append(response)
-        assert response.status_code == 400 and path.read_bytes() == original
-        server.drop_on_login = True
-        assert (
-            client.put("/api/email", json=config | {"password": None}).status_code
-            == 502
-        )
-        assert client.get("/api/email").json()["state"] == "connected"
-        server.drop_on_login = False
-        server.allow_login = False
-        response = client.put("/api/email", json=config | {"password": None})
-        responses.append(response)
-        assert response.status_code == 401 and path.read_bytes() == original
-        responses.append(client.get("/api/email"))
-        assert responses[-1].json()["state"] == "expired"
-        server.allow_login = True
-        updated = config | {
-            "password": None,
-            "scope": "folder",
-            "folder": "Jobs & 台北",
-            "check_minutes": 60,
-        }
-        responses.append(client.put("/api/email", json=updated))
-        assert responses[-1].json()["state"] == "connected"
-        assert server.folders[-1] == "Jobs &- &U,BTFw-"
-        assert json.loads(path.read_text())["password"] == PASSWORD
-        with imap_server(tmp_path / "starttls", implicit=False) as upgrade:
-            monkeypatch.setenv("SSL_CERT_FILE", str(upgrade.certificate))
-            response = client.put(
-                "/api/email",
-                json=config | {"port": upgrade.server_address[1], "tls": False},
-            )
-            responses.append(response)
-            assert response.status_code == 200
-            assert ("STARTTLS", False) in upgrade.commands and (
-                "LOGIN",
-                True,
-            ) in upgrade.commands
-            assert not any(
-                command == "LOGIN" and not secure
-                for command, secure in upgrade.commands
-            )
-        responses.append(client.delete("/api/email"))
-        assert responses[-1].json()["state"] == "not_connected" and not path.exists()
-        for response in responses:
-            assert PASSWORD not in response.text and "password" not in (
-                response.json().get("config") or {}
-            )
-        assert {command for command, _ in server.commands} <= {
-            "CAPABILITY",
-            "LOGIN",
-            "EXAMINE",
-            "LOGOUT",
-        }
+def test_gmail_status_and_retired_connection_routes(client, monkeypatch):
+    service = client.app.state.gmail
+    monkeypatch.setattr(service, "account", lambda: "owner@example.com")
+    root = service.directory / "gmail" / "credentials"
+    root.mkdir(parents=True)
+    token = root / "owner@example.com.json"
+    for scopes, expected in [
+        ([SCOPE, "openid"], "not_connected"),
+        ([SCOPE], "configured"),
+    ]:
+        token.write_text(json.dumps({"refresh_token": "secret", "scopes": scopes}))
+        status = client.get("/api/email").json()
+        assert status["state"] == expected
+        assert "secret" not in json.dumps(status)
+    routes = client.app.openapi()["paths"]
+    assert set(routes["/api/email"]) == {"get"}
+    assert "/api/email/suggestions/{suggestion_id}/{action}" not in routes
 
 
-def test_email_suggestions_require_confirmation_and_remember_exclusions(
-    tmp_path, monkeypatch
-):
-    def message(subject, sender="Acme Talent <talent@acme.com>", old=False, body=None):
-        mail = EmailMessage()
-        mail["From"], mail["Subject"], mail["Message-ID"] = (
-            sender,
-            subject,
-            f"<{subject.replace(' ', '-')}@fixture>",
-        )
-        mail["Date"] = datetime(2000, 1, 1, tzinfo=UTC) if old else datetime.now(UTC)
-        mail.set_content(
-            body
-            or "Intro call on Friday. "
-            + "x" * 200
-            + "\n> quoted old message\nPRIVATE BODY TAIL",
-            subtype="html" if body else "plain",
-        )
-        return mail.as_bytes()
-
-    calls = []
-
-    async def classify(model, prompt, schema):
-        calls.append(prompt)
-        if "Retry" in prompt and sum("Retry" in p for p in calls) == 1:
-            raise ai.AIError("Provider unavailable")
-        if "Invalid" in prompt:
-            try:
-                schema(action="invalid")
-            except ValueError as error:
-                raise ai.AIError("Invalid output") from error
-        action = (
-            "reject"
-            if "Update" in prompt
-            else "date"
-            if "Technical" in prompt
-            else "move"
-        )
-        return schema(
-            action=action,
-            stage="screen" if action == "move" else None,
-            next_at="2027-01-07T14:00:00Z" if action == "date" else None,
-            next_label="Technical" if action == "date" else None,
-        )
-
-    monkeypatch.setattr(ai, "structured", classify)
-    with (
-        imap_server(tmp_path / "tls") as server,
-        TestClient(
-            create_app(tmp_path / "joule"), base_url="http://localhost"
-        ) as client,
-    ):
-        monkeypatch.setenv("SSL_CERT_FILE", str(server.certificate))
-        service = client.app.state.email_suggestions
-        check = lambda: client.portal.call(partial(service.check, scan=True))
-        db_path = tmp_path / "joule" / "joule.db"
-        with closing(connect(db_path)) as db, db:
-            for name in ["Acme", "Phantom", "Pinterest", "Ambiguous", "Ambiguous"]:
-                job_id = db.execute(
-                    "INSERT INTO jobs(source,source_id,link,title,company,first_seen_at,state) VALUES ('hn',?,'https://jobs.example/role','Engineer',?,?,'applied')",
-                    (name + str(db.total_changes), name, datetime.now(UTC).isoformat()),
-                ).lastrowid
-                enter_pipeline(db, job_id)
-            db.execute("UPDATE jobs SET link='https://remoteok.com/role' WHERE id=4")
-        assert (
-            client.put(
-                "/api/email",
-                json={
-                    "inbox": "imap",
-                    "host": "localhost",
-                    "port": server.server_address[1],
-                    "username": USERNAME,
-                    "password": PASSWORD,
-                },
-            ).status_code
-            == 200
-        )
-        server.messages = {
-            1: message("Next steps", "Acme <noreply@acme.com>"),
-            2: message("Update Pinterest", "Recruiting <jobs@greenhouse.io>"),
-            3: message(
-                "Technical",
-                "Phantom <no-reply@careers.phantom.com>",
-                body="<style>" + "x" * 4500 + "</style><p>Real reply.</p>",
+def test_email_automatic_moves_flags_and_stale_applications(client, monkeypatch):
+    service = client.app.state.gmail
+    monkeypatch.setattr(service, "account", lambda: "owner@example.com")
+    monkeypatch.setattr(service, "configured", lambda: True)
+    for job_id in (1, 2):
+        client.patch(f"/api/jobs/{job_id}", json={"state": "applied"})
+    with closing(connect(service.path)) as db, db:
+        db.execute("UPDATE jobs SET company='Known' WHERE id=3")
+        db.execute(
+            "UPDATE jobs SET extra=? WHERE id=4",
+            (
+                json.dumps(
+                    {"application_url": "https://jobs.ashbyhq.com/known/44/application"}
+                ),
             ),
-            4: message("Unmatched", "Other <other@elsewhere.com>"),
-            5: message("Ambiguous", "Other <jobs@ambiguous.com>"),
-            6: message("Too old", old=True),
-            7: message("Newsletter", "jobs@remoteok.com"),
-            8: message("Account", "accounts@accounts.acme.com"),
-        }
-        check()
-        requests = len(server.uid_requests)
-        client.portal.call(service.check)
-        assert len(server.uid_requests) == requests
-        client.put(
-            "/api/email",
-            json=client.get("/api/email").json()["config"]
-            | {"password": None, "check_minutes": None},
         )
-        suggestions = client.get("/api/email/suggestions").json()["suggestions"]
-        assert len(suggestions) == len(calls) == 3
-        assert all(
-            row["stage"] == "applied" for row in client.get("/api/pipeline").json()
+    calls = []
+    snapshots = []
+    stamp = datetime.now(UTC)
+    apply = service.apply
+
+    def tracked(account, jobs, result):
+        snapshots.append(jobs)
+        return apply(account, jobs, result)
+
+    monkeypatch.setattr(service, "apply", tracked)
+
+    def deliver(jobs, *rows):
+        service.apply(
+            service.account(), jobs, MailRun(complete=True, results=list(rows))
         )
+
+    def mail(message_id, job_ids, **kwargs):
+        return MailResult(
+            message_id=message_id,
+            job_ids=job_ids,
+            sender="Acme <jobs@acme.com>",
+            subject="Application reply",
+            quote="One line\n> quoted tail",
+            date=stamp + timedelta(minutes=1),
+            action="move",
+            stage="screen",
+        ).model_copy(update=kwargs)
+
+    async def agent(model, prompt, schema, **kwargs):
+        calls.append(kwargs)
+        return MailRun(
+            complete=False,
+            results=[
+                mail("screen", [1]),
+                mail("ambiguous", [1, 2], action="uncertain"),
+                mail(
+                    "external",
+                    [],
+                    action="add",
+                    title="Developer",
+                    company="External",
+                    url="https://jobs.lever.co/external/42/apply",
+                ),
+                mail(
+                    "external-repeat",
+                    [],
+                    action="add",
+                    title="Another title",
+                    company="external",
+                    url="https://jobs.lever.co/external/42?utm_source=mail",
+                ),
+                mail(
+                    "known", [], action="add", title="Engineer B ", company="Known Inc."
+                ),
+                mail("known-flag", [3], action="uncertain"),
+                mail(
+                    "known-url",
+                    [],
+                    action="add",
+                    title="Different title",
+                    company="Different label",
+                    url="https://jobs.ashbyhq.com/known/44",
+                ),
+            ],
+        )
+
+    monkeypatch.setattr("joule.gmail_agent.ai.structured", agent)
+    asyncio.run(service.check())
+    assert calls[0]["mcp"]["enabled_tools"] == TOOLS
+    assert calls[0]["mcp"]["required"] is True
+    current = client.get("/api/pipeline/1").json()
+    assert current["stage"] == "screen" and current["history"][-1]["how"] == "auto"
+    assert client.get("/api/pipeline/2").json()["stage"] == "applied"
+    flags = client.get("/api/email").json()["flags"]
+    assert {1, 2, 3} <= {flag["job_id"] for flag in flags}
+    with closing(connect(service.path)) as db:
+        assert db.execute("SELECT through_at FROM gmail_checks").fetchone()[0] is None
+        discovered = db.execute(
+            "SELECT id FROM jobs WHERE company='External'"
+        ).fetchone()[0]
+    assert {flag["job_id"] for flag in flags} == {1, 2, 3, discovered}
+    assert all(
+        client.get(f"/api/jobs/{job_id}").json()["state"] == "applied"
+        for job_id in (3, 4)
+    )
+    assert all(
+        client.get(f"/api/pipeline/{job_id}").json()["history"][0]["how"] == "auto"
+        for job_id in (3, 4)
+    )
+    assert (
+        client.get(f"/api/pipeline/{discovered}").json()["history"][0]["how"] == "auto"
+    )
+    assert all(
+        len(client.get(f"/api/pipeline/{job_id}").json()["history"]) == 1
+        for job_id in (3, 4, discovered)
+    )
+    assert (
+        client.get(f"/api/pipeline/{discovered}").json()["applied_at"]
+        == (stamp + timedelta(minutes=1)).isoformat()
+    )
+    # Replaying the old output, including discovery, must not append anything.
+    replay = asyncio.run(agent(None, json.dumps({"jobs": snapshots[0]}), None))
+    service.apply(service.account(), snapshots[0], replay)
+    assert client.get("/api/pipeline/1").json() == current
+    assert len(client.get("/api/pipeline").json()) == 5
+    for flag in flags:
+        assert client.post(f"/api/email/flags/{flag['id']}/dismiss").status_code == 200
+    assert not client.get("/api/email").json()["flags"]
+    # Re-apply changes the Move ID. The future mail date keeps the independent
+    # date guard out of this assertion; no first_move_id guard remains.
+    client.patch("/api/jobs/2", json={"state": "seen"})
+    client.patch("/api/jobs/2", json={"state": "applied"})
+    deliver(snapshots[0], mail("stale-application", [2]))
+    assert client.get("/api/pipeline/2").json()["stage"] == "applied"
+    # Retry with a fresh snapshot exercises date, rejection and backward protection.
+    with closing(connect(service.path)) as db, db:
+        db.execute(
+            "UPDATE gmail_checks SET checked_at=?",
+            ((stamp - timedelta(hours=1)).isoformat(),),
+        )
+
+    async def finish(model, prompt, schema, **kwargs):
+        return MailRun(
+            complete=True,
+            results=[
+                mail(
+                    "date",
+                    [1],
+                    action="date",
+                    next_at=stamp + timedelta(days=2),
+                    next_label="Technical",
+                ),
+                mail("reject", [2], action="reject"),
+            ],
+        )
+
+    monkeypatch.setattr("joule.gmail_agent.ai.structured", finish)
+    asyncio.run(service.check())
+    assert client.get("/api/pipeline/1").json()["next_label"] == "Technical"
+    assert client.get("/api/pipeline/2").json()["closed_reason"] == "rejected"
+    fresh = snapshots[-1]
+    one = client.get("/api/pipeline/1").json()
+    snapshot = [
+        dict(job, move_id=one["id"]) if job["id"] == 1 else job for job in fresh
+    ]
+    deliver(
+        snapshot,
+        mail("backward", [1]),
+        mail("old-mail", [1], stage="offer", date=stamp - timedelta(days=1)),
+        mail("unknown", [999]),
+    )
+    assert client.get("/api/pipeline/1").json() == one
+    for reason, action in [
+        ("rejected", "reject"),
+        ("no_reply", "move"),
+        ("withdrawn", "date"),
+    ]:
+        client.patch("/api/pipeline/2", json={"closed_reason": reason})
+        closed = client.get("/api/pipeline/2").json()
+        deliver(
+            [dict(id=2, move_id=closed["id"])],
+            mail(
+                f"closed-{action}",
+                [2],
+                action=action,
+                next_at=stamp + timedelta(days=3),
+            ),
+        )
+        assert client.get("/api/pipeline/2").json() == closed
+    for action in ("move", "reject", "date"):
+        client.patch(
+            "/api/pipeline/2",
+            json={
+                "closed_reason": "no_reply",
+                "how": "auto",
+                "note": f"Automatic closure for {action}",
+            },
+        )
+        closed = client.get("/api/pipeline/2").json()
+        deliver(
+            [dict(id=2, move_id=closed["id"])],
+            mail(
+                f"late-{action}",
+                [2],
+                action=action,
+                stage="interview",
+                next_at=stamp + timedelta(days=3),
+            ),
+        )
+        reopened = client.get("/api/pipeline/2").json()
+        assert reopened["closed_reason"] == ("rejected" if action == "reject" else None)
+        assert (
+            reopened["history"][-1]["how"] == "auto"
+            and reopened["first_move_id"] == closed["first_move_id"]
+        )
+        if action == "move":
+            assert reopened["stage"] == "interview"
+        # A message predating this automatic closure must not reopen it.
+        if action == "date":
+            client.patch(
+                "/api/pipeline/2", json={"closed_reason": "no_reply", "how": "auto"}
+            )
+            closed = client.get("/api/pipeline/2").json()
+            deliver(
+                [dict(id=2, move_id=closed["id"])],
+                mail(
+                    "before-closure",
+                    [2],
+                    stage="offer",
+                    date=datetime.fromisoformat(closed["created_at"])
+                    - timedelta(microseconds=1),
+                ),
+            )
+            assert client.get("/api/pipeline/2").json() == closed
+    for job_id in (1, 2):
+        # Open and auto-No reply entries both stop at Offer on acceptance mail.
+        before = client.get(f"/api/pipeline/{job_id}").json()
+        deliver(
+            [dict(id=job_id, move_id=before["id"])],
+            mail(f"accepted-{job_id}", [job_id], stage="accepted"),
+        )
+        after = client.get(f"/api/pipeline/{job_id}").json()
+        assert after["stage"] == "offer" and after["closed_reason"] is None
+        assert all(item["stage"] != "accepted" for item in after["history"])
+        assert any(
+            flag["message_id"] == f"accepted-{job_id}"
+            for flag in service.status()["flags"]
+        )
+    for message_id in ("accepted-at-offer", "accepted-manual"):
+        if message_id == "accepted-manual":
+            client.patch("/api/pipeline/1", json={"stage": "accepted"})
+        before = client.get("/api/pipeline/1").json()
+        deliver(
+            [dict(id=1, move_id=before["id"])], mail(message_id, [1], stage="accepted")
+        )
+        assert client.get("/api/pipeline/1").json() == before
+        assert any(
+            flag["message_id"] == message_id for flag in service.status()["flags"]
+        )
+    with closing(connect(service.path)) as db, db:
+        db.execute(
+            "UPDATE jobs SET title='Shared',company='Shared',state='new' WHERE id=7"
+        )
+        db.execute("UPDATE jobs SET title='Shared',company='Shared' WHERE id=5")
+    deliver(
+        [
+            dict(id=5, state="dismissed", move_id=None),
+            dict(id=7, state="new", move_id=None),
+        ],
+        mail("ambiguous-discovery", [], action="add", title="Shared", company="Shared"),
+    )
+    assert {
+        flag["job_id"]
+        for flag in service.status()["flags"]
+        if flag["message_id"] == "ambiguous-discovery"
+    } == {5, 7}
+    with closing(connect(service.path)) as db, db:
+        db.execute("UPDATE jobs SET title='Stale',company='Stale' WHERE id=5")
+    deliver(
+        [dict(id=5, state="new", move_id=None)],
+        mail("stale-discovery", [], action="add", title="Stale", company="Stale"),
+    )
+    assert client.get("/api/jobs/5").json()["state"] == "dismissed"
+    assert len(client.get("/api/pipeline").json()) == 5
+    with closing(connect(service.path)) as db:
+        assert db.execute("SELECT through_at FROM gmail_checks").fetchone()[0]
         assert {
-            row["job_id"]: row["email_count"]
-            for row in client.get("/api/pipeline").json()
-        } == {1: 1, 2: 1, 3: 1, 4: 0, 5: 0}
-        by_subject = {row["subject"]: row for row in suggestions}
-        assert len(by_subject["Next steps"]["quote"]) == 140
-        assert by_subject["Technical"]["quote"] == "Real reply."
-        for subject, action in [
-            ("Next steps", "exclude"),
-            ("Update Pinterest", "confirm"),
-            ("Technical", "confirm"),
-        ]:
-            row = by_subject[subject]
-            assert (
-                client.post(f"/api/email/suggestions/{row['id']}/{action}").status_code
-                == 200
+            row["message_id"]: row["state"]
+            for row in db.execute(
+                "SELECT message_id,state FROM gmail_events WHERE message_id IN ('backward','closed-reject','closed-move','closed-date')"
             )
-        assert client.get("/api/pipeline/3").json()["closed_reason"] == "rejected"
-        dated = client.get("/api/pipeline/2").json()
-        assert (
-            dated["next_at"] == "2027-01-07T14:00:00+00:00"
-            and "Technical" in dated["history"][-1]["note"]
-        )
-        assert "Phantom" in dated["history"][-1]["note"]
-        # Reset UIDVALIDITY and redeliver the excluded Message-ID: durable exclusion wins.
-        server.validity = "2"
-        server.messages[9] = server.messages[1]
-        check()
-        assert (
-            len(calls) == 3
-            and not client.get("/api/email/suggestions").json()["suggestions"]
-        )
-        server.messages[10] = message("Invalid", "noreply@phantom.com")
-        server.messages[11] = message("Retry", "noreply@phantom.com")
-        server.messages[12] = message("Another next step")
-        check()
-        pending = client.get("/api/email/suggestions").json()["suggestions"][0]
-        with closing(connect(db_path)) as db:
-            assert [
-                tuple(row)[1:] for row in db.execute("SELECT * FROM email_dedup")
-            ] == [("<Invalid@fixture>", 2, "failed")]
-        check()
-        assert len(calls) == 7
-        client.patch("/api/pipeline/1", json={"stage": "offer"})
-        assert (
-            client.post(f"/api/email/suggestions/{pending['id']}/confirm").status_code
-            == 409
+        } == {
+            "backward": "uncertain",
+            "closed-reject": "uncertain",
+            "closed-move": "uncertain",
+            "closed-date": "uncertain",
+        }
+        stored = " ".join(
+            str(tuple(row)) for row in db.execute("SELECT * FROM gmail_events")
         )
         assert (
-            client.post(f"/api/email/suggestions/{pending['id']}/ignore").status_code
-            == 200
+            "old-mail" not in stored
+            and "unknown" not in stored
+            and "quoted tail" not in stored
         )
-        assert len(client.get("/api/email/suggestions").json()["suggestions"]) == 1
-        with closing(connect(db_path)) as db:
-            stored = " ".join(
-                str(tuple(row)) for row in db.execute("SELECT * FROM email_suggestions")
-            )
-            assert (
-                "PRIVATE BODY TAIL" not in stored
-                and "Unmatched" not in stored
-                and "Ambiguous" not in stored
-            )
-        assert all(
-            args[2] == "(BODY.PEEK[]<0.16384>)"
-            for args in server.uid_requests
-            if args[0] == "FETCH"
+    before = len(calls)
+    asyncio.run(service.check())
+    assert len(calls) == before
+
+
+def test_gmail_pages_freeze_window_and_bound_context(client, monkeypatch):
+    service = client.app.state.gmail
+    monkeypatch.setattr(service, "account", lambda: "owner@example.com")
+    monkeypatch.setattr(service, "configured", lambda: True)
+    prompts = []
+    pages = iter(
+        [
+            MailRun(complete=True, next_page_token="page-2", results=[]),
+            RuntimeError("private failure"),
+            MailRun(complete=True, next_page_token=None, results=[]),
+        ]
+    )
+
+    async def agent(model, prompt, schema, **kwargs):
+        data = json.loads(prompt[prompt.index("{") :])
+        prompts.append(data)
+        assert "jobs" not in data and kwargs["timeout"] > 300
+        page = next(pages)
+        if isinstance(page, Exception):
+            raise page
+        return page
+
+    monkeypatch.setattr("joule.gmail_agent.ai.structured", agent)
+    states = []
+    for _ in range(3):
+        with closing(connect(service.path)) as db, db:
+            db.execute("UPDATE gmail_checks SET checked_at='2000-01-01T00:00:00+00:00'")
+        asyncio.run(service.check())
+        states.append(service.status()["state"])
+    assert states == ["checking", "unavailable", "configured"]
+    assert prompts[0]["through"] == prompts[1]["through"] == prompts[2]["through"]
+    assert prompts[0]["page_token"] is None
+    assert prompts[1]["page_token"] == prompts[2]["page_token"] == "page-2"
+    with closing(connect(service.path)) as db, db:
+        checkpoint = db.execute("SELECT * FROM gmail_checks").fetchone()
+        assert (
+            checkpoint["through_at"] == prompts[0]["through"]
+            and checkpoint["page_token"] is None
         )
-        assert ["SEARCH", "UID", "11:*"] in server.uid_requests
-        server.drop_on_login = True
-        check()
-        transport_state = client.get("/api/email").json()["state"]
-        server.drop_on_login, server.allow_login = False, False
-        check()
-        assert (transport_state, client.get("/api/email").json()["state"]) == (
-            "connected",
-            "expired",
-        )
-        requests = len(server.commands)
-        check()
-        assert len(server.commands) == requests
-        client.delete("/api/email")
-        with closing(connect(db_path)) as db:
-            assert all(
-                db.execute(f"SELECT count(*) FROM {table}").fetchone()[0] == 0
-                for table in ("email_suggestions", "email_dedup", "email_checks")
-            )
+        db.execute("UPDATE gmail_checks SET checked_at='2000-01-01T00:00:00+00:00'")
+    monkeypatch.setattr(
+        "joule.gmail_agent.ai.structured",
+        lambda *args, **kwargs: agent(*args, **kwargs),
+    )
+    # The next window's actual overlap is computed by Joule, not delegated to the model.
+    asyncio.run(service.check())
+    assert datetime.fromisoformat(prompts[-1]["since"]) == datetime.fromisoformat(
+        prompts[0]["through"]
+    ) - timedelta(days=1)
+    row = dict(
+        message_id="large",
+        sender="s" * 400,
+        subject="s" * 600,
+        quote="q" * 200 + "\n>quoted",
+        date=datetime.now(UTC).isoformat(),
+        action="uncertain",
+        job_ids=[],
+        next_label="l" * 300,
+        title="t" * 600,
+        company="c" * 600,
+    )
+    parsed = MailRun.model_validate(
+        {"complete": True, "next_page_token": None, "results": [row] * 101}
+    )
+    assert len(parsed.results) == 101 and len(parsed.results[0].quote) == 140
+    assert (
+        len(parsed.results[0].subject) == 500 and len(parsed.results[0].sender) == 320
+    )
+
+    assert len(parsed.results[0].next_label) == 200
+    assert len(parsed.results[0].title) == len(parsed.results[0].company) == 500
+    schema = MailRun.model_json_schema()
+    assert "maxItems" not in schema["properties"]["results"]
+    assert "maxLength" not in schema["$defs"]["MailResult"]["properties"]["quote"]

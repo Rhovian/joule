@@ -22,7 +22,7 @@ class AIError(Exception):
         self.causes = tuple(sorted(set(causes or [message])))
 
 
-async def codex_stderr(process, prompt):
+async def codex_stderr(process, prompt, *, private=False):
     # communicate() buffers all output: docs.python.org/3.12/library/asyncio-subprocess.html
     with suppress(BrokenPipeError, ConnectionResetError):
         process.stdin.write(prompt.encode())
@@ -31,6 +31,8 @@ async def codex_stderr(process, prompt):
     while chunk := await process.stderr.read(4096):
         tail = (tail + chunk)[-8192:]
     await process.wait()
+    if private:
+        return ""
     # Codex 0.160.1 prints prompts and ERROR: lines to stderr, with no safe filter:
     # github.com/openai/codex/blob/rust-v0.160.1/codex-rs/exec/src/event_processor_with_human_output.rs
     prompt_lines = [
@@ -66,7 +68,9 @@ def strict_schema(value):
     return value
 
 
-async def structured[T: BaseModel](model: Model, prompt: str, schema: type[T]) -> T:
+async def structured[T: BaseModel](
+    model: Model, prompt: str, schema: type[T], *, mcp=None, timeout=None
+) -> T:
     with TemporaryDirectory(prefix="joule-ai-") as directory:
         path = Path(directory)
         (path / "schema.json").write_text(
@@ -81,6 +85,31 @@ async def structured[T: BaseModel](model: Model, prompt: str, schema: type[T]) -
             "-s",
             "read-only",
         ]
+        if mcp:
+            # Codex rust-v0.160.1 config.schema.json: MCP tool allowlists.
+            for key, value in mcp.items():
+                if isinstance(value, dict):
+                    value = (
+                        "{"
+                        + ",".join(
+                            json.dumps(k) + "=" + json.dumps(v)
+                            for k, v in value.items()
+                        )
+                        + "}"
+                    )
+                else:
+                    value = json.dumps(value)
+                args += ["-c", f"mcp_servers.gmail.{key}={value}"]
+            args += [
+                "-c",
+                'history.persistence="none"',
+                "-c",
+                'web_search="disabled"',
+                "-c",
+                "log_dir=" + json.dumps(directory),
+                "-c",
+                "sqlite_home=" + json.dumps(directory),
+            ]
         # Scoring needs no tools; Job text is untrusted, so the shell goes too.
         for feature in (
             "shell_tool",
@@ -112,7 +141,9 @@ async def structured[T: BaseModel](model: Model, prompt: str, schema: type[T]) -
         except OSError as error:
             raise AIError("Could not start Codex") from error
         try:
-            diagnostic = await asyncio.wait_for(codex_stderr(process, prompt), TIMEOUT)
+            diagnostic = await asyncio.wait_for(
+                codex_stderr(process, prompt, private=bool(mcp)), timeout or TIMEOUT
+            )
         except (TimeoutError, asyncio.CancelledError) as error:
             # Codex runs a native child under its node wrapper; kill the whole group.
             with suppress(ProcessLookupError):
