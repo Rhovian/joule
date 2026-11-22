@@ -57,19 +57,18 @@ def client(tmp_path):
 @pytest.mark.parametrize(
     "query,ids",
     [
-        ("", [2, 1, 3]),
-        ("?unscored=false", [2, 1]),
-        ("?filtered=true", [4, 2, 1, 3]),
-        ("?dismissed=true", [5, 2, 1, 3]),
-        ("?applied=true", [7, 2, 1, 3]),
-        ("?filtered=true&dismissed=true", [5, 4, 2, 1, 3]),
+        ("", [1, 2, 3]),
+        ("?unscored=false", [1, 2]),
+        ("?filtered=true", [4, 1, 2, 3]),
+        ("?dismissed=true", [5, 1, 2, 3]),
+        ("?applied=true", [7, 1, 2, 3]),
+        ("?filtered=true&dismissed=true", [5, 4, 1, 2, 3]),
         ("?new=false", [3]),
         ("?new=false&filtered=true", [4, 3]),
         ("?new=false&unscored=false", []),
         ("?source=hn", [1]),
         ("?source=hotfix", [1, 3]),
-        ("?source=hn&source=remoteok", [2, 1]),
-        ("?sort=score", [1, 2, 3]),
+        ("?source=hn&source=remoteok", [1, 2]),
         ("?sort=newest", [3, 2, 1]),
         ("?sort=score&direction=asc", [2, 1, 3]),
         ("?sort=title&direction=asc", [1, 3, 2]),
@@ -77,7 +76,7 @@ def client(tmp_path):
         ("?sort=source&direction=asc", [3, 1, 2]),
         ("?sort=state&direction=asc", [3, 2, 1]),
         ("?min_score=90&filtered=true", [4]),
-        ("?q=ENGINEER", [2, 1, 3]),
+        ("?q=ENGINEER", [1, 2, 3]),
         ("?q=ZÜRICH", [2]),
         ("?q=focused", [2]),
         ("?q=%25", []),
@@ -90,7 +89,8 @@ def test_list(client, query, ids):
     rows = response.json()
     assert [row["id"] for row in rows] == ids
     assert all(
-        not {"description", "extra", "score_points"} & row.keys() for row in rows
+        not {"description", "extra", "score_points", "rank"} & row.keys()
+        for row in rows
     )
     assert all(
         type(row["remote"]) is int and row["location_unclear"] == 0 for row in rows
@@ -214,7 +214,7 @@ def test_list_has_drafts(client):
             ],
         )
     rows = client.get("/api/jobs").json()
-    assert [row["id"] for row in rows] == [2, 1, 3]
+    assert [row["id"] for row in rows] == [1, 2, 3]
     assert {row["id"]: row["has_drafts"] for row in rows} == {
         2: False,
         1: True,
@@ -277,6 +277,7 @@ def test_detail(client):
     assert row["score_points"] == [] and row["duplicates"][0]["id"] == 6
     assert client.get("/api/jobs/6").json()["primary_id"] == 1
     assert client.get("/api/jobs/999").status_code == 404
+    assert client.get("/api/jobs?sort=rank").status_code == 422
     with closing(connect(client.app.state.data_dir / "joule.db")) as db, db:
         db.execute("UPDATE jobs SET extra=NULL, score_points=NULL WHERE id=1")
     row = client.get("/api/jobs/1").json()

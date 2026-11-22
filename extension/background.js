@@ -103,7 +103,7 @@ function createBackground(chrome, fetcher = fetch) {
     }
     if (message.type === 'jobs') {
       const jobs = (await api('/api/jobs')).filter(job => job.source !== 'upwork');
-      return jobs.sort((a, b) => Number(b.has_drafts) - Number(a.has_drafts) || (b.rank ?? -Infinity) - (a.rank ?? -Infinity));
+      return jobs.sort((a, b) => Number(b.has_drafts) - Number(a.has_drafts) || (b.score ?? -Infinity) - (a.score ?? -Infinity));
     }
     if (message.type === 'active') return (await chrome.storage.session.get('active')).active || null;
     if (message.type === 'select') {

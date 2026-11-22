@@ -146,12 +146,12 @@ def test_queue_rule_and_order(bot):
     seed(db, 10, source="hn")
     seed(db, 11)
     db.execute("DELETE FROM drafts WHERE job_id=11")
-    seed(db, 12, score=90, posted_at="0")
+    seed(db, 12, score=90, posted_at="2020-01-01")
     seed(db, 13, score=10, posted_at="0", filtered_reason="no", queued=1)
     seed(db, 14, queued=1, state="seen")
-    assert [r["id"] for r in queue(db, Settings())] == [2, 1, 12, 13]
+    assert [r["id"] for r in queue(db, Settings())] == [12, 2, 1, 13]
     unscored = Settings(upwork={"scoring": False})
-    assert [r["id"] for r in queue(db, unscored)] == [2, 1, 12, 13, 9, 3]
+    assert [r["id"] for r in queue(db, unscored)] == [12, 2, 1, 13, 9, 3]
 
 
 @pytest.mark.parametrize("case", ["skip new seen", "skip applied applied"])

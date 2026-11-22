@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 from fastapi import HTTPException
 
-from joule import answers, drafts, score
+from joule import answers, drafts
 from joule.config import load_settings
 from joule.db import connect, enter_pipeline
 from joule.sources import upwork
@@ -43,7 +43,7 @@ def queue(db, settings):
     return db.execute(
         f"SELECT * FROM jobs WHERE {ELIGIBLE} AND EXISTS "
         "(SELECT 1 FROM drafts WHERE job_id=jobs.id AND kind='proposal') "
-        f"ORDER BY {score.RANK} DESC NULLS LAST, posted_at DESC",
+        "ORDER BY score DESC NULLS LAST, posted_at DESC",
         eligible(settings),
     ).fetchall()
 

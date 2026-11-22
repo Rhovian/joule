@@ -96,7 +96,7 @@ Also rejected: `Origin: chrome-extension://<id>` allowlist (forgeable by any non
 ### 3c. Static happy path
 
 1. Operator opens the employer form (Greenhouse/Lever/Ashby static content script; others via §3e).
-2. Side panel shows active Job. None → picker built from existing `GET /api/jobs` (client drops `source='upwork'`, sorts by Jobs with Drafts first then `rank`, text filter). Selection stored in `chrome.storage.session`; manual selections and generation/results are bound to their Job/tab/page rather than another window’s active Job.
+2. Side panel shows active Job. None → picker built from existing `GET /api/jobs` (client drops `source='upwork'`, sorts by Jobs with Drafts first then Fit Score descending, unscored last, text filter). Selection stored in `chrome.storage.session`; manual selections and generation/results are bound to their Job/tab/page rather than another window’s active Job.
 3. **Fill**: SW asks every frame of the tab for descriptors (content scripts push `{frameId, descriptors}`; refs are `(frameId,index)`), POSTs `/api/fill/jobs/{id}/match`.
 4. Response per ref: `set{value}`, `upload{file}`, `ask`, `leave{reason}`; plus `resume_draft_id`, `cover_letter_draft_id` (latest rows or null).
 5. Content scripts apply `set` with the native value setter + `input`/`change` (React-controlled inputs), highlight touched fields. Panel lists counts and every `ask`/`leave` field with reason.
