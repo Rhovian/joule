@@ -89,7 +89,8 @@ def test_list(client, query, ids):
     rows = response.json()
     assert [row["id"] for row in rows] == ids
     assert all(
-        not {"description", "extra", "score_points", "rank"} & row.keys() for row in rows
+        not {"description", "extra", "score_points", "rank"} & row.keys()
+        for row in rows
     )
     assert all(
         type(row["remote"]) is int and row["location_unclear"] == 0 for row in rows
