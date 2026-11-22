@@ -105,11 +105,24 @@ test('stale descriptors and operator edits during option loading do not receive 
   assert.equal((await worker.apply(set('Yes'))).filled, 0);
   assert.equal(input.value, 'operator');
 });
-test('large menus use free-text Ask rather than silently losing later options', async () => {
-  const {worker} = widget({choices: Array.from({length: 101}, (_, i) => `Country ${i}`)});
-  await worker.prepare();
-  assert.deepEqual(worker.describe()[0].options, []);
-  assert.equal((await worker.apply(set('Country 100'))).filled, 1);
+test('large menus retain complete choices or explicitly stay manual, without blocking other fields', async () => {
+  for (const count of [121, 1000, 1001]) {
+    const {worker, document} = widget({choices: Array.from({length: count}, (_, i) => `Choice ${i}`)});
+    document.body.insertAdjacentHTML('beforeend', `<select required>${Array.from({length: count}, (_, i) => `<option value="${i}">Choice ${i}</option>`).join('')}</select><input type="email">`);
+    document.querySelector('select').selectedIndex = -1;
+    await worker.prepare();
+    const fields = worker.describe();
+    for (const field of fields.slice(0, 2)) {
+      assert.equal(field.options.length, count > 1000 ? 0 : count);
+      assert.equal(!!field.options_overflow, count > 1000);
+    }
+    assert.equal((await worker.apply([{ref: 2, action: 'set', value: 'ada@example.com'}])).filled, 1);
+    if (count === 121) {
+      assert.equal((await worker.apply(set('Choice 120'), fields[0])).filled, 1);
+      assert.equal((await worker.apply([{ref: 1, action: 'set', value: '120'}], fields[1])).filled, 1);
+      assert.equal(document.querySelector('select').value, '120');
+    }
+  }
 });
 test('required surveys are not opened during discovery; aria-required is recognized', async () => {
   const {worker, input} = widget({required: false});

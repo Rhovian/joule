@@ -127,8 +127,8 @@
         key(element, 'ArrowDown');
         await waitFor(() => options(element).length);
         const available = options(element);
-        // The API permits 100 choices; larger menus use a Profile answer + exact search.
-        comboOptions.set(element, (available.length <= 100 ? available : []).map(option => ({
+        // Retain one overflow sentinel; describe refuses the whole list above the API bound.
+        comboOptions.set(element, available.slice(0, 1001).map(option => ({
           value: option.textContent.trim().slice(0, 200), label: option.textContent.trim().slice(0, 200),
         })));
         key(element, 'Escape');
@@ -202,7 +202,7 @@
         options: sensitive(element) ? [] : group(element) ? choices(element).map(option => ({value: option.dataset.option, label: option.textContent.trim()})) : element.type === 'radio' ? radios(element).filter(visible).map(option => ({value: option.value, label: label(option)})) :
           element.tagName === 'SELECT' ? [...element.options].map(option => ({value: option.value, label: option.textContent.trim()})) : comboOptions.get(element) || [],
         accept: element.accept || '', maxlength: element.maxLength >= 0 ? element.maxLength : null,
-      }));
+      })).map(field => field.options.length > 1000 ? {...field, options: [], options_overflow: true} : field);
     }
     async function applyWidgets(actions, expected) {
       if (expected && !sameDescriptor(describe()[expected.ref],expected)) return {filled: 0};
