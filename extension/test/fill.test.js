@@ -122,7 +122,7 @@ async function setup() {
         assert.equal(field.ref.length, 2);
         assert.ok(field.ref.every(part => Number.isInteger(part) && part >= 0));
       }
-      return {job: jobs[1], actions: fields.map(field => ({ref: field.ref, action: 'set', value: field.label})), resume_draft_id: null, cover_letter_draft_id: null};
+      return {job: jobs[1], actions: fields.map(field => ({ref: field.ref, action: field.options_overflow ? 'leave' : 'set', value: field.label})), resume_draft_id: null, cover_letter_draft_id: null};
     }};
     return {ok: true, json: async () => url.endsWith('/api/jobs') ? jobs : jobs.find(job => job.id === id)};
   });
@@ -145,22 +145,29 @@ test('Fill aggregates and routes two frames, reuses session after SW restart, cl
   const senders = [0, 7].map(frameId => ({id: 'extension', tab, frameId, url: 'https://jobs.lever.co/a'}));
   await Promise.all(senders.map(sender => background.handle({type: 'register'}, sender)));
   const applied = [];
+  const options = Array.from({length: 1000}, (_, i) => ({value: String(i), label: String(i)}));
   chrome.tabs.sendMessage = async (tabId, message, target) => {
     if (message.type === 'describe') {
-      await background.handle({type: 'frame', request: message.request, fields: [{ref: 0, label: `frame ${target.frameId}`} ]}, senders.find(sender => sender.frameId === target.frameId));
+      await background.handle({type: 'frame', request: message.request, fields: target.frameId === 0 ? Array(20).fill(options).map((options, ref) => ({ref, label: 'Choose', options})) : [{ref: 0, label: 'Choose', options}, {ref: 1, label: 'Email', type: 'email'}]}, senders.find(sender => sender.frameId === target.frameId));
       return {ok: true};
     }
     applied.push({target, message});
-    return {filled: message.actions.length};
+    return {filled: message.actions.filter(action => action.action === 'set').length};
   };
   const result = await background.handle({type: 'fill', tabId: 4}, ui);
-  assert.equal(result.filled, 2);
-  assert.deepEqual(result.fields.map(field => field.ref), [[0, 0], [7, 0]]);
+  assert.equal(result.filled, 21);
+  assert.equal(result.fields.length, 22);
+  assert.deepEqual(result.fields.at(-1).ref, [7, 1]);
   assert.deepEqual(applied.map(call => call.message.actions[0].ref), [0, 0]);
   assert.deepEqual(applied.map(call => call.target.frameId), [0, 7]);
   const match = calls.find(call => call.url.endsWith('/match'));
   assert.equal(match.url, 'http://localhost:8000/api/fill/jobs/2/match');
   assert.equal(match.options.headers['Content-Type'], 'application/json');
+  const wire = JSON.parse(match.options.body).fields;
+  assert.equal(wire.reduce((sum, field) => sum + (field.options?.length || 0), 0), 20000);
+  assert.deepEqual(wire.at(-2).options, []);
+  assert.equal(wire.at(-2).options_overflow, true);
+  assert.equal(wire.at(-1).type, 'email');
   assert.equal((await createBackground(chrome).handle({type: 'active'}, ui)).id, 2);
   setupResult.missing();
   await assert.rejects(background.handle({type: 'fill', tabId: 4}, ui), /HTTP 404/);

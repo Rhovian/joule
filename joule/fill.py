@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import Field, create_model
+from pydantic import Field, create_model, field_validator
 
 from joule import ai, answers, cv, drafts, filters, job_urls
 from joule.answers import normalize
@@ -23,6 +23,8 @@ from joule.sources import Candidate
 router = APIRouter(prefix="/api/fill")
 Text = Annotated[str, Field(max_length=2000)]
 Index = Annotated[int, Field(strict=True, ge=0)]
+MATCH_OPTIONS_MAX = 20000
+ASK_TEXT_MAX = 40000
 
 
 class Option(StrictModel):
@@ -40,7 +42,8 @@ class Descriptor(StrictModel):
     autocomplete: Text = ""
     label: Text = ""
     required: bool = False
-    options: list[Option] = Field(default_factory=list, max_length=100)
+    options: list[Option] = Field(default_factory=list, max_length=1000)
+    options_overflow: bool = False
     accept: Text = ""
     maxlength: Annotated[int, Field(strict=True, ge=0)] | None = None
 
@@ -48,10 +51,34 @@ class Descriptor(StrictModel):
 class MatchRequest(StrictModel):
     fields: list[Descriptor] = Field(max_length=200)
 
+    # Pydantic 2.14.0 max_length bounds one list, not a sum across nested lists:
+    # https://github.com/pydantic/pydantic/blob/v2.14.0/pydantic/functional_validators.py
+    @field_validator("fields", mode="before")
+    @classmethod
+    def bound_options(cls, fields):
+        if (
+            isinstance(fields, list)
+            and sum(
+                len(f["options"])
+                for f in fields
+                if isinstance(f, dict) and isinstance(f.get("options"), list)
+            )
+            > MATCH_OPTIONS_MAX
+        ):
+            raise ValueError(f"at most {MATCH_OPTIONS_MAX} total options per request")
+        return fields
+
 
 class AskRequest(StrictModel):
     question: str = Field(min_length=1, max_length=2000)
-    options: list[Option] = Field(default_factory=list, max_length=100)
+    options: list[Option] = Field(default_factory=list, max_length=1000)
+
+    @field_validator("options")
+    @classmethod
+    def bound_option_text(cls, options):
+        if sum(len(o.value) + len(o.label) for o in options) > ASK_TEXT_MAX:
+            raise ValueError(f"at most {ASK_TEXT_MAX} option characters per Ask")
+        return options
 
 
 class PageJob(PostingRequest):
@@ -232,6 +259,11 @@ def classify(field, values, cover_letter=None, bank=None):
     # Invariant 6 also guards identity-like labels on sensitive questions.
     if sensitive(field.label):
         return leave("sensitive")
+    if (
+        field.options_overflow
+        or sum(len(o.value) + len(o.label) for o in field.options) > ASK_TEXT_MAX
+    ):
+        return leave("choice list exceeds Fill limits; select manually")
     # Operator override: optional CV identity is allowed, but optional comboboxes stay manual.
     if field.role == "combobox" and not field.required:
         return leave("optional")

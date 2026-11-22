@@ -1,5 +1,6 @@
 if (typeof importScripts === 'function') importScripts('content.js');
 function createBackground(chrome, fetcher = fetch) {
+  const MATCH_OPTIONS_MAX = 20000;
   const pending = new Map(), generating = new Map();
   let registration = Promise.resolve();
   const allowed = typeof module !== 'undefined' ? require('./content.js').allowed :
@@ -167,7 +168,13 @@ function createBackground(chrome, fetcher = fetch) {
     const diagnosticOnly = message.type === 'replay' && !active;
     if (!diagnosticOnly && (!active || active.source === 'upwork')) throw Error('No Job selected. Pick a non-Upwork Job before Fill can attach a Tailored CV');
     async function match(fields) {
-      try { return await api(diagnosticOnly ? '/api/fill/replay-match' : `/api/fill/jobs/${integer(active.id)}/match`, {fields:fields.map(({documentId,...field}) => field)}); }
+      let remaining = MATCH_OPTIONS_MAX;
+      const bounded = fields.map(({documentId,...field}) => {
+        const count = field.options?.length || 0;
+        if (count > remaining) return {...field, options: [], options_overflow: true};
+        remaining -= count; return field;
+      });
+      try { return await api(diagnosticOnly ? '/api/fill/replay-match' : `/api/fill/jobs/${integer(active.id)}/match`, {fields:bounded}); }
       catch (error) {
         if (error.status === 404) await chrome.storage.session.remove('active');
         error.message = `Fill matching failed: ${error.message}`;
