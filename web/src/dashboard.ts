@@ -188,7 +188,7 @@ function renderDetail() {
   if (!split) { element('detail').innerHTML = ''; return; }
   if (activeSection === 'pipeline' && detail && detail.state !== 'applied') activeSection = 'fit';
   const ids = view === 'pipeline' ? pipeline.visible().map(row => row.job_id) : jobs.map(row => row.id);
-  replace('detail', renderDrawer({ job: detail && { ...detail, rank: jobs.find(j => j.id === detailId)?.rank }, id: detailId, index: ids.indexOf(detailId), total: ids.length,
+  replace('detail', renderDrawer({ job: detail, id: detailId, index: ids.indexOf(detailId), total: ids.length,
     section: activeSection, pipeline: detail?.state === 'applied' ? pipeline.section(detailId) : '', pendingScores, pendingQueue,
     unscored: unscoredVisible().length, scoreAllDisabled: !!runningId || starting || !unscoredVisible().length }));
   renderScoreAll(); triage.render();

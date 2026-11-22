@@ -57,9 +57,7 @@ async def list_jobs(
     dismissed: bool = False,
     applied: bool = False,
     source: Annotated[list[str] | None, Query()] = None,
-    sort: Literal[
-        "rank", "score", "newest", "title", "reason", "source", "state"
-    ] = "rank",
+    sort: Literal["score", "newest", "title", "reason", "source", "state"] = "score",
     direction: Literal["asc", "desc"] = "desc",
     q: str = "",
     min_score: Annotated[int | None, Query(ge=0, le=100)] = None,
@@ -73,7 +71,7 @@ async def list_jobs(
     stamp = score.fingerprint(directory, load_settings(directory))
     with closing(connect(directory / "joule.db")) as db:
         rows = db.execute(
-            f"SELECT jobs.*, {score.RANK} AS rank, drafted.job_id IS NOT NULL AS has_drafts "
+            "SELECT jobs.*, drafted.job_id IS NOT NULL AS has_drafts "
             "FROM jobs LEFT JOIN (SELECT DISTINCT job_id FROM drafts WHERE kind!='follow_up') drafted "
             "ON drafted.job_id=jobs.id WHERE primary_id IS NULL "
             f"AND {SHOW_CATEGORY} IN (SELECT value FROM json_each(?)) "

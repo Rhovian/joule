@@ -6,7 +6,7 @@ export type Job = {
   content_purged_at?: string | null;
   posted_at: string | null; first_seen_at: string;
   id: number; title: string; company: string | null; source: string; link: string; state: string;
-  score_stale?: boolean; score_points?: { stance: string; text: string }[]; score: number | null; rank?: number | null; score_reason: string | null; filtered_reason: string | null;
+  score_stale?: boolean; score_points?: { stance: string; text: string }[]; score: number | null; score_reason: string | null; filtered_reason: string | null;
   location_raw: string | null; location_unclear: number | null; pay_min: number | null;
   pay_max: number | null; pay_currency: string | null; pay_period: string | null;
   queued: number; duplicates: { id: number; source: string; link: string }[]; description?: string | null;
