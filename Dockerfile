@@ -9,6 +9,14 @@ RUN npm run build
 FROM node:22-slim AS codex
 RUN npm install -g @openai/codex@0.160.1
 
+FROM python:3.12-slim AS gmail
+COPY --from=ghcr.io/astral-sh/uv:0.9 /uv /bin/uv
+# Isolate Workspace MCP's dependencies from joule; pin the reviewed MIT source.
+ADD https://github.com/taylorwilsdon/google_workspace_mcp/archive/43b662a938ef002626ac269451c469b91979bd9a.tar.gz /tmp/gmail.tar.gz
+RUN mkdir /opt/gmail-src && tar -xzf /tmp/gmail.tar.gz -C /opt/gmail-src --strip-components=1 \
+    && UV_PROJECT_ENVIRONMENT=/opt/gmail uv sync --python /usr/local/bin/python --no-python-downloads --project /opt/gmail-src --frozen --no-dev --no-editable \
+    && rm /tmp/gmail.tar.gz
+
 FROM python:3.12-slim
 COPY --from=codex /usr/local/bin/node /usr/local/bin/node
 COPY --from=codex /usr/local/lib/node_modules /usr/local/lib/node_modules
@@ -18,6 +26,7 @@ ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy JOULE_DATA_DIR=/data JOULE_HOST=0.0.
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
+COPY --from=gmail /opt/gmail /opt/gmail
 COPY joule/ joule/
 RUN uv sync --frozen --no-dev
 COPY --from=web /web/dist web/dist

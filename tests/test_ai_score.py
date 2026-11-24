@@ -10,7 +10,9 @@ from joule.config import Model, Settings
 from joule.db import connect, init_db
 
 
-@pytest.mark.parametrize("mode", ["success", "bad", "exit", "timeout", "missing"])
+@pytest.mark.parametrize(
+    "mode", ["success", "bad", "exit", "timeout", "missing", "mail", "mail_exit"]
+)
 def test_codex(tmp_path, monkeypatch, mode):
     executable = tmp_path / "codex"
     executable.write_text("""#!/usr/bin/env python3
@@ -25,6 +27,19 @@ schema = json.loads(Path(args[args.index('--output-schema')+1]).read_text())
 assert schema['additionalProperties'] is False
 assert set(schema['required']) == set(schema['properties'])
 mode = os.environ['FAKE_MODE']
+if mode.startswith('mail'):
+    import tomllib
+    config = tomllib.loads(chr(10).join(args[i+1] for i, arg in enumerate(args) if arg == '-c'))
+    gmail = config['mcp_servers']['gmail']
+    assert gmail['enabled_tools'] == ['search_gmail_messages', 'get_gmail_message_content']
+    assert gmail['env'] == {'JOULE_GMAIL_ACCOUNT': 'owner@example.com'}
+    assert gmail['required'] is True
+    assert config['history']['persistence'] == 'none'
+    assert config['web_search'] == 'disabled'
+    assert config['log_dir'] == config['sqlite_home'] == str(Path(args[args.index('-o')+1]).parent)
+    assert '--ephemeral' in args
+    assert {'shell_tool', 'unified_exec', 'browser_use', 'computer_use', 'image_generation', 'in_app_browser'} <= set(args)
+    mode = 'exit' if mode == 'mail_exit' else 'success'
 if mode == 'exit':
     sys.stderr.buffer.write(os.environ.get('CODEX_STDERR', '').encode())
     sys.exit(7)
@@ -40,12 +55,29 @@ if mode != 'missing':
     monkeypatch.setenv("FAKE_MODE", mode)
     monkeypatch.setenv("CHILD_PID", str(tmp_path / "child.pid"))
     monkeypatch.setattr(ai, "TIMEOUT", 1 if mode == "timeout" else 5)
+    if mode == "mail_exit":
+        monkeypatch.setenv("CODEX_STDERR", "ERROR: private mail not present in prompt")
     call = ai.structured(
         Model(provider="codex", model="chosen"),
         os.environ.get("CODEX_PROMPT", "private prompt"),
         score.Score,
+        **(
+            {
+                "mcp": {
+                    "command": "gmail",
+                    "enabled_tools": [
+                        "search_gmail_messages",
+                        "get_gmail_message_content",
+                    ],
+                    "env": {"JOULE_GMAIL_ACCOUNT": "owner@example.com"},
+                    "required": True,
+                }
+            }
+            if mode.startswith("mail")
+            else {}
+        ),
     )
-    if mode == "success":
+    if mode in {"success", "mail"}:
         assert asyncio.run(call).score == 70
     else:
         with pytest.raises(ai.AIError) as error:
@@ -53,6 +85,7 @@ if mode != 'missing':
         assert "private prompt" not in str(error.value)
         expected = {
             "exit": "Codex exited with status 7",
+            "mail_exit": "Codex exited with status 7",
             "timeout": "Codex timed out",
             "bad": "Codex returned missing or invalid output",
             "missing": "Codex returned missing or invalid output",

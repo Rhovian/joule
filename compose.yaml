@@ -3,6 +3,7 @@ services:
     build: .
     ports:
       - "127.0.0.1:8000:8000"
+      - "127.0.0.1:8090:8090" # one-time Gmail OAuth callback
     volumes:
       - ~/.joule:/data
       # Own Codex home: sharing the host's ~/.codex SQLite files over the VM file share corrupts them.

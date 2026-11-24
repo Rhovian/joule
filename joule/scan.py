@@ -91,8 +91,7 @@ class ScanInProgress(Exception):
 
 
 class Scanner:
-    def __init__(self, data_dir, client, auth, telegram=None, email=None):
-        self.email = email
+    def __init__(self, data_dir, client, auth, telegram=None):
         self.telegram = telegram
         self.client, self.auth = client, auth
         self.data_dir = data_dir
@@ -278,8 +277,6 @@ class Scanner:
                 )
             finally:
                 self.busy = False
-                if self.email and status != "interrupted":
-                    self.email.wake.set()
 
     async def _scan_source(self, db, source, settings, ctx, counts):
         days = settings.source_max_age_days.get(source, settings.max_age_days)
