@@ -10,6 +10,8 @@ from fastapi.testclient import TestClient
 from joule import ai
 from joule.app import create_app
 from joule.db import connect, enter_pipeline
+from joule.email_suggestions import match, metadata
+from joule.pipeline import MoveRequest, move
 from tests.imap_fixture import PASSWORD, USERNAME, imap_server
 
 
@@ -124,7 +126,7 @@ def test_email_connect_validate_private_and_disconnect(tmp_path, monkeypatch):
         }
 
 
-def test_email_suggestions_require_confirmation_and_remember_exclusions(
+def test_email_rejections_and_informational_mail_preserve_history_and_dedup(
     tmp_path, monkeypatch
 ):
     def message(subject, sender="Acme Talent <talent@acme.com>", old=False, body=None):
@@ -155,18 +157,15 @@ def test_email_suggestions_require_confirmation_and_remember_exclusions(
                 schema(action="invalid")
             except ValueError as error:
                 raise ai.AIError("Invalid output") from error
-        action = (
-            "reject"
-            if "Update" in prompt
-            else "date"
-            if "Technical" in prompt
-            else "move"
-        )
+        if "Another next step" in prompt:
+            with closing(connect(db_path)) as db, db:
+                move(db, 1, MoveRequest(stage="offer"))
         return schema(
-            action=action,
-            stage="screen" if action == "move" else None,
-            next_at="2027-01-07T14:00:00Z" if action == "date" else None,
-            next_label="Technical" if action == "date" else None,
+            action="reject"
+            if "Update" in prompt or "Another next step" in prompt
+            else "received"
+            if "Acknowledgement" in prompt or "Retry" in prompt
+            else "none"
         )
 
     monkeypatch.setattr(ai, "structured", classify)
@@ -188,6 +187,7 @@ def test_email_suggestions_require_confirmation_and_remember_exclusions(
                 ).lastrowid
                 enter_pipeline(db, job_id)
             db.execute("UPDATE jobs SET link='https://remoteok.com/role' WHERE id=4")
+            db.execute("UPDATE jobs SET title='Frontend Developer' WHERE id=5")
         assert (
             client.put(
                 "/api/email",
@@ -210,10 +210,15 @@ def test_email_suggestions_require_confirmation_and_remember_exclusions(
                 body="<style>" + "x" * 4500 + "</style><p>Real reply.</p>",
             ),
             4: message("Unmatched", "Other <other@elsewhere.com>"),
-            5: message("Ambiguous", "Other <jobs@ambiguous.com>"),
+            5: message(
+                "Update Ambiguous",
+                "jobs@ambiguous.com",
+                body="We will not proceed. Try our Frontend Developer role.",
+            ),
             6: message("Too old", old=True),
             7: message("Newsletter", "jobs@remoteok.com"),
             8: message("Account", "accounts@accounts.acme.com"),
+            9: message("Acknowledgement"),
         }
         check()
         requests = len(server.uid_requests)
@@ -224,79 +229,101 @@ def test_email_suggestions_require_confirmation_and_remember_exclusions(
             json=client.get("/api/email").json()["config"]
             | {"password": None, "check_minutes": None},
         )
-        suggestions = client.get("/api/email/suggestions").json()["suggestions"]
-        assert len(suggestions) == len(calls) == 3
+        paths = client.app.openapi()["paths"]
+        assert not any(path.startswith("/api/email/suggestions") for path in paths)
+        with closing(connect(db_path)) as db:
+            by_subject = {
+                row["subject"]: dict(row)
+                for row in db.execute("SELECT * FROM email_suggestions")
+            }
+        assert len(by_subject) == 3 and len(calls) == 5
+        rejected = client.get("/api/pipeline/3").json()
+        assert rejected["closed_reason"] == "rejected" and rejected["how"] == "auto"
+        assert "Update Pinterest" in rejected["history"][-1]["note"]
         assert all(
-            row["stage"] == "applied" for row in client.get("/api/pipeline").json()
+            len(client.get(f"/api/pipeline/{i}").json()["history"]) == 1
+            for i in (1, 2, 4, 5)
         )
         assert {
             row["job_id"]: row["email_count"]
             for row in client.get("/api/pipeline").json()
-        } == {1: 1, 2: 1, 3: 1, 4: 0, 5: 0}
-        by_subject = {row["subject"]: row for row in suggestions}
-        assert len(by_subject["Next steps"]["quote"]) == 140
-        assert by_subject["Technical"]["quote"] == "Real reply."
-        for subject, action in [
-            ("Next steps", "exclude"),
-            ("Update Pinterest", "confirm"),
-            ("Technical", "confirm"),
-        ]:
-            row = by_subject[subject]
-            assert (
-                client.post(f"/api/email/suggestions/{row['id']}/{action}").status_code
-                == 200
+        } == {1: 1, 2: 0, 3: 1, 4: 0, 5: 1}
+        received = by_subject["Acknowledgement"]
+        assert json.loads(received["proposal"]) == {"action": "received"}
+        assert by_subject["Update Ambiguous"]["state"] == received["state"] == "ignored"
+        assert len(received["quote"]) == 140
+        assert metadata(server.messages[3])[0]["quote"] == "Real reply."
+        # Retire historical proposals, preserving all stored metadata and exclusions.
+        with closing(connect(db_path)) as db, db:
+            for identity, payload in (
+                ("legacy-stage", {"stage": "screen"}),
+                ("legacy-date", {"next_at": "2027-01-07T14:00:00Z"}),
+            ):
+                db.execute(
+                    "INSERT INTO email_suggestions(account,message_id,job_id,first_move_id,move_id,folder,uid,sender_name,sender_address,subject,quote,date,proposal,state) SELECT account,?,job_id,first_move_id,move_id,folder,uid,sender_name,sender_address,subject,quote,date,?,'pending' FROM email_suggestions WHERE id=?",
+                    (identity, json.dumps(payload), received["id"]),
+                )
+            db.execute(
+                "UPDATE email_suggestions SET state='excluded' WHERE id=?",
+                (received["id"],),
             )
-        assert client.get("/api/pipeline/3").json()["closed_reason"] == "rejected"
-        dated = client.get("/api/pipeline/2").json()
-        assert (
-            dated["next_at"] == "2027-01-07T14:00:00+00:00"
-            and "Technical" in dated["history"][-1]["note"]
-        )
-        assert "Phantom" in dated["history"][-1]["note"]
+        client.portal.call(service.check)  # Resolve even when no Scan/check is due.
+        with closing(connect(db_path)) as db:
+            legacy = db.execute(
+                "SELECT * FROM email_suggestions WHERE message_id LIKE 'legacy-%'"
+            ).fetchall()
+            assert len(legacy) == 2 and all(
+                row["state"] == "ignored" and row["quote"] == received["quote"]
+                for row in legacy
+            )
+        config = service.connection.load()
+        with monkeypatch.context() as account:
+            account.setattr(
+                service.connection,
+                "load",
+                lambda: config.model_copy(update={"username": "other@fixture"}),
+            )
+            assert not any(
+                row["email_count"] for row in client.get("/api/pipeline").json()
+            )
         # Reset UIDVALIDITY and redeliver the excluded Message-ID: durable exclusion wins.
         server.validity = "2"
-        server.messages[9] = server.messages[1]
+        server.messages[10] = server.messages[2]  # Redeliver the rejection too.
         check()
-        assert (
-            len(calls) == 3
-            and not client.get("/api/email/suggestions").json()["suggestions"]
-        )
-        server.messages[10] = message("Invalid", "noreply@phantom.com")
-        server.messages[11] = message("Retry", "noreply@phantom.com")
-        server.messages[12] = message("Another next step")
+        assert len(calls) == 5 and client.get("/api/pipeline/3").json() == rejected
+        server.messages[11] = message("Invalid", "noreply@phantom.com")
+        server.messages[12] = message("Retry", "noreply@phantom.com")
+        server.messages[13] = message("Another next step")
         check()
-        pending = client.get("/api/email/suggestions").json()["suggestions"][0]
+        assert client.get("/api/pipeline/1").json()["stage"] == "offer"
         with closing(connect(db_path)) as db:
-            assert [
-                tuple(row)[1:] for row in db.execute("SELECT * FROM email_dedup")
-            ] == [("<Invalid@fixture>", 2, "failed")]
+            failed = db.execute("SELECT * FROM email_dedup WHERE outcome='failed'")
+            assert [tuple(row)[1:] for row in failed] == [
+                ("<Invalid@fixture>", 2, "failed")
+            ]
         check()
-        assert len(calls) == 7
-        client.patch("/api/pipeline/1", json={"stage": "offer"})
-        assert (
-            client.post(f"/api/email/suggestions/{pending['id']}/confirm").status_code
-            == 409
-        )
-        assert (
-            client.post(f"/api/email/suggestions/{pending['id']}/ignore").status_code
-            == 200
-        )
-        assert len(client.get("/api/email/suggestions").json()["suggestions"]) == 1
+        assert len(calls) == 9
+        assert client.get("/api/pipeline/1").json()["closed_reason"] is None
+        client.patch("/api/jobs/3", json={"state": "seen"})
+        client.patch("/api/jobs/3", json={"state": "applied"})
+        check()
+        assert len(client.get("/api/pipeline/3").json()["history"]) == 1
+        cards = {row["job_id"]: row for row in client.get("/api/pipeline").json()}
+        assert cards[3]["email_count"] == 0
         with closing(connect(db_path)) as db:
             stored = " ".join(
                 str(tuple(row)) for row in db.execute("SELECT * FROM email_suggestions")
             )
-            assert (
-                "PRIVATE BODY TAIL" not in stored
-                and "Unmatched" not in stored
-                and "Ambiguous" not in stored
-            )
+            assert "PRIVATE BODY TAIL" not in stored and "Unmatched" not in stored
+            assert not db.execute(
+                "SELECT 1 FROM email_suggestions WHERE state='pending'"
+            ).fetchone()
         assert all(
             args[2] == "(BODY.PEEK[]<0.16384>)"
             for args in server.uid_requests
             if args[0] == "FETCH"
         )
-        assert ["SEARCH", "UID", "11:*"] in server.uid_requests
+        assert ["SEARCH", "UID", "12:*"] in server.uid_requests
         server.drop_on_login = True
         check()
         transport_state = client.get("/api/email").json()["state"]
@@ -315,3 +342,50 @@ def test_email_suggestions_require_confirmation_and_remember_exclusions(
                 db.execute(f"SELECT count(*) FROM {table}").fetchone()[0] == 0
                 for table in ("email_suggestions", "email_dedup", "email_checks")
             )
+
+
+def test_email_matching_disambiguates_company_roles():
+    jobs = [
+        {
+            "id": index,
+            "title": title,
+            "company": "Widget",
+            "link": "https://ashbyhq.com/demo",
+        }
+        for index, title in enumerate(
+            [
+                "Senior Software Engineer - Tools",
+                "Staff Infrastructure Engineer - Storage",
+                "Senior Software Engineer - Platform",
+            ]
+        )
+    ]
+    mail = EmailMessage()
+    mail["From"], mail["Subject"] = (
+        "no-reply@ashbyhq.com",
+        "Thanks for applying to Widget!",
+    )
+    mail.set_content(
+        "Hi Reader,\nThanks for applying to our Sr. Software Engineer - Platform role!"
+    )
+    fields, excerpt = metadata(mail.as_bytes())
+    assert fields["quote"] == "Hi Reader,"
+    for body, expected in [
+        (excerpt, 2),
+        ("Our SR. SOFTWARE ENG. — Platform role", 2),
+        ("Hi Reader, thanks for applying!", None),
+        ("Sr. Software Engineer - Platform and Senior Software Engineer - Tools", None),
+        ("Sr. Software Engineer - PlatformX", None),
+        ("x" * 4000 + excerpt, None),
+    ]:
+        result = match(
+            jobs, fields["sender_address"], fields["subject"], fields["quote"], body
+        )
+        assert (result["id"] if result else None) == expected
+    args = (fields["sender_address"], fields["subject"], fields["quote"], excerpt)
+    assert match(list(reversed(jobs)), *args)["id"] == 2
+    assert match(jobs + [jobs[2] | {"id": 3}], *args) is None
+    assert match([jobs[0]], *args)["id"] == 0
+    assert (
+        match(jobs, fields["sender_address"], "Thanks!", "Hi Reader,", excerpt) is None
+    )
