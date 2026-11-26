@@ -433,7 +433,7 @@ def test_score_route_and_stale(client, monkeypatch):
     assert client.get("/api/jobs").json()[0]["score_stale"] is True
 
     async def current(context, *args):
-        assert "Replacement owner" in context
+        assert "Current employer" in context and "Replacement owner" not in context
         return Score(score=89, reason="current CV", points=[])
 
     monkeypatch.setattr(scoring_session.session, "structured", current)
@@ -458,6 +458,12 @@ def test_score_route_and_stale(client, monkeypatch):
     response = client.post("/api/profile/rescore", json={})
     assert response.status_code == 202 and response.json()["queued"] == len(expected)
     assert start.call_args.kwargs["job_ids"] == expected
+    # Direct edits bypass Replace validation; read endpoints must remain usable.
+    (directory / "profile" / "cv.yaml").write_text("basics: [")
+    for endpoint in ("/api/jobs", "/api/jobs/3", "/api/profile"):
+        assert client.get(endpoint).status_code == 200
+    assert client.get("/api/jobs/3").json()["score_stale"] is True
+    assert client.get("/api/profile").json()["error"]
 
 
 def test_cover_letter_versions_and_prompt(client, monkeypatch):

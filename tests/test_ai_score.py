@@ -4,6 +4,7 @@ import os
 from contextlib import closing
 
 import pytest
+import yaml
 
 from joule import ai, score, scoring_session
 from joule.config import Model, Settings
@@ -163,7 +164,57 @@ def test_profile_prompt_and_fingerprint(tmp_path):
     assert '"roles"' not in text
     assert text.index("a.md") < text.index("b.txt")
     settings = Settings()
+    cv_path = profile / "cv.yaml"
+    document = {
+        "skills": "Rust",
+        "basics": {"label": "Engineer", "summary": "Builds tools"},
+        "education": [{"institution": "University"}],
+        "work": [{"name": "Employer"}],
+        "projects": [{"name": "Compiler"}],
+    }
+    cv_path.write_text(yaml.safe_dump(document))
     original = score.fingerprint(tmp_path, settings)
+    for key in (
+        "name",
+        "firstName",
+        "lastName",
+        "email",
+        "phone",
+        "location",
+        "address",
+        "url",
+        "profiles",
+    ):
+        document["basics"][key] = "private-contact"
+    cv_path.write_text(
+        yaml.safe_dump(document, sort_keys=False, default_flow_style=True)
+    )
+    assert score.fingerprint(tmp_path, settings) == original
+    cv_path.write_text(yaml.safe_dump(document))
+    assert score.fingerprint(tmp_path, settings) == original
+    assert dict(score.profile_files(tmp_path))["cv.yaml"] == cv_path.read_bytes()
+    assert "private-contact" not in score.context(tmp_path)
+    assert "Engineer" in score.context(tmp_path) and "Builds tools" in score.context(
+        tmp_path
+    )
+    for section, key in (
+        ("basics", "label"),
+        ("basics", "summary"),
+        ("education", "institution"),
+        ("work", "name"),
+        ("projects", "name"),
+    ):
+        target = document[section] if section == "basics" else document[section][0]
+        previous = target[key]
+        target[key] = "Changed"
+        cv_path.write_text(yaml.safe_dump(document))
+        assert score.fingerprint(tmp_path, settings) != original
+        target[key] = previous
+    document["skills"] = "Python"
+    cv_path.write_text(yaml.safe_dump(document))
+    assert score.fingerprint(tmp_path, settings) != original
+    document["skills"] = "Rust"
+    cv_path.write_text(yaml.safe_dump(document))
     (history / "a.md").write_text("Changed")
     changed = score.fingerprint(tmp_path, settings)
     assert changed != original

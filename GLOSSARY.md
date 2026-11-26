@@ -78,9 +78,10 @@ _Avoid_: Deadline, reminder (no notification is implied)
 The owner's validated IMAP account and read-only folder configuration for Pipeline email. Connecting validates access; it does not fetch messages or move Jobs.
 _Avoid_: Mail sync (not implemented by connecting)
 
-**Email suggestion**:
-A matched email's proposed Pipeline Move or Next date, awaiting the owner's confirmation. Ignore dismisses it; Not this Job excludes that Message-ID/Job pair until the inbox is disconnected. Fetching/classifying never makes a Move.
-_Avoid_: Automatic move, email action (nothing is sent)
+**Email update**:
+A matched email retained for a Pipeline Job. Only an unambiguous rejection makes an auto Move; application-received acknowledgements remain informational and count as emails. Stage/date suggestions and confirmation actions are removed. Previously retained mail, including uncertain or retired suggestions, keeps its metadata/history without pending actions. Stale applications or later Moves are never overwritten.
+_Avoid_: Email action (nothing is sent)
+
 
 **Manual Source**:
 Jobs the owner explicitly creates from a page in the Extension. It stores the page URL and bounded text; cheap filters and scoring apply, but it does not fetch new postings.

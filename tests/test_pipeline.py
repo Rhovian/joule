@@ -100,9 +100,6 @@ def test_pipeline_flow_and_reply_rates(client):
         return response.json()
 
     assert stats()["total"] == 0
-    with closing(connect(client.app.state.data_dir / "joule.db")) as db, db:
-        db.execute("UPDATE jobs SET score=69 WHERE id=1")
-        db.execute("UPDATE jobs SET score=70 WHERE id=7")
     for job_id, moves in [
         (1, [{"stage": "interview"}, {"stage": "applied"}]),
         (
@@ -143,13 +140,6 @@ def test_pipeline_flow_and_reply_rates(client):
         (3, "accepted", None): 1,
         (0, None, "rejected"): 1,
     }
-    assert [(r["name"], r["applied"], r["replies"]) for r in result["bands"]] == [
-        ("90+", 2, 2),
-        ("80–89", 1, 1),
-        ("70–79", 1, 0),
-        ("<70", 1, 1),
-        ("Unscored", 1, 0),
-    ]
     assert result["sources"] == [
         {"name": "hotfix", "applied": 5, "replies": 3},
         {"name": "remoteok", "applied": 1, "replies": 1},
@@ -164,7 +154,6 @@ def test_pipeline_flow_and_reply_rates(client):
         assert (
             filtered["total"]
             == sum(r["applied"] for r in filtered["sources"])
-            == sum(r["applied"] for r in filtered["bands"])
             == len(ids)
         )
         assert filtered["replies"] == replies

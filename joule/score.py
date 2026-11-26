@@ -8,6 +8,7 @@ from functools import partial
 from pathlib import Path
 from typing import Literal
 
+import yaml
 from pydantic import Field
 
 from joule import ai, scoring_session
@@ -35,7 +36,38 @@ class Score(StrictModel):
     points: list[Point] = Field(max_length=3)
 
 
-def profile_files(data_dir):
+def scoring_cv(contents):
+    """Canonical fit evidence; identity/contact data is not scoring context."""
+    # PyYAML safe_load resolves YAML formatting; safe_dump(sort_keys=True)
+    # canonicalizes mappings, but neither selects domain fields:
+    # https://github.com/yaml/pyyaml/blob/6.0.3/lib/yaml/__init__.py
+    document = yaml.safe_load(contents)
+    if isinstance(document, dict):
+        contact = {
+            "name",
+            "firstName",
+            "lastName",
+            "email",
+            "phone",
+            "location",
+            "address",
+            "addresses",
+            "url",
+            "profiles",
+            "social",
+            "socialLinks",
+            "image",
+        }
+        document = {key: value for key, value in document.items() if key not in contact}
+        basics = document.pop("basics", {})
+        if isinstance(basics, dict):
+            basics = {key: value for key, value in basics.items() if key not in contact}
+            if basics:
+                document["basics"] = basics
+    return yaml.safe_dump(document, sort_keys=True).encode()
+
+
+def profile_files(data_dir, *, scoring=False):
     profile = data_dir / "profile"
     files = [profile / "cv.yaml"]
     has_preferences = (profile / "preferences.yaml").exists()
@@ -44,15 +76,24 @@ def profile_files(data_dir):
         history = (profile / preferences.work_history_path.expanduser()).resolve()
         files += [history] if history.is_file() else sorted(history.rglob("*"))
     return [
-        (Path(os.path.relpath(p, profile)).as_posix(), p.read_bytes())
+        (
+            Path(os.path.relpath(p, profile)).as_posix(),
+            scoring_cv(p.read_bytes())
+            if scoring and p == profile / "cv.yaml"
+            else p.read_bytes(),
+        )
         for p in files
         if p.is_file() and p.suffix in {".md", ".txt", ".yaml"}
     ]
 
 
 def fingerprint(data_dir, settings) -> str:
-    digest = hashlib.sha256()
-    for name, contents in profile_files(data_dir):
+    digest = hashlib.sha256(b"joule-fit-v2\0")
+    try:
+        files = profile_files(data_dir, scoring=True)
+    except yaml.YAMLError:
+        return "invalid-cv"
+    for name, contents in files:
         digest.update(json.dumps(name).encode() + b"\0" + contents + b"\0")
     model = settings.models.scoring
     digest.update(f"{model.provider}:{model.model}".encode())
@@ -73,7 +114,8 @@ def job_block(job):
 
 def context(data_dir):
     profile = "\n".join(
-        f"## {name}\n{contents.decode()}" for name, contents in profile_files(data_dir)
+        f"## {name}\n{contents.decode()}"
+        for name, contents in profile_files(data_dir, scoring=True)
     )
     return (
         f"Give this Job a Fit Score from 0 to 100: {RUBRIC}\n"

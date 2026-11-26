@@ -3,7 +3,6 @@
 from collections import Counter
 
 STAGES = ("applied", "screen", "interview", "offer", "accepted")
-BANDS = ("90+", "80–89", "70–79", "<70", "Unscored")
 
 
 def summarize(db, rows):
@@ -18,7 +17,6 @@ def summarize(db, rows):
             history[1] |= move["closed_reason"] == "rejected"
     reached = [0] * 4
     terminals = Counter()
-    bands = {band: {"applied": 0, "replies": 0} for band in BANDS}
     sources = {}
     replies = 0
     for row in rows:
@@ -30,14 +28,9 @@ def summarize(db, rows):
         # A backward Move preserves reach, but its blue exit names the current Stage.
         stage = None if row["closed_reason"] else row["stage"]
         terminals[min(furthest, 3), stage, row["closed_reason"]] += 1
-        score = row["score"]
-        band = BANDS[
-            4 if score is None else sum(score < floor for floor in (90, 80, 70))
-        ]
         source = sources.setdefault(row["source"], {"applied": 0, "replies": 0})
-        for group in (bands[band], source):
-            group["applied"] += 1
-            group["replies"] += replied
+        source["applied"] += 1
+        source["replies"] += replied
     return {
         "total": len(rows),
         "job_ids": list(histories),
@@ -47,6 +40,5 @@ def summarize(db, rows):
             {"at": at, "stage": stage, "closed_reason": reason, "count": count}
             for (at, stage, reason), count in terminals.items()
         ],
-        "bands": [{"name": name, **values} for name, values in bands.items()],
         "sources": [{"name": name, **sources[name]} for name in sorted(sources)],
     }

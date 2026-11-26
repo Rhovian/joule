@@ -18,7 +18,6 @@ from joule.db import connect, init_db
 from joule.email_connection import EmailConnection
 from joule.email_connection import router as email_router
 from joule.email_suggestions import EmailSuggestions
-from joule.email_suggestions import router as suggestions_router
 from joule.fill import router as fill_router
 from joule.jobs import router as jobs_router
 from joule.manual import router as manual_router
@@ -115,7 +114,6 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     app.include_router(settings_router)
     app.state.email_suggestions = EmailSuggestions(directory, app.state.email)
     app.include_router(email_router)
-    app.include_router(suggestions_router)
     app.include_router(answers_router)
     app.include_router(profile_router)
     app.include_router(pipeline_router)

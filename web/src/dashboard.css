@@ -78,6 +78,7 @@ input[type=checkbox] { accent-color: var(--green); width: 15px; height: 15px; }
 .score.low { background: var(--score-low); color: var(--on-score-low); }
 .score.unscored { background: transparent; color: var(--on-score-low); border: 1px dashed var(--score-outline); }
 .score.good { background: var(--score-good); color: var(--on-score-good); }
+.score-freshness { display: flex; flex-direction: column; gap: 4px; color: var(--caution); font-size: 11px; line-height: 1.4; margin-bottom: 4px; }
 .score.stale { background: transparent; color: var(--green); border: 1.5px dashed var(--green); }
 .job-title { border: none; border-radius: 2px; padding: 0; background: transparent; text-align: left; font-size: 14px; line-height: 1.4; font-weight: 700; color: var(--ink); }
 .job-title { display: inline; white-space: normal; min-height: 0; overflow-wrap: anywhere; }
@@ -171,6 +172,7 @@ body:has(#dashboard.split) .app-header { position: sticky; top: 0; z-index: 2; }
 .split .triage-table thead, .split .triage-table td:is(:nth-child(1), :nth-child(4), :nth-child(5), :nth-child(6)), .split .row-actions, .split .triage-table .flags .flag { display: none; }
 .split .triage-table td { padding-top: 8px; padding-bottom: 8px; }
 .split .triage-table td:nth-child(2) { width: 52px; padding-left: 14px; padding-right: 0; vertical-align: middle; }
+.split .triage-table td:nth-child(2):has(.stale) { vertical-align: top; }
 .split .triage-table td:nth-child(3) { width: auto; }
 .split .triage-table td:last-child { width: 112px; vertical-align: middle; }
 .split .triage-table .job-title { font-size: 13px; }
