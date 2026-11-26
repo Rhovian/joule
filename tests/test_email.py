@@ -229,8 +229,8 @@ def test_email_rejections_and_informational_mail_preserve_history_and_dedup(
             json=client.get("/api/email").json()["config"]
             | {"password": None, "check_minutes": None},
         )
-        assert client.get("/api/email/suggestions").status_code == 404
-        assert client.post("/api/email/suggestions/1/confirm").status_code in (404, 405)
+        paths = client.app.openapi()["paths"]
+        assert not any(path.startswith("/api/email/suggestions") for path in paths)
         with closing(connect(db_path)) as db:
             by_subject = {
                 row["subject"]: dict(row)
