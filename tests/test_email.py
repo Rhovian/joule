@@ -346,7 +346,12 @@ def test_email_rejections_and_informational_mail_preserve_history_and_dedup(
 
 def test_email_matching_disambiguates_company_roles():
     jobs = [
-        dict(id=index, title=title, company="Widget", link="https://ashbyhq.com/demo")
+        {
+            "id": index,
+            "title": title,
+            "company": "Widget",
+            "link": "https://ashbyhq.com/demo",
+        }
         for index, title in enumerate(
             [
                 "Senior Software Engineer - Tools",
